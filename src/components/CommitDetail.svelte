@@ -10,7 +10,9 @@
 
   let info = $state<CommitInfo | null>(null);
   let file = $state<string | null>(null);
-  let diff = $state<FileDiff | null>(null);
+  let diff = $state.raw<FileDiff | null>(null);
+  // Which file the shown diff belongs to, so a slow (huge) diff shows as loading.
+  let diffKey = $state("");
   let error = $state<string | null>(null);
 
   $effect(() => {
@@ -33,8 +35,14 @@
       return;
     }
     api.commitFileDiff(app.path, id, f, s).then((d) => {
-      if (file === f && oid === id) diff = d;
-    }).catch((e) => toasts.push("error", String(e)));
+      if (file === f && oid === id) {
+        diff = d;
+        diffKey = `${id}:${f}`;
+      }
+    }).catch((e) => {
+      if (file === f && oid === id) diffKey = `${id}:${f}`;
+      toasts.push("error", String(e));
+    });
   });
 
   function fileMenu(e: MouseEvent, path: string) {
@@ -87,7 +95,7 @@
     </div>
 
     <div class="diff">
-      <DiffView {diff} mode="readonly" split={app.settings.splitDiff} image={{ old: info.parents[0] ?? null, new: info.oid }} />
+      <DiffView {diff} loading={!!file && diffKey !== `${oid}:${file}`} mode="readonly" split={app.settings.splitDiff} image={{ old: info.parents[0] ?? null, new: info.oid }} />
     </div>
   {/if}
 </div>

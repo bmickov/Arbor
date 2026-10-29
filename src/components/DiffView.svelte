@@ -13,8 +13,11 @@
     split = false,
     onaction,
     image,
+    loading = false,
   }: {
     diff: FileDiff | null;
+    /** The requested diff hasn't arrived yet (big diffs take a moment). */
+    loading?: boolean;
     mode?: Mode;
     split?: boolean;
     onaction?: (a: Act, sel: Selection[]) => void;
@@ -30,12 +33,16 @@
   // Reset the selection only when the diff's content changes, not when the
   // same diff is reloaded by a background refresh.
   let lastSig = "";
+  let lastPath = "";
   $effect(() => {
     const sig = diff ? `${diff.path}|${diff.additions}|${diff.deletions}|${diff.hunks.map((h) => h.header + h.lines.length).join(";")}` : "";
     if (sig === lastSig) return;
     lastSig = sig;
     selected = new Set();
     anchor = null;
+    // A different file starts at the top; a refresh of the same file stays put.
+    if (diff?.path !== lastPath && scroller) scroller.scrollTop = 0;
+    lastPath = diff?.path ?? "";
   });
 
   const key = (h: number, l: number) => `${h}:${l}`;
@@ -120,6 +127,76 @@
     return rows;
   }
 
+  // Big diffs are virtualized: every row has a fixed height, and only the
+  // rows in (or near) the viewport are in the DOM. Small diffs render in full,
+  // which keeps wrapping in the side-by-side view and native text selection.
+  const VIRTUAL_MIN = 3000;
+  const OVERSCAN = 600; // px rendered above and below the viewport
+
+  const splitMode = $derived(split && mode === "readonly");
+  const lineCount = $derived(diff ? diff.hunks.reduce((n, h) => n + h.lines.length, 0) : 0);
+  const virtual = $derived(lineCount > VIRTUAL_MIN);
+  // Line-number gutters grow with the largest line number (7 digits for a million lines).
+  const width = (max: number) => (String(max).length <= 4 ? "44px" : `calc(${String(max).length}ch + 12px)`);
+  const gutterOld = $derived(width(diff ? diff.hunks.reduce((m, h) => Math.max(m, h.oldStart + h.oldLines), 0) : 0));
+  const gutterNew = $derived(width(diff ? diff.hunks.reduce((m, h) => Math.max(m, h.newStart + h.newLines), 0) : 0));
+  const lineH = $derived(Math.round(app.settings.codeSize * 1.6));
+  const headH = $derived(Math.max(32, Math.ceil((app.settings.uiSize / 13) * 12 * 1.4) + 10));
+
+  // Flattened rows: hunk index, and line (or side-by-side pair) index, -1 for the hunk header.
+  const layout = $derived.by(() => {
+    if (!diff || !virtual) return null;
+    const pairsOf = splitMode ? diff.hunks.map((h) => pairs(h.lines)) : null;
+    let n = 0;
+    diff.hunks.forEach((h, i) => (n += 1 + (pairsOf ? pairsOf[i].length : h.lines.length)));
+    const rowH = new Int32Array(n), rowL = new Int32Array(n), top = new Float64Array(n + 1);
+    let r = 0, y = 0, widest = 0;
+    diff.hunks.forEach((h, i) => {
+      rowH[r] = i; rowL[r] = -1; top[r++] = y; y += headH;
+      const count = pairsOf ? pairsOf[i].length : h.lines.length;
+      for (let l = 0; l < count; l++) {
+        rowH[r] = i; rowL[r] = l; top[r++] = y; y += lineH;
+      }
+      if (!pairsOf) for (const ln of h.lines) {
+        // Tabs are 4 columns wide (tab-size: 4); good enough for sizing the scroll width.
+        let w = ln.content.length;
+        if (w > widest || w * 4 > widest) {
+          for (let k = ln.content.indexOf("\t"); k >= 0; k = ln.content.indexOf("\t", k + 1)) w += 3;
+          if (w > widest) widest = w;
+        }
+      }
+    });
+    top[n] = y;
+    return { n, rowH, rowL, top, pairsOf, widest };
+  });
+
+  let scroller = $state<HTMLDivElement>();
+  let scrollTop = $state(0);
+  let viewH = $state(0);
+
+  // First row whose bottom is below `y`.
+  function rowAt(top: Float64Array, n: number, y: number): number {
+    let lo = 0, hi = n - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (top[mid + 1] <= y) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  const win = $derived.by(() => {
+    if (!layout || !layout.n) return null;
+    const { n, top } = layout;
+    const first = rowAt(top, n, Math.max(0, scrollTop - OVERSCAN));
+    const last = rowAt(top, n, scrollTop + (viewH || 800) + OVERSCAN);
+    const rows: number[] = [];
+    for (let i = first; i <= last; i++) rows.push(i);
+    // The hunk whose rows are at the top of the viewport keeps its header pinned.
+    const pinned = layout.rowH[rowAt(top, n, scrollTop)];
+    return { rows, y: top[first], pinned };
+  });
+
   // Image previews.
   let images = $state<{ old: string | null; new: string | null } | null>(null);
   $effect(() => {
@@ -139,8 +216,48 @@
   });
 </script>
 
+{#snippet head(h: number)}
+  {@const hunk = diff!.hunks[h]}
+  <div class="hunk-head">
+    <span class="range">{hunk.header.replace(/^(@@[^@]*@@).*/, "$1")}</span>
+    <span class="ctx">{hunk.header.replace(/^@@[^@]*@@\s?/, "")}</span>
+    {#if virtual}<span class="count">{hunk.lines.length.toLocaleString()} lines</span>{/if}
+    {#if mode === "unstaged"}
+      <button class="hbtn" onclick={() => fire("discard", hunkSel(h))} title="Discard this hunk"><Icon name="discard" size={13} /> Discard</button>
+      <button class="hbtn strong" onclick={() => fire("stage", hunkSel(h))}><Icon name="plus" size={13} /> Stage hunk</button>
+    {:else if mode === "staged"}
+      <button class="hbtn strong" onclick={() => fire("unstage", hunkSel(h))}><Icon name="minus" size={13} /> Unstage hunk</button>
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet line(h: number, l: number)}
+  {@const ln = diff!.hunks[h].lines[l]}
+  {@const sel = selected.has(key(h, l))}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="line {ln.origin === '+' ? 'add' : ln.origin === '-' ? 'del' : ''}" class:sel
+    onmousedown={(e) => isChange(ln) && down(e, h, l)}
+    onmouseenter={() => isChange(ln) && enter(h, l)}>
+    <span class="no">{ln.oldNo ?? ""}</span>
+    <span class="no">{ln.newNo ?? ""}</span>
+    <span class="sign">{ln.origin === " " ? "" : ln.origin}</span>
+    <span class="code">{ln.content}{#if !ln.nl}<span class="eof" title="No newline at end of file">⏎̸</span>{/if}</span>
+  </div>
+{/snippet}
+
+{#snippet pairRow(row: Row)}
+  <div class="prow">
+    <span class="no">{row.left?.oldNo ?? ""}</span>
+    <span class="code {row.left ? (row.left.origin === '-' ? 'del' : '') : 'blank'}" title={row.left?.content}>{row.left?.content ?? ""}</span>
+    <span class="no">{row.right?.newNo ?? ""}</span>
+    <span class="code {row.right ? (row.right.origin === '+' ? 'add' : '') : 'blank'}" title={row.right?.content}>{row.right?.content ?? ""}</span>
+  </div>
+{/snippet}
+
 <div class="wrap">
-<div class="diff mono" class:interactive={mode !== "readonly"}>
+<div class="diff mono" class:interactive={mode !== "readonly"} class:v={virtual}
+  style="--lh: {lineH}px; --hh: {headH}px; --nwo: {gutterOld}; --nwn: {gutterNew}"
+  bind:this={scroller} bind:clientHeight={viewH} onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}>
   {#if !diff}
     <div class="empty"><div><strong>No changes</strong>Select a file to see its changes.</div></div>
   {:else if diff.binary}
@@ -156,19 +273,28 @@
     <div class="empty"><div><strong>This diff is too large to show</strong>{diff.additions} additions and {diff.deletions} deletions.</div></div>
   {:else if !diff.hunks.length}
     <div class="empty"><div><strong>No content changes</strong>{diff.oldMode !== diff.newMode ? `File mode changed from ${diff.oldMode.toString(8)} to ${diff.newMode.toString(8)}.` : diff.status === "renamed" ? "The file was renamed." : "The file is empty."}</div></div>
+  {:else if virtual && layout && win}
+    <div class="vpin">{@render head(win.pinned)}</div>
+    <div class="vspace" class:vsplit={splitMode}
+      style="height: {layout.top[layout.n] + 60}px; {splitMode ? '' : `min-width: calc(${layout.widest}ch + var(--nwo) + var(--nwn) + 42px);`}">
+      <div class="vwin" style="transform: translateY({win.y}px)">
+        {#each win.rows as i (i)}
+          {@const h = layout.rowH[i]}
+          {@const l = layout.rowL[i]}
+          {#if l < 0}
+            {@render head(h)}
+          {:else if layout.pairsOf}
+            {@render pairRow(layout.pairsOf[h][l])}
+          {:else}
+            {@render line(h, l)}
+          {/if}
+        {/each}
+      </div>
+    </div>
   {:else}
     {#each diff.hunks as hunk, h}
-      <div class="hunk-head">
-        <span class="range">{hunk.header.replace(/^(@@[^@]*@@).*/, "$1")}</span>
-        <span class="ctx">{hunk.header.replace(/^@@[^@]*@@\s?/, "")}</span>
-        {#if mode === "unstaged"}
-          <button class="hbtn" onclick={() => fire("discard", hunkSel(h))} title="Discard this hunk"><Icon name="discard" size={13} /> Discard</button>
-          <button class="hbtn strong" onclick={() => fire("stage", hunkSel(h))}><Icon name="plus" size={13} /> Stage hunk</button>
-        {:else if mode === "staged"}
-          <button class="hbtn strong" onclick={() => fire("unstage", hunkSel(h))}><Icon name="minus" size={13} /> Unstage hunk</button>
-        {/if}
-      </div>
-      {#if split && mode === "readonly"}
+      {@render head(h)}
+      {#if splitMode}
         <table class="split">
           <tbody>
             {#each pairs(hunk.lines) as row}
@@ -183,17 +309,8 @@
         </table>
       {:else}
         <div class="lines">
-          {#each hunk.lines as ln, l}
-            {@const sel = selected.has(key(h, l))}
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div class="line {ln.origin === '+' ? 'add' : ln.origin === '-' ? 'del' : ''}" class:sel
-              onmousedown={(e) => isChange(ln) && down(e, h, l)}
-              onmouseenter={() => isChange(ln) && enter(h, l)}>
-              <span class="no">{ln.oldNo ?? ""}</span>
-              <span class="no">{ln.newNo ?? ""}</span>
-              <span class="sign">{ln.origin === " " ? "" : ln.origin}</span>
-              <span class="code">{ln.content}{#if !ln.nl}<span class="eof" title="No newline at end of file">⏎̸</span>{/if}</span>
-            </div>
+          {#each hunk.lines as _, l}
+            {@render line(h, l)}
           {/each}
         </div>
       {/if}
@@ -201,6 +318,10 @@
     <div class="tail"></div>
   {/if}
 </div>
+
+  {#if loading}
+    <div class="loading" class:blank={!diff}><span class="spin"></span>Loading changes…</div>
+  {/if}
 
   {#if count && mode !== "readonly"}
     <div class="selbar">
@@ -233,7 +354,7 @@
   .hbtn.strong { color: var(--accent); }
 
   .lines { min-width: max-content; }
-  .line { display: grid; grid-template-columns: 44px 44px 18px 1fr; white-space: pre; }
+  .line { display: grid; grid-template-columns: var(--nwo) var(--nwn) 18px 1fr; white-space: pre; }
   .interactive .line.add, .interactive .line.del { cursor: pointer; }
   .no { color: var(--ink-3); text-align: right; padding-right: 8px; font-size: calc(var(--cs) * 11); opacity: 0.85; }
   .sign { text-align: center; color: var(--ink-3); }
@@ -250,7 +371,8 @@
 
   table.split { width: 100%; border-collapse: collapse; table-layout: fixed; }
   table.split td { white-space: pre-wrap; word-break: break-all; vertical-align: top; padding: 0; }
-  table.split td.no { width: 44px; }
+  table.split td.no:first-child { width: var(--nwo); }
+  table.split td.no { width: var(--nwn); }
   table.split td.code { padding: 0 10px 0 6px; border-right: 1px solid var(--line-soft); }
   table.split td.add { background: var(--add-bg); }
   table.split td.del { background: var(--del-bg); }
@@ -264,8 +386,35 @@
     background: repeating-conic-gradient(var(--surface-3) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px;
   }
   .tail { height: 60px; }
+
+  /* Virtualized rendering for big diffs: fixed row heights. */
+  .count { font-size: calc(var(--fs) * 11); white-space: nowrap; }
+  .vspace { position: relative; }
+  .vwin { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
+  .v .hunk-head { height: var(--hh); position: static; border-top: 1px solid var(--line-soft); }
+  .v .line, .v .prow { height: var(--lh); line-height: var(--lh); overflow: hidden; }
+  .vpin { position: sticky; top: 0; left: 0; height: 0; z-index: 2; }
+  .vpin > .hunk-head { position: absolute; top: 0; left: 0; right: 0; }
+  .vspace.vsplit { width: 100%; }
+  .prow { display: grid; grid-template-columns: var(--nwo) minmax(0, 1fr) var(--nwn) minmax(0, 1fr); white-space: pre; }
+  .prow .code { overflow: hidden; text-overflow: ellipsis; padding: 0 10px 0 6px; border-right: 1px solid var(--line-soft); }
+  .prow .code.add { background: var(--add-bg); }
+  .prow .code.del { background: var(--del-bg); }
+  .prow .code.blank { background: repeating-linear-gradient(135deg, transparent 0 5px, var(--line-soft) 5px 6px); }
   .empty { font-family: var(--font-ui); }
 
+  .loading {
+    position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; grid-auto-flow: column; gap: 10px; align-items: center;
+    background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--ink-2);
+    font-family: var(--font-ui); font-size: calc(var(--fs) * 13);
+    /* Quick diffs never flash the overlay. */
+    opacity: 0; animation: show 0.1s 0.15s forwards;
+  }
+  .loading.blank { background: var(--surface); }
+  @keyframes show { to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .loading { opacity: 1; } }
+  .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { rotate: 1turn; } }
   .selbar {
     position: absolute; bottom: 16px; left: 50%; translate: -50% 0; width: max-content; display: flex; align-items: center; gap: 8px;
     padding: 6px 6px 6px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line);

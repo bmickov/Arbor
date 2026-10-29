@@ -11,7 +11,9 @@
   const st = $derived(app.status);
   let selStaged = $state<Set<string>>(new Set());
   let selUnstaged = $state<Set<string>>(new Set());
-  let diff = $state<FileDiff | null>(null);
+  let diff = $state.raw<FileDiff | null>(null);
+  // Which file the shown diff belongs to, so a slow (huge) diff shows as loading.
+  let diffKey = $state("");
   let loading = $state(false);
 
   // Keep the selection pointing at something sensible after every refresh.
@@ -52,8 +54,14 @@
       ? api.diffStaged(app.path, sel.path, entry?.oldPath ?? null, settings)
       : api.diffUnstaged(app.path, sel.path, settings);
     req.then((d) => {
-      if (app.selectedFile?.path === sel.path && app.selectedFile.area === sel.area) diff = d;
-    }).catch((e) => toasts.push("error", String(e))).finally(() => (loading = false));
+      if (app.selectedFile?.path === sel.path && app.selectedFile.area === sel.area) {
+        diff = d;
+        diffKey = `${sel.area}:${sel.path}`;
+      }
+    }).catch((e) => {
+      if (app.selectedFile?.path === sel.path && app.selectedFile.area === sel.area) diffKey = `${sel.area}:${sel.path}`;
+      toasts.push("error", String(e));
+    }).finally(() => (loading = false));
   });
 
   function select(area: "staged" | "unstaged", path: string, e: MouseEvent | KeyboardEvent) {
@@ -235,7 +243,7 @@
         <div class="empty"><div><strong>This file has conflicts</strong>Edit it to remove the conflict markers, then choose “Resolved”. Or keep one side entirely with “Mine” or “Theirs”.</div></div>
       {:else}
         <div class="dv">
-          <DiffView {diff} mode={app.selectedFile.area} onaction={lineAction}
+          <DiffView {diff} loading={diffKey !== `${app.selectedFile.area}:${app.selectedFile.path}`} mode={app.selectedFile.area} onaction={lineAction}
             image={{ old: app.selectedFile.area === "staged" || st?.head ? "HEAD" : null, new: null }} />
         </div>
       {/if}

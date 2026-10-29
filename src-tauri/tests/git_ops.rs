@@ -583,3 +583,53 @@ fn conflicting_stash_pop_keeps_the_stash() {
     assert!(git::stash::list(&r.path).unwrap().is_empty());
     assert_eq!(r.read("g.txt"), "y\n");
 }
+
+#[test]
+fn huge_diffs_are_returned_in_full() {
+    let r = Repo::new();
+    r.write("big.txt", &lines(150_000));
+    r.commit_all("init");
+    // Change every other line: 150k lines out, 75k in, all in one hunk.
+    let changed: String = (1..=150_000).map(|i| if i % 2 == 0 { format!("changed {i}\n") } else { format!("line {i}\n") }).collect();
+    r.write("big.txt", &changed);
+
+    let fd = git::diff::unstaged_file(&r.path, "big.txt", s()).unwrap().unwrap();
+    assert!(!fd.too_large);
+    assert_eq!((fd.additions, fd.deletions), (75_000, 75_000));
+    let total: usize = fd.hunks.iter().map(|h| h.lines.len()).sum();
+    assert_eq!(total, 225_000);
+
+    // The wire format is column-wise and round-trips to the same lines.
+    let json = serde_json::to_value(&fd).unwrap();
+    let h = &json["hunks"][0];
+    let origins = h["origins"].as_str().unwrap();
+    let text = h["text"].as_str().unwrap();
+    assert_eq!(origins.len(), fd.hunks[0].lines.len());
+    let decoded: Vec<&str> = text.split('\n').collect();
+    assert_eq!(decoded.len(), origins.len());
+    for (i, l) in fd.hunks[0].lines.iter().enumerate().step_by(997) {
+        assert_eq!(decoded[i], l.content);
+        assert_eq!(origins.as_bytes()[i] as char, l.origin);
+    }
+    assert!(h.get("lines").is_none(), "per-line objects must not be sent");
+
+    // Staging a line deep inside the huge hunk still works.
+    let deep = fd.hunks[0].lines.iter().position(|l| l.content == "changed 149998").unwrap();
+    git::patch::stage_lines(&r.path, "big.txt", &[Selection { hunk: 0, lines: vec![deep] }], s()).unwrap();
+    let staged = r.staged_content("big.txt");
+    assert!(staged.contains("line 149998\nchanged 149998\n"), "only the addition half was staged");
+}
+
+#[test]
+fn missing_newline_survives_the_wire_format() {
+    let r = Repo::new();
+    r.write("a.txt", "one\ntwo");
+    r.commit_all("init");
+    r.write("a.txt", "one\ntwo\nthree");
+    let fd = git::diff::unstaged_file(&r.path, "a.txt", s()).unwrap().unwrap();
+    let json = serde_json::to_value(&fd).unwrap();
+    let h = &json["hunks"][0];
+    assert_eq!(h["origins"], " -++");
+    assert_eq!(h["text"], "one\ntwo\ntwo\nthree");
+    assert_eq!(h["noNl"], serde_json::json!([1, 3]));
+}

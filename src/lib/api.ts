@@ -39,6 +39,33 @@ export interface FileDiff {
   binary: boolean; tooLarge: boolean; additions: number; deletions: number;
   oldMode: number; newMode: number; hunks: Hunk[];
 }
+/** A hunk as the backend sends it: column-wise, see `impl Serialize for Hunk`. */
+interface WireHunk { header: string; oldStart: number; oldLines: number; newStart: number; newLines: number; origins: string; text: string; noNl: number[] }
+type WireDiff = Omit<FileDiff, "hunks"> & { hunks: WireHunk[] };
+
+function decodeHunk(w: WireHunk): Hunk {
+  const n = w.origins.length;
+  const lines: DiffLine[] = new Array(n);
+  const noNl = new Set(w.noNl);
+  let oldNo = w.oldStart, newNo = w.newStart, pos = 0;
+  for (let i = 0; i < n; i++) {
+    let end = w.text.indexOf("\n", pos);
+    if (end < 0 || i === n - 1) end = w.text.length;
+    const origin = w.origins[i] as DiffLine["origin"];
+    lines[i] = {
+      origin,
+      content: w.text.slice(pos, end),
+      nl: !noNl.has(i),
+      oldNo: origin === "+" ? null : oldNo++,
+      newNo: origin === "-" ? null : newNo++,
+    };
+    pos = end + 1;
+  }
+  return { header: w.header, oldStart: w.oldStart, oldLines: w.oldLines, newStart: w.newStart, newLines: w.newLines, lines };
+}
+
+const decodeDiff = (d: WireDiff | null): FileDiff | null => (d ? { ...d, hunks: d.hunks.map(decodeHunk) } : null);
+
 export interface DiffSettings { context?: number; ignoreWhitespace?: boolean }
 export interface Selection { hunk: number; lines: number[] }
 
@@ -93,9 +120,10 @@ export const api = {
   summaries: (paths: string[]) => call<RepoSummary[]>("repo_summaries", { paths }),
 
   status: (repo: string) => call<WorkingStatus>("get_status", { repo }),
-  diffUnstaged: (repo: string, path: string, settings?: DiffSettings) => call<FileDiff | null>("diff_unstaged", { repo, path, settings }),
+  diffUnstaged: (repo: string, path: string, settings?: DiffSettings) =>
+    call<WireDiff | null>("diff_unstaged", { repo, path, settings }).then(decodeDiff),
   diffStaged: (repo: string, path: string, oldPath: string | null, settings?: DiffSettings) =>
-    call<FileDiff | null>("diff_staged", { repo, path, oldPath, settings }),
+    call<WireDiff | null>("diff_staged", { repo, path, oldPath, settings }).then(decodeDiff),
   fileAt: (repo: string, rev: string | null, path: string) => call<number[] | null>("file_at", { repo, rev, path }),
   stageFiles: (repo: string, paths: string[]) => call<void>("stage_files", { repo, paths }),
   unstageFiles: (repo: string, paths: string[]) => call<void>("unstage_files", { repo, paths }),
@@ -120,7 +148,7 @@ export const api = {
   log: (repo: string, scope: string, limit: number) => call<Log>("get_log", { repo, scope, limit }),
   commitInfo: (repo: string, oid: string) => call<CommitInfo>("commit_info", { repo, oid }),
   commitFileDiff: (repo: string, oid: string, path: string, settings?: DiffSettings) =>
-    call<FileDiff | null>("commit_file_diff", { repo, oid, path, settings }),
+    call<WireDiff | null>("commit_file_diff", { repo, oid, path, settings }).then(decodeDiff),
   fileHistory: (repo: string, path: string, limit = 300) => call<FileHistoryEntry[]>("file_history", { repo, path, limit }),
   blame: (repo: string, path: string) => call<Blame>("blame", { repo, path }),
 
