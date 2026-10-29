@@ -14,10 +14,13 @@
     onaction,
     image,
     loading = false,
+    onshowall,
   }: {
     diff: FileDiff | null;
     /** The requested diff hasn't arrived yet (big diffs take a moment). */
     loading?: boolean;
+    /** Load a held-back large diff in full. */
+    onshowall?: () => void;
     mode?: Mode;
     split?: boolean;
     onaction?: (a: Act, sel: Selection[]) => void;
@@ -34,10 +37,13 @@
   // same diff is reloaded by a background refresh.
   let lastSig = "";
   let lastPath = "";
+  // "Show diff" was clicked on a held-back diff and its lines are on the way.
+  let asked = $state(false);
   $effect(() => {
     const sig = diff ? `${diff.path}|${diff.additions}|${diff.deletions}|${diff.hunks.map((h) => h.header + h.lines.length).join(";")}` : "";
     if (sig === lastSig) return;
     lastSig = sig;
+    asked = false;
     selected = new Set();
     anchor = null;
     // A different file starts at the top; a refresh of the same file stays put.
@@ -269,6 +275,18 @@
     {:else}
       <div class="empty"><div><strong>Binary file</strong>{diff.status === "added" || diff.status === "untracked" ? "Added" : diff.status === "deleted" ? "Deleted" : "Changed"} — no text diff to show.</div></div>
     {/if}
+  {:else if diff.heldBack}
+    <div class="empty large">
+      <div>
+        <span class="licon"><Icon name="file" size={22} /></span>
+        <strong>Large diff</strong>
+        <p>{(diff.additions + diff.deletions).toLocaleString()} changed lines
+          (<span class="a">+{diff.additions.toLocaleString()}</span> <span class="d">−{diff.deletions.toLocaleString()}</span>).
+          It's hidden so big generated files don't get in the way.</p>
+        <button class="btn primary" onclick={() => { asked = true; onshowall?.(); }}>Show diff</button>
+        <small>Diffs over {app.settings.largeDiffLines.toLocaleString()} changed lines ask first. Change this in Preferences → Diffs &amp; Git.</small>
+      </div>
+    </div>
   {:else if diff.tooLarge}
     <div class="empty"><div><strong>This diff is too large to show</strong>{diff.additions} additions and {diff.deletions} deletions.</div></div>
   {:else if !diff.hunks.length}
@@ -319,8 +337,8 @@
   {/if}
 </div>
 
-  {#if loading}
-    <div class="loading" class:blank={!diff}><span class="spin"></span>Loading changes…</div>
+  {#if loading || (asked && diff?.heldBack)}
+    <div class="loading" class:blank={!diff || diff.heldBack}><span class="spin"></span>Loading changes…</div>
   {/if}
 
   {#if count && mode !== "readonly"}
@@ -403,6 +421,13 @@
   .prow .code.blank { background: repeating-linear-gradient(135deg, transparent 0 5px, var(--line-soft) 5px 6px); }
   .empty { font-family: var(--font-ui); }
 
+  .large > div { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 380px; }
+  .large strong { margin: 4px 0 0; }
+  .large p { margin: 0 0 8px; line-height: 1.5; color: var(--ink-2); }
+  .large .a { color: var(--add-ink); font-family: var(--font-mono); font-size: calc(var(--cs) * 12); }
+  .large .d { color: var(--del-ink); font-family: var(--font-mono); font-size: calc(var(--cs) * 12); }
+  .large small { margin-top: 8px; font-size: calc(var(--fs) * 11.5); color: var(--ink-3); }
+  .licon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line-soft); color: var(--ink-2); }
   .loading {
     position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; grid-auto-flow: column; gap: 10px; align-items: center;
     background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--ink-2);

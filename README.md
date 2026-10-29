@@ -45,6 +45,9 @@ contains none of their code or artwork.
   lines opens in a second or two and scrolls smoothly, and you can still stage
   single lines deep inside it. (In very large side-by-side diffs, long lines
   are cut off instead of wrapped; switch to unified to scroll sideways.)
+- Diffs with more than 10,000 changed lines (often generated or lock files)
+  show a summary and a **Show diff** button instead of loading right away.
+  The limit is in Preferences → Diffs & Git, including "Always show"
 - File history (follows renames) and blame
 - Right-click a commit to check out, branch, tag, cherry-pick, revert, reset,
   edit its message, squash or fixup into its parent, or remove it
@@ -85,13 +88,13 @@ Pick the package for your distribution from the release files:
 
 ```sh
 # Debian, Ubuntu, Mint, Pop!_OS
-sudo apt install ./Arbor_0.4.1_amd64.deb
+sudo apt install ./Arbor_0.4.2_amd64.deb
 
 # Fedora, openSUSE
-sudo dnf install ./Arbor-0.4.1-1.x86_64.rpm
+sudo dnf install ./Arbor-0.4.2-1.x86_64.rpm
 
 # Anything else
-chmod +x Arbor_0.4.1_amd64.AppImage && ./Arbor_0.4.1_amd64.AppImage
+chmod +x Arbor_0.4.2_amd64.AppImage && ./Arbor_0.4.2_amd64.AppImage
 ```
 
 Run `arbor /path/to/repo` to open a repository directly in a new tab.
@@ -109,8 +112,11 @@ Open with **Ctrl+,** or the sliders button.
   **Ubuntu Dark**, which matches Ubuntu's Yaru dark style with Ubuntu orange accents
 - **Interface text:** Atkinson Hyperlegible or your system font, 10–20 px
 - **Code and diffs:** Commit Mono or your system monospace font, 9–22 px.
+  By default code scales along with the interface text, keeping the size
+  difference you set; turn off "Scale with interface text" to keep it fixed.
   History rows and the graph scale with the interface size
-- **Diffs & Git:** context lines, ignore whitespace, side-by-side history diffs, pull with rebase
+- **Diffs & Git:** context lines, when to ask before showing large diffs,
+  ignore whitespace, side-by-side history diffs, pull with rebase
 - **Keyboard:** every shortcut below can be changed. Click it and press new keys;
   if another action used them, it's unassigned and you're told which
 
@@ -137,7 +143,7 @@ Open with **Ctrl+,** or the sliders button.
 | Ctrl+Shift+↓ / Ctrl+Shift+↑ | Pull / push |
 | Ctrl+Z | Undo the last operation |
 | Ctrl+R, F5 | Refresh |
-| Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / reset text |
+| Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / reset text (code and diffs follow, unless turned off) |
 | Ctrl+Alt+= / Ctrl+Alt+- | Larger / smaller code text |
 | Ctrl+Shift+D | Side-by-side diffs in history |
 | Ctrl+\\ | Show or hide the sidebar |
