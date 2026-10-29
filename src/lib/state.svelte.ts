@@ -7,9 +7,37 @@ import {
   api, type CommitRow, type Creds, type DiffSettings, type Refs, type RepoInfo,
   type StashEntry, type UndoEntry, type WorkingStatus,
 } from "./api";
+import { library } from "./library.svelte";
 import { dialog, toasts } from "./ui.svelte";
 
 export type View = "changes" | "history" | "stashes";
+
+/** Per-repository state that is swapped in and out when switching tabs. */
+interface TabState {
+  repo: RepoInfo;
+  status: WorkingStatus | null;
+  refs: Refs | null;
+  stashes: StashEntry[];
+  undoTop: UndoEntry | null;
+  view: View;
+  scope: string;
+  log: CommitRow[];
+  logMore: boolean;
+  logLimit: number;
+  selectedCommit: string | null;
+  selectedStash: number | null;
+  selectedFile: App["selectedFile"];
+  lastSig: string;
+}
+
+export interface Tab {
+  path: string;
+  name: string;
+  /** Saved state while the tab is in the background. */
+  saved: TabState | null;
+}
+
+const TABS_KEY = "arbor.tabs";
 
 const SETTINGS_KEY = "arbor.settings";
 interface Settings {
@@ -53,6 +81,10 @@ class App {
   version = $state(0);
   settings = $state<Settings>(loadSettings());
 
+  /** Open repositories; `active` is -1 when the repository manager is showing. */
+  tabs = $state<Tab[]>([]);
+  active = $state(-1);
+
   private refreshing = false;
   private lastSig = "";
   /** Set when the window regains focus: file contents may differ even if status doesn't. */
@@ -78,32 +110,159 @@ class App {
     return this.repo?.path ?? "";
   }
 
-  async open(path: string) {
+  /** Open a repository in a tab (switching to it if it's already open). */
+  async open(path: string, opts: { background?: boolean } = {}) {
+    let info: RepoInfo;
     try {
-      const info = await api.openRepo(path);
-      this.repo = info;
-      this.log = [];
-      this.selectedCommit = null;
-      this.selectedFile = null;
-      this.selectedStash = null;
-      this.fileHistoryPath = null;
-      this.scope = "all";
-      this.view = "changes";
-      document.title = `${info.name} — Arbor`;
-      await this.refresh(true);
+      info = await api.openRepo(path);
     } catch (e) {
       toasts.push("error", String(e));
+      return;
     }
+    library.noteOpened(info.path);
+    const existing = this.tabs.findIndex((t) => t.path === info.path);
+    if (existing >= 0) {
+      if (!opts.background) this.switchTo(existing);
+      return;
+    }
+    const name = library.repos.find((r) => r.path === info.path)?.name ?? info.name;
+    // Open next to the current tab, like a browser.
+    const at = this.active >= 0 ? this.active + 1 : this.tabs.length;
+    this.tabs.splice(at, 0, { path: info.path, name, saved: null });
+    if (this.active >= at) this.active++;
+    this.persistTabs();
+    if (!opts.background) this.switchTo(at, info);
   }
 
-  close() {
+  private snapshot(): TabState | null {
+    if (!this.repo) return null;
+    return {
+      repo: this.repo, status: this.status, refs: this.refs, stashes: this.stashes, undoTop: this.undoTop,
+      view: this.view, scope: this.scope, log: this.log, logMore: this.logMore, logLimit: this.logLimit,
+      selectedCommit: this.selectedCommit, selectedStash: this.selectedStash, selectedFile: this.selectedFile,
+      lastSig: this.lastSig,
+    };
+  }
+
+  private restore(t: TabState | null, info: RepoInfo) {
+    this.repo = t?.repo ?? info;
+    this.status = t?.status ?? null;
+    this.refs = t?.refs ?? null;
+    this.stashes = t?.stashes ?? [];
+    this.undoTop = t?.undoTop ?? null;
+    this.view = t?.view ?? "changes";
+    this.scope = t?.scope ?? "all";
+    this.log = t?.log ?? [];
+    this.logMore = t?.logMore ?? false;
+    this.logLimit = t?.logLimit ?? 2000;
+    this.selectedCommit = t?.selectedCommit ?? null;
+    this.selectedStash = t?.selectedStash ?? null;
+    this.selectedFile = t?.selectedFile ?? null;
+    this.lastSig = t?.lastSig ?? "";
+    this.fileHistoryPath = null;
+  }
+
+  /** Make tab `i` active (-1 shows the repository manager). */
+  switchTo(i: number, info?: RepoInfo) {
+    if (i === this.active && this.repo) return;
+    if (this.active >= 0 && this.tabs[this.active]) this.tabs[this.active].saved = this.snapshot();
+    this.active = i;
+    this.persistTabs();
+    if (i < 0 || !this.tabs[i]) {
+      this.repo = null;
+      this.status = null;
+      this.refs = null;
+      document.title = "Repositories — Arbor";
+      library.refreshSummaries();
+      return;
+    }
+    const tab = this.tabs[i];
+    this.restore(tab.saved, info ?? { path: tab.path, name: tab.name });
+    tab.saved = null;
+    document.title = `${tab.name} — Arbor`;
+    this.workdirMayHaveChanged = true;
+    this.refresh(!this.log.length);
+  }
+
+  closeTab(i: number) {
+    const t = this.tabs[i];
+    if (!t) return;
+    if (this.busy && i === this.active) {
+      toasts.push("info", `Wait for “${this.busy}” to finish before closing this tab.`);
+      return;
+    }
+    const wasActive = i === this.active;
+    if (wasActive) {
+      // Don't save the closing tab's state.
+      this.active = -1;
+      this.repo = null;
+    }
+    this.tabs.splice(i, 1);
+    if (!wasActive) {
+      if (this.active > i) this.active--;
+      this.persistTabs();
+      return;
+    }
+    const next = this.tabs.length ? Math.min(i, this.tabs.length - 1) : -1;
+    this.switchTo(next);
+  }
+
+  moveTab(from: number, to: number) {
+    if (from === to || !this.tabs[from]) return;
+    const activePath = this.tabs[this.active]?.path;
+    const [t] = this.tabs.splice(from, 1);
+    this.tabs.splice(to > from ? to - 1 : to, 0, t);
+    if (activePath) this.active = this.tabs.findIndex((x) => x.path === activePath);
+    this.persistTabs();
+  }
+
+  cycleTab(dir: 1 | -1) {
+    const n = this.tabs.length;
+    if (!n) return;
+    // The manager sits before the first tab in the cycle.
+    const pos = (this.active + 1 + dir + n + 1) % (n + 1);
+    this.switchTo(pos - 1);
+  }
+
+  /** Keep a tab's label in sync after renaming it in the library. */
+  renameTab(path: string, name: string) {
+    const t = this.tabs.find((x) => x.path === path);
+    if (t) t.name = name;
+    if (this.repo?.path === path) document.title = `${name} — Arbor`;
+  }
+
+  private persistTabs() {
     try {
+      localStorage.setItem(TABS_KEY, JSON.stringify({ paths: this.tabs.map((t) => t.path), active: this.active }));
+    } catch {}
+  }
+
+  /** Reopen the tabs from last time, plus a folder given on the command line. */
+  async restoreTabs(extra: string | null) {
+    let saved: { paths: string[]; active: number } = { paths: [], active: -1 };
+    try {
+      saved = JSON.parse(localStorage.getItem(TABS_KEY) || "null") ?? saved;
+      // Earlier versions remembered a single repository.
+      const last = localStorage.getItem("arbor.last");
+      if (!saved.paths.length && last) saved = { paths: [last], active: 0 };
       localStorage.removeItem("arbor.last");
     } catch {}
-    this.repo = null;
-    this.status = null;
-    this.refs = null;
-    document.title = "Arbor";
+    for (const p of saved.paths) {
+      try {
+        const info = await api.openRepo(p);
+        if (!this.tabs.some((t) => t.path === info.path)) {
+          this.tabs.push({ path: info.path, name: library.repos.find((r) => r.path === info.path)?.name ?? info.name, saved: null });
+        }
+      } catch {
+        // The folder is gone; drop the tab quietly.
+      }
+    }
+    if (extra) {
+      await this.open(extra);
+      return;
+    }
+    const idx = Math.min(saved.active, this.tabs.length - 1);
+    this.switchTo(this.tabs.length ? idx : -1);
   }
 
   async refresh(withLog = false) {
@@ -148,8 +307,10 @@ class App {
   async loadLog(): Promise<void> {
     if (!this.repo) return;
     this.logLoading = true;
+    const path = this.path;
     try {
-      const l = await api.log(this.path, this.scope, this.logLimit);
+      const l = await api.log(path, this.scope, this.logLimit);
+      if (path !== this.path) return;
       this.log = l.rows;
       this.logMore = l.more;
       if (this.selectedCommit && !l.rows.some((r) => r.oid === this.selectedCommit)) {
@@ -178,6 +339,7 @@ class App {
    */
   async run<T>(label: string, fn: (creds?: Creds) => Promise<T>, opts: { success?: string | ((r: T) => string | null); quiet?: boolean } = {}): Promise<T | undefined> {
     if (!this.repo) return;
+    const path = this.path;
     this.busy = label;
     this.progress = "";
     let creds: Creds | undefined;
@@ -198,7 +360,7 @@ class App {
               "Stash and continue",
             );
             if (!ok) return;
-            await api.stashSave(this.path, `Arbor: before ${label.toLowerCase()}`, false, false, true);
+            await api.stashSave(path, `Arbor: before ${label.toLowerCase()}`, false, false, true);
             stashed = true;
             continue;
           }
@@ -217,7 +379,7 @@ class App {
     } finally {
       if (stashed) {
         try {
-          await api.stashPop(this.path, 0, true);
+          await api.stashPop(path, 0, true);
         } catch (e) {
           toasts.push("error", `Your changes couldn't be put back automatically, so they're kept in the stash list. ${String(e)}`);
         }
@@ -225,7 +387,8 @@ class App {
       this.busy = null;
       this.progress = "";
       this.workdirMayHaveChanged = true;
-      await this.refresh();
+      library.refreshSummaries([path]);
+      if (this.path === path) await this.refresh();
     }
   }
 

@@ -8,5 +8,11 @@ import "./styles.css";
 import { mount } from "svelte";
 import App from "./App.svelte";
 
+import { toasts } from "./lib/ui.svelte";
+
+// Surface unexpected errors instead of failing silently.
+window.addEventListener("error", (e) => toasts.push("error", `Unexpected error: ${e.message}`));
+window.addEventListener("unhandledrejection", (e) => toasts.push("error", `Unexpected error: ${String(e.reason)}`));
+
 const app = mount(App, { target: document.getElementById("app")! });
 export default app;

@@ -5,6 +5,14 @@ import { invoke } from "@tauri-apps/api/core";
 
 export interface RepoInfo { path: string; name: string }
 export interface RecentRepo { path: string; name: string; opened: number }
+export interface Group { id: string; name: string; collapsed: boolean }
+export interface Bookmark { path: string; name: string; group: string | null; opened: number }
+export interface Library { groups: Group[]; repos: Bookmark[] }
+export interface RepoSummary {
+  path: string; ok: boolean; error: string | null; branch: string | null; detached: boolean;
+  upstream: string | null; ahead: number; behind: number; changes: number; conflicts: number;
+  state: string; lastCommit: number | null; lastSummary: string | null; stashes: number;
+}
 
 export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "typechange" | "untracked" | "conflicted" | "copied";
 export interface FileEntry { path: string; oldPath: string | null; status: FileStatus }
@@ -77,6 +85,12 @@ export const api = {
   cloneRepo: (url: string, dest: string, creds?: Creds) => call<RepoInfo>("clone_repo", { url, dest, creds }),
   recentRepos: () => call<RecentRepo[]>("recent_repos"),
   forgetRepo: (path: string) => call<void>("forget_repo", { path }),
+
+  library: () => call<Library>("library_get"),
+  saveLibrary: (library: Library) => call<void>("library_save", { library }),
+  addManyToLibrary: (paths: string[], group: string | null) => call<Library>("library_add_many", { paths, group }),
+  scanFolder: (path: string, depth = 4) => call<string[]>("scan_folder", { path, depth }),
+  summaries: (paths: string[]) => call<RepoSummary[]>("repo_summaries", { paths }),
 
   status: (repo: string) => call<WorkingStatus>("get_status", { repo }),
   diffUnstaged: (repo: string, path: string, settings?: DiffSettings) => call<FileDiff | null>("diff_unstaged", { repo, path, settings }),

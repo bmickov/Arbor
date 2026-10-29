@@ -68,7 +68,7 @@ pub fn clone_repo(url: &str, dest: &str, creds: Option<super::remote::Creds>, pr
 }
 
 fn recent_file() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("arbor").join("recent.json"))
+    super::config_dir().map(|d| d.join("recent.json"))
 }
 
 pub fn recent() -> Vec<RecentRepo> {
@@ -81,6 +81,7 @@ pub fn recent() -> Vec<RecentRepo> {
 }
 
 fn remember(i: &RepoInfo) {
+    super::library::touch(&i.path, &i.name);
     let Some(f) = recent_file() else { return };
     let mut list = recent();
     list.retain(|r| r.path != i.path);

@@ -54,6 +54,29 @@ fn forget_repo(path: String) {
     git::repo::forget(&path)
 }
 
+// ----------------------------------------------------------------- library
+
+#[tauri::command]
+fn library_get() -> git::library::Library {
+    git::library::get()
+}
+#[tauri::command]
+fn library_save(library: git::library::Library) -> R<()> {
+    git::library::save(&library).map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn library_add_many(paths: Vec<String>, group: Option<String>) -> R<git::library::Library> {
+    blocking(move || git::library::add_many(&paths, group)).await
+}
+#[tauri::command]
+async fn scan_folder(path: String, depth: Option<usize>) -> R<Vec<String>> {
+    blocking(move || git::library::scan(&path, depth.unwrap_or(4))).await
+}
+#[tauri::command]
+async fn repo_summaries(paths: Vec<String>) -> R<Vec<git::library::Summary>> {
+    blocking(move || Ok(git::library::summaries(&paths))).await
+}
+
 // ----------------------------------------------------------- working copy
 
 #[tauri::command]
@@ -349,6 +372,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             open_repo, init_repo, clone_repo, recent_repos, forget_repo,
+            library_get, library_save, library_add_many, scan_folder, repo_summaries,
             get_status, diff_unstaged, diff_staged, file_at,
             stage_files, unstage_files, stage_all, unstage_all, discard_files,
             stage_lines, unstage_lines, discard_lines, resolve_conflict,

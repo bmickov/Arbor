@@ -10,8 +10,16 @@ struct Repo {
     path: String,
 }
 
+/// Keep tests out of the real ~/.config/arbor.
+fn isolate_config() {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let d = DIR.get_or_init(|| tempfile::tempdir().unwrap());
+    unsafe { std::env::set_var("ARBOR_CONFIG_DIR", d.path()) };
+}
+
 impl Repo {
     fn new() -> Repo {
+        isolate_config();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_string_lossy().to_string();
         let r = Repo { _dir: dir, path };
@@ -509,4 +517,44 @@ fn push_and_pull_over_local_remote() {
     let p = git::remote::pull(&b_path, true, None, None).unwrap();
     assert_eq!(p.result, "rebased");
     git::remote::push(&b_path, None, None, false, false, None, None).unwrap();
+}
+
+#[test]
+fn library_scan_and_summaries() {
+    isolate_config();
+    let root = tempfile::tempdir().unwrap();
+    let base = root.path();
+    for (dir, dirty) in [("a", false), ("nested/b", true), ("nested/deeper/c", false)] {
+        let p = base.join(dir);
+        std::fs::create_dir_all(&p).unwrap();
+        let run = |args: &[&str]| assert!(Command::new("git").args(args).current_dir(&p).output().unwrap().status.success());
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "user.name", "T"]);
+        run(&["config", "user.email", "t@example.com"]);
+        std::fs::write(p.join("f.txt"), "x\n").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-q", "-m", "first"]);
+        if dirty {
+            std::fs::write(p.join("g.txt"), "new\n").unwrap();
+            std::fs::write(p.join("f.txt"), "y\n").unwrap();
+        }
+    }
+    // Repos inside build output and hidden folders are skipped.
+    std::fs::create_dir_all(base.join("node_modules/pkg/.git")).unwrap();
+    let found = git::library::scan(&base.to_string_lossy(), 4).unwrap();
+    assert_eq!(found.len(), 3, "{found:?}");
+    assert!(found.iter().all(|p| !p.contains("node_modules")));
+
+    let mut paths = found.clone();
+    paths.push(base.join("missing").to_string_lossy().to_string());
+    let sums = git::library::summaries(&paths);
+    assert_eq!(sums.len(), 4);
+    let b = sums.iter().find(|s| s.path.ends_with("nested/b")).unwrap();
+    assert!(b.ok);
+    assert_eq!(b.changes, 2);
+    assert_eq!(b.branch.as_deref(), Some("main"));
+    assert_eq!(b.last_summary.as_deref(), Some("first"));
+    let missing = sums.iter().find(|s| s.path.ends_with("missing")).unwrap();
+    assert!(!missing.ok);
+    assert_eq!(missing.error.as_deref(), Some("Folder not found"));
 }
