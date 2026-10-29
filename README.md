@@ -71,13 +71,13 @@ Pick the package for your distribution from the release files:
 
 ```sh
 # Debian, Ubuntu, Mint, Pop!_OS
-sudo apt install ./Arbor_0.1.0_amd64.deb
+sudo apt install ./Arbor_0.2.0_amd64.deb
 
 # Fedora, openSUSE
-sudo dnf install ./Arbor-0.1.0-1.x86_64.rpm
+sudo dnf install ./Arbor-0.2.0-1.x86_64.rpm
 
 # Anything else
-chmod +x Arbor_0.1.0_amd64.AppImage && ./Arbor_0.1.0_amd64.AppImage
+chmod +x Arbor_0.2.0_amd64.AppImage && ./Arbor_0.2.0_amd64.AppImage
 ```
 
 Run `arbor /path/to/repo` to open a repository directly in a new tab.
