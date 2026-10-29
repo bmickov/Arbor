@@ -144,7 +144,18 @@ pub fn pop(repo_path: &str, index: usize, quiet: bool) -> Result<()> {
     let mut repo = open(repo_path)?;
     let clean = is_clean(&repo)?;
     let (id, msg) = entry_at(&mut repo, index)?;
-    repo.stash_pop(index, Some(&mut apply_opts())).map_err(map_apply)?;
+    // Apply, then drop only if nothing conflicted, like `git stash pop`:
+    // a conflicted pop keeps the stash so the changes can't be lost.
+    let applied = repo.stash_apply(index, Some(&mut apply_opts()));
+    let conflicted = repo.index()?.has_conflicts();
+    if conflicted {
+        return err(
+            "The stashed changes conflict with the files in your working copy. \
+             The conflicts are marked in the affected files, and the stash is kept in the list so nothing is lost.",
+        );
+    }
+    applied.map_err(map_apply)?;
+    repo.stash_drop(index)?;
     if !quiet {
         undo::record(&repo, format!("Pop stash \"{msg}\""), Action::RestoreStash { oid: id.to_string(), message: msg, reset_worktree: clean });
     }

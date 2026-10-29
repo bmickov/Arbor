@@ -377,7 +377,7 @@
     padding: 18px 24px 14px; border-bottom: 1px solid var(--line);
   }
   .title { display: flex; align-items: baseline; gap: 8px; }
-  h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+  h1 { margin: 0; font-size: calc(var(--fs) * 20); font-weight: 700; letter-spacing: -0.01em; }
   .search {
     display: flex; align-items: center; gap: 6px; padding: 0 9px; height: 30px;
     border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink-3); background: var(--surface);
@@ -386,10 +386,10 @@
   .clear { color: var(--ink-3); display: grid; }
   .actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
   .seg { display: flex; background: var(--surface-3); border-radius: 7px; padding: 2px; }
-  .seg button { padding: 3px 10px; border-radius: 5px; font-weight: 600; color: var(--ink-2); font-size: 12px; }
+  .seg button { padding: 3px 10px; border-radius: 5px; font-weight: 600; color: var(--ink-2); font-size: calc(var(--fs) * 12); }
   .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
 
-  .statusline { display: flex; align-items: center; gap: 14px; padding: 7px 24px; background: var(--surface-2); border-bottom: 1px solid var(--line-soft); font-size: 12px; }
+  .statusline { display: flex; align-items: center; gap: 14px; padding: 7px 24px; background: var(--surface-2); border-bottom: 1px solid var(--line-soft); font-size: calc(var(--fs) * 12); }
   .working { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); }
   .sel { color: var(--ink-2); }
   .link { color: var(--accent); font-weight: 600; }
@@ -403,9 +403,9 @@
   .gtoggle:disabled { opacity: 1; cursor: default; }
   .chev { display: inline-grid; color: var(--ink-3); transition: rotate 0.12s; }
   .chev.open { rotate: 90deg; }
-  .gname { font-size: 14px; }
+  .gname { font-size: calc(var(--fs) * 14); }
   .gcount { font-weight: 500; }
-  .gstats { flex: 1; font-size: 12px; }
+  .gstats { flex: 1; font-size: calc(var(--fs) * 12); }
   .gmore { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; color: var(--ink-3); opacity: 0; }
   .ghead:hover .gmore { opacity: 1; }
   .gmore:hover { background: var(--surface-3); color: var(--ink); }
@@ -426,23 +426,23 @@
   .dot.gone { border: 2px dashed var(--ink-3); }
   .who { min-width: 0; display: flex; flex-direction: column; }
   .rname { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
-  .opentag { font-size: 10px; font-weight: 700; color: var(--accent); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; line-height: 14px; }
-  .rpath { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
-  .branch { display: flex; align-items: center; gap: 5px; color: var(--ink-2); min-width: 0; font-size: 12px; }
+  .opentag { font-size: calc(var(--fs) * 10); font-weight: 700; color: var(--accent); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; line-height: 14px; }
+  .rpath { font-size: calc(var(--fs) * 12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+  .branch { display: flex; align-items: center; gap: 5px; color: var(--ink-2); min-width: 0; font-size: calc(var(--fs) * 12); }
   .branch span:not(.tag) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tag { font-size: 10px; font-weight: 700; border-radius: 4px; padding: 0 4px; flex: none; }
+  .tag { font-size: calc(var(--fs) * 10); font-weight: 700; border-radius: 4px; padding: 0 4px; flex: none; }
   .tag.warn { color: var(--warn); background: var(--warn-soft); }
-  .sync { display: flex; gap: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  .sync { display: flex; gap: 6px; font-size: calc(var(--fs) * 12); font-variant-numeric: tabular-nums; color: var(--ink-2); }
   .sync .behind { color: var(--accent); font-weight: 700; }
-  .changes { display: flex; gap: 8px; font-size: 12px; color: var(--lane-1); font-weight: 600; align-items: center; }
+  .changes { display: flex; gap: 8px; font-size: calc(var(--fs) * 12); color: var(--lane-1); font-weight: 600; align-items: center; }
   .changes .faint { display: inline-flex; gap: 3px; align-items: center; font-weight: 500; }
-  .last { display: flex; gap: 8px; min-width: 0; font-size: 12px; align-items: baseline; }
+  .last { display: flex; gap: 8px; min-width: 0; font-size: calc(var(--fs) * 12); align-items: baseline; }
   .lsum { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
   .ltime { flex: none; }
   .row.missing .rname { color: var(--ink-3); }
-  .missing-msg { grid-column: 3 / 5; color: var(--ink-3); font-size: 12px; }
+  .missing-msg { grid-column: 3 / 5; color: var(--ink-3); font-size: calc(var(--fs) * 12); }
   .fix { grid-column: 5 / 7; display: flex; gap: 6px; justify-content: flex-end; }
-  .none { padding: 6px 38px 10px; font-size: 12px; }
+  .none { padding: 6px 38px 10px; font-size: calc(var(--fs) * 12); }
 
   .spinner {
     display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line);
@@ -452,7 +452,7 @@
 
   .first { margin: auto; width: min(720px, 100%); padding: 40px 24px; }
   .mark { width: 56px; height: 56px; }
-  .first h1 { font-size: 26px; margin: 8px 0 4px; }
+  .first h1 { font-size: calc(var(--fs) * 26); margin: 8px 0 4px; }
   .first p { margin: 0 0 24px; }
   .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .card {
@@ -462,7 +462,7 @@
   .card:hover { border-color: var(--accent); background: var(--accent-soft); }
   .card :global(svg) { grid-row: span 2; color: var(--accent); margin-top: 2px; }
   .card b { font-weight: 700; }
-  .card span { color: var(--ink-2); font-size: 12px; }
+  .card span { color: var(--ink-2); font-size: calc(var(--fs) * 12); }
   .first .working { margin-top: 16px; }
 
   @media (max-width: 1100px) {

@@ -67,7 +67,7 @@
     border: 1px solid var(--line); box-shadow: var(--shadow-pop); outline: none;
   }
   .title {
-    padding: 4px 8px 6px; color: var(--ink-3); font-size: 12px;
+    padding: 4px 8px 6px; color: var(--ink-3); font-size: calc(var(--fs) * 12);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 340px;
   }
   button {
@@ -77,7 +77,7 @@
   button.active:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
   button.danger { color: var(--danger); }
   button.danger.active:not(:disabled) { background: var(--danger); color: #fff; }
-  .hint { color: var(--ink-3); font-size: 12px; }
+  .hint { color: var(--ink-3); font-size: calc(var(--fs) * 12); }
   button.active .hint { color: inherit; opacity: 0.8; }
   .sep { height: 1px; background: var(--line-soft); margin: 4px 2px; }
 </style>

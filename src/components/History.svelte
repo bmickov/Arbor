@@ -10,8 +10,10 @@
   import Icon from "./Icon.svelte";
   import RebaseEditor from "./RebaseEditor.svelte";
 
-  const ROW = 32;
-  const LANE = 16;
+  // Row height and lane width follow the interface font size.
+  const scale = $derived(app.settings.uiSize / 13);
+  const ROW = $derived(Math.round(24 * scale));
+  const LANE = $derived(Math.max(9, Math.round(11 * scale)));
   const MAX_LANES = 14;
 
   let query = $state("");
@@ -20,6 +22,16 @@
   let viewH = $state(600);
   let listW = $state(55); // percent
   let rebaseFrom = $state<CommitRow | null>(null);
+  let searchEl = $state<HTMLInputElement>();
+  let seenSearch = 0;
+  $effect(() => {
+    const t = app.focusSearch;
+    if (t > seenSearch && Date.now() - t < 1500 && searchEl) {
+      seenSearch = t;
+      searchEl.focus();
+      searchEl.select();
+    }
+  });
   let dropLine = $state<{ oid: string; below: boolean } | null>(null);
 
   const q = $derived(query.trim().toLowerCase());
@@ -114,13 +126,14 @@
   }
 </script>
 
-<div class="history" style:--list-w="{listW}%">
+<div class="history" style:--list-w="{listW}%" style:--row-h="{ROW}px">
   <div class="list">
     <div class="tools">
       <button class="scope" onclick={scopeMenu}><Icon name="history" size={14} /> {scopeLabel} <Icon name="down" size={12} /></button>
       <div class="search">
         <Icon name="search" size={14} />
-        <input placeholder="Search message, author, ID" bind:value={query} spellcheck="false" />
+        <input bind:this={searchEl} placeholder="Search message, author, ID" bind:value={query} spellcheck="false"
+          onkeydown={(e) => { if (e.key === "Escape") { query = ""; scroller?.focus(); } if (e.key === "Enter") scroller?.focus(); }} />
         {#if query}<button class="clear" onclick={() => (query = "")} aria-label="Clear search"><Icon name="x" size={12} /></button>{/if}
       </div>
     </div>
@@ -206,7 +219,7 @@
 <style>
   .history { display: grid; grid-template-columns: var(--list-w) 5px 1fr; height: 100%; min-height: 0; background: var(--surface); }
   .list { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .tools { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .tools { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); }
   .scope {
     display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: var(--radius);
     font-weight: 600; color: var(--ink-2); white-space: nowrap; max-width: 45%;
@@ -223,8 +236,8 @@
   .rows { flex: 1; overflow: auto; position: relative; outline: none; }
   .spacer { position: relative; min-width: 100%; }
   .row {
-    position: absolute; left: 0; right: 0; height: 32px; display: flex; align-items: center; gap: 8px;
-    padding-right: 12px; white-space: nowrap;
+    position: absolute; left: 0; right: 0; height: var(--row-h); display: flex; align-items: center; gap: 6px;
+    padding-right: 10px; white-space: nowrap; font-size: calc(var(--fs) * 12.5);
   }
   .row:hover { background: var(--surface-2); }
   .row.sel { background: var(--sel); }
@@ -245,13 +258,13 @@
   .grip.pushed { color: var(--warn); }
   .row:hover .grip { opacity: 1; }
   .avatar {
-    width: 20px; height: 20px; border-radius: 50%; flex: none; display: grid; place-items: center;
-    font-size: 9px; font-weight: 700; letter-spacing: 0.02em;
-    background: hsl(var(--h) 45% 88%); color: hsl(var(--h) 45% 28%);
+    width: calc(var(--fs) * 16); height: calc(var(--fs) * 16); border-radius: 50%; flex: none; display: grid; place-items: center;
+    font-size: calc(var(--fs) * 7.5); font-weight: 700; letter-spacing: 0.02em;
+    background: hsl(var(--h) var(--av-bg-s) var(--av-bg-l)); color: hsl(var(--h) var(--av-ink-s) var(--av-ink-l));
   }
-  @media (prefers-color-scheme: dark) { .avatar { background: hsl(var(--h) 30% 26%); color: hsl(var(--h) 55% 82%); } }
-  .author { width: 110px; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); font-size: 12px; }
-  .date { width: 78px; text-align: right; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .author { width: calc(var(--fs) * 96); overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); font-size: calc(var(--fs) * 11.5); }
+  .date { width: calc(var(--fs) * 68); text-align: right; color: var(--ink-3); font-size: calc(var(--fs) * 11.5); font-variant-numeric: tabular-nums; }
+  .row .pill { height: calc(var(--fs) * 16); padding: 0 5px; font-size: calc(var(--fs) * 10.5); gap: 3px; }
   .more { position: absolute; left: 50%; translate: -50% 0; }
 
   .splitter { cursor: col-resize; background: var(--line); border-inline: 2px solid var(--surface); }

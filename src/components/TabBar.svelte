@@ -74,6 +74,10 @@
     {/each}
   </div>
   <button class="plus" title="Open another repository" aria-label="Open another repository" onclick={() => app.switchTo(-1)}><Icon name="plus" size={14} /></button>
+  <span class="grow"></span>
+  {#if !app.repo}
+    <button class="gear" title="Preferences (Ctrl+,)" aria-label="Preferences" onclick={() => (app.prefs = "appearance")}><Icon name="settings" size={15} /></button>
+  {/if}
 </div>
 
 <style>
@@ -95,12 +99,15 @@
   .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
   .dot.dirty { background: var(--lane-1); }
   .dot.conflict { background: var(--danger); }
-  .behind { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .behind { font-size: calc(var(--fs) * 11); color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .x { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: var(--ink-3); opacity: 0; flex: none; }
   .tab:hover .x, .tab.on .x { opacity: 1; }
   .x:hover { background: var(--surface-3); color: var(--ink); }
   .plus { display: grid; place-items: center; width: 28px; height: 28px; margin: 0 0 4px 2px; border-radius: 6px; color: var(--ink-2); flex: none; }
   .plus:hover { background: var(--bg); color: var(--ink); }
+  .grow { flex: 1; }
+  .gear { display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: 4px; border-radius: 6px; color: var(--ink-2); flex: none; }
+  .gear:hover { background: var(--bg); color: var(--ink); }
   .tab.ins-before::before, .tab.ins-after::after {
     content: ""; position: absolute; top: 5px; bottom: 5px; width: 3px; border-radius: 2px; background: var(--accent);
   }

@@ -119,7 +119,7 @@
 </div>
 
 <style>
-  .backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(10, 18, 22, 0.28); display: flex; justify-content: flex-end; }
+  .backdrop { position: fixed; inset: 0; z-index: 70; background: var(--backdrop); display: flex; justify-content: flex-end; }
   .drawer {
     width: min(1100px, 92vw); height: 100%; background: var(--surface); box-shadow: var(--shadow-pop);
     display: flex; flex-direction: column; animation: in 0.16s ease-out;
@@ -138,23 +138,23 @@
   .entry:hover { background: var(--surface-2); }
   .entry.sel { background: var(--sel); }
   .sum { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .meta { font-size: 12px; }
-  .renamed { font-size: 11px; color: var(--lane-3); }
+  .meta { font-size: calc(var(--fs) * 12); }
+  .renamed { font-size: calc(var(--fs) * 11); color: var(--lane-3); }
   .diff { min-width: 0; min-height: 0; }
 
-  .blame { flex: 1; overflow: auto; font-size: 12px; line-height: 20px; }
+  .blame { flex: 1; overflow: auto; font-size: calc(var(--cs) * 12); line-height: 1.65; }
   .bl { display: grid; grid-template-columns: 300px 46px 1fr; white-space: pre; }
   .bl.odd { background: var(--surface-2); }
   .bl.start { border-top: 1px solid var(--line-soft); }
   .who { overflow: hidden; border-right: 1px solid var(--line-soft); font-family: var(--font-ui); }
-  .hc { display: flex; align-items: center; gap: 6px; width: 100%; padding: 0 8px; height: 20px; text-align: left; }
+  .hc { display: flex; align-items: center; gap: 6px; width: 100%; padding: 0 8px; height: calc(var(--cs) * 19.8); text-align: left; }
   .hc:hover .hs { color: var(--accent); text-decoration: underline; }
   .av {
-    width: 16px; height: 16px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 8px; font-weight: 700;
-    background: hsl(var(--h) 45% 88%); color: hsl(var(--h) 45% 28%);
+    width: 16px; height: 16px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: calc(var(--fs) * 8); font-weight: 700;
+    background: hsl(var(--h) var(--av-bg-s) var(--av-bg-l)); color: hsl(var(--h) var(--av-ink-s) var(--av-ink-l));
   }
-  .hs { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
-  .age { color: var(--ink-3); font-size: 11px; }
-  .no { color: var(--ink-3); text-align: right; padding-right: 10px; font-size: 11px; }
+  .hs { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: calc(var(--fs) * 12); }
+  .age { color: var(--ink-3); font-size: calc(var(--fs) * 11); }
+  .no { color: var(--ink-3); text-align: right; padding-right: 10px; font-size: calc(var(--cs) * 11); }
   .code { user-select: text; padding-right: 20px; tab-size: 4; }
 </style>

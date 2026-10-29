@@ -71,13 +71,13 @@ Pick the package for your distribution from the release files:
 
 ```sh
 # Debian, Ubuntu, Mint, Pop!_OS
-sudo apt install ./Arbor_0.2.0_amd64.deb
+sudo apt install ./Arbor_0.3.0_amd64.deb
 
 # Fedora, openSUSE
-sudo dnf install ./Arbor-0.2.0-1.x86_64.rpm
+sudo dnf install ./Arbor-0.3.0-1.x86_64.rpm
 
 # Anything else
-chmod +x Arbor_0.2.0_amd64.AppImage && ./Arbor_0.2.0_amd64.AppImage
+chmod +x Arbor_0.3.0_amd64.AppImage && ./Arbor_0.3.0_amd64.AppImage
 ```
 
 Run `arbor /path/to/repo` to open a repository directly in a new tab.
@@ -85,20 +85,46 @@ Without an argument, Arbor reopens the tabs from your last session.
 
 The repository list lives in `~/.config/arbor/library.json`.
 
+## Preferences
+
+Open with **Ctrl+,** or the sliders button.
+
+- **Theme:** System (follows your desktop), Arbor Light, Arbor Dark, or
+  **Ubuntu Dark**, which matches Ubuntu's Yaru dark style with Ubuntu orange accents
+- **Interface text:** Atkinson Hyperlegible or your system font, 10–20 px
+- **Code and diffs:** Commit Mono or your system monospace font, 9–22 px.
+  History rows and the graph scale with the interface size
+- **Diffs & Git:** context lines, ignore whitespace, side-by-side history diffs, pull with rebase
+- **Keyboard:** every shortcut below can be changed. Click it and press new keys;
+  if another action used them, it's unassigned and you're told which
+
 ## Keyboard
 
 | Keys | Action |
 | --- | --- |
+| Ctrl+, | Preferences |
+| Ctrl+/ | Show keyboard shortcuts |
 | Ctrl+T | Show all repositories |
-| Ctrl+W | Close the current tab |
-| Ctrl+Tab, Ctrl+PageDown / PageUp | Next / previous tab |
+| Ctrl+O | Open a repository |
+| Ctrl+W | Close tab |
+| Ctrl+Tab, Ctrl+PageDown / Ctrl+Shift+Tab, Ctrl+PageUp | Next / previous tab |
 | Alt+1 … Alt+9 | Go to tab 1–8, or the last tab |
-| Ctrl+Z | Undo the last operation |
-| Ctrl+Enter | Commit (in the message fields) |
-| Ctrl+R | Refresh |
 | Ctrl+1 / 2 / 3 | Changes / History / Stashes |
-| ↑ ↓ | Move through files or commits |
-| Space or Enter | Stage or unstage the focused file |
+| Ctrl+P | Switch branch (type to filter, or to create a new one) |
+| Ctrl+B | New branch |
+| Ctrl+F | Search history |
+| Ctrl+Enter | Commit |
+| Ctrl+M | Write commit message |
+| Ctrl+Shift+A / Ctrl+Shift+U | Stage all / unstage all |
+| Ctrl+Shift+S / Ctrl+Alt+S | Stash / apply and remove the latest stash |
+| Ctrl+Shift+F | Fetch |
+| Ctrl+Shift+↓ / Ctrl+Shift+↑ | Pull / push |
+| Ctrl+Z | Undo the last operation |
+| Ctrl+R, F5 | Refresh |
+| Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / reset text |
+| Ctrl+Alt+= / Ctrl+Alt+- | Larger / smaller code text |
+| Ctrl+Shift+D | Side-by-side diffs in history |
+| Ctrl+\\ | Show or hide the sidebar |
 
 ## Build from source
 

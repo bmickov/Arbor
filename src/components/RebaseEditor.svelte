@@ -125,14 +125,14 @@
 </div>
 
 <style>
-  .backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(10, 18, 22, 0.32); display: grid; place-items: center; padding: 24px; }
+  .backdrop { position: fixed; inset: 0; z-index: 80; background: var(--backdrop); display: grid; place-items: center; padding: 24px; }
   .panel {
     width: min(720px, 100%); max-height: 85vh; display: flex; flex-direction: column; background: var(--surface);
     border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-pop);
   }
   header { padding: 18px 20px 8px; }
-  h2 { margin: 0 0 4px; font-size: 16px; }
-  header p { margin: 0; font-size: 12px; }
+  h2 { margin: 0 0 4px; font-size: calc(var(--fs) * 16); }
+  header p { margin: 0; font-size: calc(var(--fs) * 12); }
   ol { list-style: none; margin: 0; padding: 8px 12px; overflow-y: auto; flex: 1; }
   li {
     display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--line-soft);
@@ -145,8 +145,8 @@
   .grip { color: var(--ink-3); display: grid; }
   select { width: 130px; flex: none; padding: 4px 6px; }
   .summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 6px; align-items: center; }
-  textarea { flex: 1; font-size: 12px; }
+  textarea { flex: 1; font-size: calc(var(--fs) * 12); }
   .sha { flex: none; }
-  .error { margin: 0 20px; color: var(--danger); font-size: 12px; }
+  .error { margin: 0 20px; color: var(--danger); font-size: calc(var(--fs) * 12); }
   footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
 </style>

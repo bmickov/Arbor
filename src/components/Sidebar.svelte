@@ -174,12 +174,12 @@
   .nav:hover { background: var(--surface-3); color: var(--ink); }
   .nav.on { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
   .badge {
-    min-width: 20px; height: 18px; padding: 0 6px; border-radius: 9px; font-size: 11px;
+    min-width: 20px; height: 18px; padding: 0 6px; border-radius: 9px; font-size: calc(var(--fs) * 11);
     line-height: 18px; text-align: center; background: var(--accent); color: var(--accent-ink);
   }
   .badge.plain { background: var(--surface-3); color: var(--ink-2); }
   .badge.warn { background: var(--danger); color: #fff; min-width: 18px; padding: 0; }
-  .scope { font-weight: 500; font-size: 11px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scope { font-weight: 500; font-size: calc(var(--fs) * 11); max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .lists { flex: 1; overflow-y: auto; padding: 6px 8px 24px; }
   .filter {
@@ -191,7 +191,7 @@
   section header { display: flex; align-items: center; }
   .head {
     flex: 1; display: flex; align-items: center; gap: 4px; padding: 4px 4px; text-align: left;
-    color: var(--ink-3); font-size: 12px; font-weight: 700;
+    color: var(--ink-3); font-size: calc(var(--fs) * 12); font-weight: 700;
   }
   .head:hover { color: var(--ink-2); }
   .count { font-weight: 500; margin-left: 4px; }
@@ -212,7 +212,7 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--ink-3); flex: none; }
   .dot.current { background: var(--lane-0); border-color: var(--lane-0); box-shadow: 0 0 0 3px color-mix(in srgb, var(--lane-0) 25%, transparent); }
   .dot.remote { border-style: dashed; border-width: 1.5px; }
-  .ab { font-size: 11px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-  .gone { font-size: 10px; color: var(--warn); border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; }
-  .none { padding: 4px 10px; font-size: 12px; }
+  .ab { font-size: calc(var(--fs) * 11); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .gone { font-size: calc(var(--fs) * 10); color: var(--warn); border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; }
+  .none { padding: 4px 10px; font-size: calc(var(--fs) * 12); }
 </style>

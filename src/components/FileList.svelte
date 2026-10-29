@@ -77,7 +77,7 @@
   .file:focus-visible { outline: 2px solid var(--focus); }
   .st {
     width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center;
-    font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+    font-size: calc(var(--fs) * 10); font-weight: 700; font-family: var(--font-mono);
     color: var(--ink-2); background: var(--surface-3);
   }
   .st.added, .st.untracked { color: var(--add-ink); background: var(--add-bg-strong); }
@@ -86,12 +86,12 @@
   .st.renamed { color: var(--lane-3); background: color-mix(in srgb, var(--lane-3) 18%, transparent); }
   .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .name b { font-weight: 600; }
-  .dir { color: var(--ink-3); font-size: 12px; }
+  .dir { color: var(--ink-3); font-size: calc(var(--fs) * 12); }
   .toggle {
     display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; flex: none;
     color: var(--ink-2); opacity: 0;
   }
   .file:hover .toggle, .file.sel .toggle, .file:focus-within .toggle { opacity: 1; }
   .toggle:hover { background: var(--accent); color: var(--accent-ink); }
-  .none { padding: 6px 8px; font-size: 12px; }
+  .none { padding: 6px 8px; font-size: calc(var(--fs) * 12); }
 </style>

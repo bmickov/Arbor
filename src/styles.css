@@ -39,58 +39,25 @@
   --lane-7: #5f7f90;
 
   --shadow-pop: 0 12px 32px rgba(18, 32, 40, 0.18), 0 2px 6px rgba(18, 32, 40, 0.1);
+  --backdrop: rgba(10, 18, 22, 0.32);
+  --av-bg-s: 45%; --av-bg-l: 88%; --av-ink-s: 45%; --av-ink-l: 28%;
+  --btn-bg: #fbfcfc; --btn-hover: #f2f5f6; --input-bg: #fbfcfc;
   --radius: 6px;
+
+  /* Font scaling: sizes are written as calc(var(--fs) * N) so N is the size
+     at the default 13px interface font; --cs does the same for code. */
+  --fs: 1px;
+  --cs: 1px;
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14181b;
-    --surface: #1b2024;
-    --surface-2: #20262a;
-    --surface-3: #283035;
-    --line: #2d353a;
-    --line-soft: #252c31;
-    --ink: #e3e8eb;
-    --ink-2: #a5b0b7;
-    --ink-3: #6e7a82;
-    --accent: #5cbfb3;
-    --accent-ink: #0d1b1d;
-    --accent-soft: rgba(92, 191, 179, 0.14);
-    --sel: rgba(92, 191, 179, 0.14);
-    --sel-strong: rgba(92, 191, 179, 0.26);
-    --focus: #5cbfb3;
-    --danger: #ec7b67;
-    --danger-soft: rgba(236, 123, 103, 0.12);
-    --warn: #e6b450;
-    --warn-soft: rgba(230, 180, 80, 0.14);
-
-    --add-bg: rgba(77, 170, 103, 0.13);
-    --add-bg-strong: rgba(77, 170, 103, 0.3);
-    --add-ink: #8fd6a3;
-    --del-bg: rgba(220, 96, 74, 0.13);
-    --del-bg-strong: rgba(220, 96, 74, 0.3);
-    --del-ink: #f09a89;
-
-    --lane-0: #49c2b2;
-    --lane-1: #e9b04a;
-    --lane-2: #e57b93;
-    --lane-3: #719ff0;
-    --lane-4: #a98ae8;
-    --lane-5: #98c056;
-    --lane-6: #ec915c;
-    --lane-7: #8aa6b5;
-
-    --shadow-pop: 0 14px 36px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
-    color-scheme: dark;
-  }
-}
+/* Themes are applied by src/lib/themes.ts; colours above are the fallback. */
 
 * { box-sizing: border-box; }
 html, body, #app { height: 100%; margin: 0; }
 body {
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: calc(var(--fs) * 13);
   line-height: 1.4;
   color: var(--ink);
   background: var(--bg);
@@ -103,7 +70,7 @@ body {
 img, svg, a { -webkit-user-drag: none; }
 body.dragging, body.dragging * { cursor: grabbing !important; }
 
-.mono { font-family: var(--font-mono); font-size: 12px; font-variant-ligatures: none; }
+.mono { font-family: var(--font-mono); font-size: calc(var(--cs) * 12); font-variant-ligatures: none; }
 .muted { color: var(--ink-2); }
 .faint { color: var(--ink-3); }
 .selectable { user-select: text; cursor: text; }
@@ -127,12 +94,12 @@ button:disabled { cursor: default; opacity: 0.45; }
   padding: 0 11px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--btn-bg);
   color: var(--ink);
   font-weight: 500;
   white-space: nowrap;
 }
-.btn:hover:not(:disabled) { background: var(--surface-2); }
+.btn:hover:not(:disabled) { background: var(--btn-hover); }
 .btn:active:not(:disabled) { background: var(--surface-3); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.07); background: var(--accent); }
@@ -140,12 +107,12 @@ button:disabled { cursor: default; opacity: 0.45; }
 .btn.danger.solid { background: var(--danger); color: #fff; border-color: var(--danger); }
 .btn.ghost { border-color: transparent; background: transparent; }
 .btn.ghost:hover:not(:disabled) { background: var(--surface-3); }
-.btn.small { height: 24px; padding: 0 8px; font-size: 12px; }
+.btn.small { height: 24px; padding: 0 8px; font-size: calc(var(--fs) * 12); }
 
 input[type="text"], input[type="password"], input:not([type]), textarea, select {
   font: inherit;
   color: var(--ink);
-  background: var(--surface);
+  background: var(--input-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 6px 9px;
@@ -170,7 +137,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   height: 18px;
   padding: 0 6px;
   border-radius: 9px;
-  font-size: 11px;
+  font-size: calc(var(--fs) * 11);
   font-weight: 600;
   white-space: nowrap;
   max-width: 220px;
@@ -194,15 +161,16 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   text-align: center;
   color: var(--ink-3);
 }
-.empty strong { display: block; color: var(--ink-2); font-size: 14px; margin-bottom: 4px; font-weight: 600; }
+.empty strong { display: block; color: var(--ink-2); font-size: calc(var(--fs) * 14); margin-bottom: 4px; font-weight: 600; }
 
 .kbd {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: calc(var(--fs) * 11);
   padding: 1px 5px;
   border: 1px solid var(--line);
   border-bottom-width: 2px;
   border-radius: 4px;
+  background: var(--btn-bg);
   color: var(--ink-2);
 }
 

@@ -44,22 +44,6 @@
     menu.open(r.left, r.bottom + 4, items, "Switch branch");
   }
 
-  function settingsMenu(e: MouseEvent) {
-    const s = app.settings;
-    const set = (k: keyof typeof s, v: never) => {
-      (s as unknown as Record<string, unknown>)[k] = v;
-      app.saveSettings();
-    };
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    menu.open(r.right - 260, r.bottom + 4, [
-      { label: "Pull with rebase", hint: s.pullRebase ? "on" : "off", action: () => set("pullRebase", !s.pullRebase as never) },
-      { label: "Ignore whitespace in diffs", hint: s.ignoreWhitespace ? "on" : "off", action: () => set("ignoreWhitespace", !s.ignoreWhitespace as never) },
-      { label: "Side-by-side diffs in history", hint: s.splitDiff ? "on" : "off", action: () => set("splitDiff", !s.splitDiff as never) },
-      { separator: true },
-      ...[1, 3, 6, 10].map((n) => ({ label: `${n} lines of context`, hint: s.context === n ? "current" : undefined, action: () => set("context", n as never) })),
-    ], "Preferences");
-  }
-
   const undoTitle = $derived(app.undoTop ? `Undo “${app.undoTop.label}” (Ctrl+Z)` : "Nothing to undo");
 </script>
 
@@ -107,7 +91,7 @@
       <span class="busy" role="status"><span class="spinner"></span>{app.busy}{app.progress ? ` · ${app.progress}` : "…"}</span>
     {/if}
     <button class="icon" onclick={() => app.refresh(true)} title="Refresh (Ctrl+R)" aria-label="Refresh"><Icon name="refresh" /></button>
-    <button class="icon" onclick={settingsMenu} title="Preferences" aria-label="Preferences"><Icon name="settings" /></button>
+    <button class="icon" onclick={() => (app.prefs = "appearance")} title="Preferences (Ctrl+,)" aria-label="Preferences"><Icon name="settings" /></button>
   </div>
 </header>
 
@@ -122,7 +106,7 @@
     border-radius: var(--radius); min-width: 0;
   }
   .repo:hover, .branch:hover { background: var(--surface-3); }
-  .repo-name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .repo-name { font-weight: 700; font-size: calc(var(--fs) * 14); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .branch { color: var(--ink-2); font-weight: 600; }
   .branch span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
   .detached { color: var(--warn); }
@@ -134,18 +118,18 @@
     position: relative; display: flex; flex-direction: column; align-items: center; gap: 1px;
     min-width: 52px; padding: 4px 8px 3px; border-radius: var(--radius); color: var(--ink-2);
   }
-  .tool span { font-size: 11px; font-weight: 600; }
+  .tool span { font-size: calc(var(--fs) * 11); font-weight: 600; }
   .tool:hover:not(:disabled) { background: var(--surface-3); color: var(--ink); }
   .count {
     position: absolute; top: 1px; right: 8px; min-width: 16px; height: 16px; padding: 0 4px;
-    border-radius: 8px; font-size: 10px; line-height: 16px; background: var(--accent); color: var(--accent-ink);
+    border-radius: 8px; font-size: calc(var(--fs) * 10); line-height: 16px; background: var(--accent); color: var(--accent-ink);
   }
 
   .right { display: flex; justify-content: flex-end; align-items: center; gap: 4px; min-width: 0; }
   .icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius); color: var(--ink-2); }
   .icon:hover { background: var(--surface-3); color: var(--ink); }
   .busy {
-    display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 12px;
+    display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: calc(var(--fs) * 12);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 6px;
   }
   .spinner {

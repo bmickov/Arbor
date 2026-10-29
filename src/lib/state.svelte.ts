@@ -8,6 +8,7 @@ import {
   type StashEntry, type UndoEntry, type WorkingStatus,
 } from "./api";
 import { library } from "./library.svelte";
+import { applyTheme, type ThemeId } from "./themes";
 import { dialog, toasts } from "./ui.svelte";
 
 export type View = "changes" | "history" | "stashes";
@@ -40,19 +41,53 @@ export interface Tab {
 const TABS_KEY = "arbor.tabs";
 
 const SETTINGS_KEY = "arbor.settings";
-interface Settings {
+export interface Settings {
   context: number;
   ignoreWhitespace: boolean;
   pullRebase: boolean;
   splitDiff: boolean;
+  theme: ThemeId;
+  uiFont: "atkinson" | "system";
+  /** Interface text size in px (default 13). */
+  uiSize: number;
+  codeFont: "commit" | "system";
+  /** Code and diff text size in px (default 12). */
+  codeSize: number;
+  /** Custom key bindings by command id; missing ids use the defaults. */
+  shortcuts: Record<string, string[]>;
 }
+export const DEFAULT_SETTINGS: Settings = {
+  context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false,
+  theme: "system", uiFont: "atkinson", uiSize: 13, codeFont: "commit", codeSize: 12, shortcuts: {},
+};
+export const UI_SIZES = { min: 10, max: 20, default: 13 };
+export const CODE_SIZES = { min: 9, max: 22, default: 12 };
+
 function loadSettings(): Settings {
-  const d: Settings = { context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false };
   try {
-    return { ...d, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") };
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") };
   } catch {
-    return d;
+    return { ...DEFAULT_SETTINGS };
   }
+}
+
+const UI_FONTS = {
+  atkinson: '"Atkinson Hyperlegible Next", system-ui, sans-serif',
+  system: 'system-ui, "Ubuntu Sans", Ubuntu, Cantarell, "Noto Sans", sans-serif',
+};
+const CODE_FONTS = {
+  commit: '"Commit Mono", ui-monospace, "DejaVu Sans Mono", monospace',
+  system: '"Ubuntu Sans Mono", "Ubuntu Mono", ui-monospace, "DejaVu Sans Mono", monospace',
+};
+
+/** Apply theme, fonts and sizes to the document. */
+export function applyAppearance(s: Settings) {
+  applyTheme(s.theme);
+  const root = document.documentElement.style;
+  root.setProperty("--fs", `${s.uiSize / UI_SIZES.default}px`);
+  root.setProperty("--cs", `${s.codeSize / CODE_SIZES.default}px`);
+  root.setProperty("--font-ui", UI_FONTS[s.uiFont] ?? UI_FONTS.atkinson);
+  root.setProperty("--font-mono", CODE_FONTS[s.codeFont] ?? CODE_FONTS.commit);
 }
 
 class App {
@@ -74,6 +109,17 @@ class App {
   selectedFile = $state<{ path: string; area: "staged" | "unstaged" | "conflicted" } | null>(null);
   /** File whose history/blame panel is open. */
   fileHistoryPath = $state<string | null>(null);
+
+  /** Preferences window: closed, or open at a section. */
+  prefs = $state<null | "appearance" | "diffs" | "keyboard">(null);
+  /** Branch switcher (Ctrl+P) visibility. */
+  switcher = $state(false);
+  /** Times (ms) of requests from shortcuts, picked up by the views even if
+   *  they mount just after: commit, focus the commit summary, focus search. */
+  commitRequest = $state(0);
+  focusComposer = $state(0);
+  focusSearch = $state(0);
+  sidebarHidden = $state(false);
 
   busy = $state<string | null>(null);
   progress = $state("");
@@ -103,7 +149,18 @@ class App {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
     } catch {}
+    applyAppearance(this.settings);
     this.version++;
+  }
+
+  setUiSize(n: number) {
+    this.settings.uiSize = Math.min(UI_SIZES.max, Math.max(UI_SIZES.min, Math.round(n)));
+    this.saveSettings();
+  }
+
+  setCodeSize(n: number) {
+    this.settings.codeSize = Math.min(CODE_SIZES.max, Math.max(CODE_SIZES.min, Math.round(n)));
+    this.saveSettings();
   }
 
   get path(): string {
@@ -381,7 +438,7 @@ class App {
         try {
           await api.stashPop(path, 0, true);
         } catch (e) {
-          toasts.push("error", `Your changes couldn't be put back automatically, so they're kept in the stash list. ${String(e)}`);
+          toasts.push("error", String(e));
         }
       }
       this.busy = null;
