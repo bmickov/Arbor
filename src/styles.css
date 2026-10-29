@@ -1,0 +1,211 @@
+:root {
+  --font-ui: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  --font-mono: "Commit Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+
+  --bg: #e9edef;
+  --surface: #fbfcfc;
+  --surface-2: #f2f5f6;
+  --surface-3: #e6ebed;
+  --line: #d6dde1;
+  --line-soft: #e4e9ec;
+  --ink: #1a2227;
+  --ink-2: #4f5c64;
+  --ink-3: #85919a;
+  --accent: #1b6b70;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(27, 107, 112, 0.12);
+  --sel: rgba(27, 107, 112, 0.14);
+  --sel-strong: rgba(27, 107, 112, 0.24);
+  --focus: #2b8f96;
+  --danger: #b23b2a;
+  --danger-soft: rgba(178, 59, 42, 0.1);
+  --warn: #9a6a0a;
+  --warn-soft: rgba(224, 164, 46, 0.18);
+
+  --add-bg: #e3f3e6;
+  --add-bg-strong: #c5e8cd;
+  --add-ink: #1e6a37;
+  --del-bg: #fbe8e4;
+  --del-bg-strong: #f4cbc2;
+  --del-ink: #9b3423;
+
+  --lane-0: #1f9e8f;
+  --lane-1: #d9952a;
+  --lane-2: #d15c78;
+  --lane-3: #4677cf;
+  --lane-4: #8a68cc;
+  --lane-5: #6f9431;
+  --lane-6: #d4703a;
+  --lane-7: #5f7f90;
+
+  --shadow-pop: 0 12px 32px rgba(18, 32, 40, 0.18), 0 2px 6px rgba(18, 32, 40, 0.1);
+  --radius: 6px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14181b;
+    --surface: #1b2024;
+    --surface-2: #20262a;
+    --surface-3: #283035;
+    --line: #2d353a;
+    --line-soft: #252c31;
+    --ink: #e3e8eb;
+    --ink-2: #a5b0b7;
+    --ink-3: #6e7a82;
+    --accent: #5cbfb3;
+    --accent-ink: #0d1b1d;
+    --accent-soft: rgba(92, 191, 179, 0.14);
+    --sel: rgba(92, 191, 179, 0.14);
+    --sel-strong: rgba(92, 191, 179, 0.26);
+    --focus: #5cbfb3;
+    --danger: #ec7b67;
+    --danger-soft: rgba(236, 123, 103, 0.12);
+    --warn: #e6b450;
+    --warn-soft: rgba(230, 180, 80, 0.14);
+
+    --add-bg: rgba(77, 170, 103, 0.13);
+    --add-bg-strong: rgba(77, 170, 103, 0.3);
+    --add-ink: #8fd6a3;
+    --del-bg: rgba(220, 96, 74, 0.13);
+    --del-bg-strong: rgba(220, 96, 74, 0.3);
+    --del-ink: #f09a89;
+
+    --lane-0: #49c2b2;
+    --lane-1: #e9b04a;
+    --lane-2: #e57b93;
+    --lane-3: #719ff0;
+    --lane-4: #a98ae8;
+    --lane-5: #98c056;
+    --lane-6: #ec915c;
+    --lane-7: #8aa6b5;
+
+    --shadow-pop: 0 14px 36px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--bg);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-drag: none;
+  cursor: default;
+}
+img, svg, a { -webkit-user-drag: none; }
+body.dragging, body.dragging * { cursor: grabbing !important; }
+
+.mono { font-family: var(--font-mono); font-size: 12px; font-variant-ligatures: none; }
+.muted { color: var(--ink-2); }
+.faint { color: var(--ink-3); }
+.selectable { user-select: text; cursor: text; }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+button:disabled { cursor: default; opacity: 0.45; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 4px; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { background: var(--surface-2); }
+.btn:active:not(:disabled) { background: var(--surface-3); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.07); background: var(--accent); }
+.btn.danger { color: var(--danger); }
+.btn.danger.solid { background: var(--danger); color: #fff; border-color: var(--danger); }
+.btn.ghost { border-color: transparent; background: transparent; }
+.btn.ghost:hover:not(:disabled) { background: var(--surface-3); }
+.btn.small { height: 24px; padding: 0 8px; font-size: 12px; }
+
+input[type="text"], input[type="password"], input:not([type]), textarea, select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px 9px;
+  width: 100%;
+  user-select: text;
+}
+textarea { resize: none; line-height: 1.45; }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--accent-soft); }
+input::placeholder, textarea::placeholder { color: var(--ink-3); }
+input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-3); background-clip: content-box; border: 3px solid transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Ref pills share the lane colours of the graph. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  background: color-mix(in srgb, var(--c) 14%, var(--surface));
+  color: color-mix(in srgb, var(--c) 70%, var(--ink));
+}
+.pill.head { background: var(--c); color: var(--surface); border-color: var(--c); }
+.pill.remote { border-style: dashed; font-weight: 500; }
+.pill.tag { border-radius: 3px; --c: var(--ink-3); }
+
+.drop-over { box-shadow: inset 0 0 0 2px var(--accent) !important; background: var(--accent-soft) !important; }
+
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: var(--ink-3);
+}
+.empty strong { display: block; color: var(--ink-2); font-size: 14px; margin-bottom: 4px; font-weight: 600; }
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: var(--ink-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
