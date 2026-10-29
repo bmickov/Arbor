@@ -29,11 +29,11 @@
   $effect(() => {
     const f = file;
     const id = oid;
-    const s = app.diffSettings;
     if (!f) {
       diff = null;
       return;
     }
+    const s = app.diffSettingsFor(`${app.path}|${id}|${f}`);
     api.commitFileDiff(app.path, id, f, s).then((d) => {
       if (file === f && oid === id) {
         diff = d;
@@ -95,7 +95,7 @@
     </div>
 
     <div class="diff">
-      <DiffView {diff} loading={!!file && diffKey !== `${oid}:${file}`} mode="readonly" split={app.settings.splitDiff} image={{ old: info.parents[0] ?? null, new: info.oid }} />
+      <DiffView {diff} onshowall={() => app.largeDiffs.add(`${app.path}|${oid}|${file}`)} loading={!!file && diffKey !== `${oid}:${file}`} mode="readonly" split={app.settings.splitDiff} image={{ old: info.parents[0] ?? null, new: info.oid }} />
     </div>
   {/if}
 </div>

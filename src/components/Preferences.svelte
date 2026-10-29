@@ -211,7 +211,7 @@
                 <button class="link" disabled={s.uiSize === UI_SIZES.default} onclick={() => app.setUiSize(UI_SIZES.default)}>Reset</button>
               </div>
             </div>
-            <p class="hint">Also with <span class="kbd">Ctrl</span> <span class="kbd">=</span> and <span class="kbd">Ctrl</span> <span class="kbd">-</span> anywhere in Arbor.</p>
+            <p class="hint">Also with <span class="kbd">Ctrl</span> <span class="kbd">=</span> and <span class="kbd">Ctrl</span> <span class="kbd">-</span> anywhere in Arbor{s.codeFollowsUi ? ", which resize code and diffs along with it" : ""}.</p>
           </section>
 
           <section>
@@ -234,6 +234,10 @@
                 <button class="link" disabled={s.codeSize === CODE_SIZES.default} onclick={() => app.setCodeSize(CODE_SIZES.default)}>Reset</button>
               </div>
             </div>
+            <label class="toggle">
+              <input type="checkbox" checked={s.codeFollowsUi} onchange={() => { s.codeFollowsUi = !s.codeFollowsUi; save(); }} />
+              <span><b>Scale with interface text</b><small>When interface text gets bigger or smaller (here or with Ctrl+= and Ctrl+-), code and diffs change by the same amount, keeping the difference you set above. Turn this off to keep code at a fixed size. Ctrl+Alt+= and Ctrl+Alt+- always change code alone.</small></span>
+            </label>
             <div class="sample mono" aria-hidden="true">
               <div class="sl"><span class="n">12</span><span class="c">  const total = items.reduce((a, b) =&gt; a + b, 0);</span></div>
               <div class="sl del"><span class="n">13</span><span class="c">- return total;</span></div>
@@ -251,6 +255,17 @@
                 {/each}
               </div>
             </div>
+            <div class="row">
+              <span class="label">Large diffs</span>
+              <select aria-label="Ask before showing diffs larger than" value={String(s.largeDiffLines)}
+                onchange={(e) => { s.largeDiffLines = Number((e.currentTarget as HTMLSelectElement).value); save(); }}>
+                {#each [2000, 5000, 10000, 20000, 50000, 100000] as n}
+                  <option value={String(n)}>Ask first above {n.toLocaleString()} changed lines</option>
+                {/each}
+                <option value="0">Always show</option>
+              </select>
+            </div>
+            <p class="hint">Big diffs (often generated files or lock files) show a "Show diff" button instead of loading right away.</p>
             <label class="toggle">
               <input type="checkbox" checked={s.ignoreWhitespace} onchange={() => { s.ignoreWhitespace = !s.ignoreWhitespace; save(); }} />
               <span><b>Ignore whitespace changes</b><small>Hide lines that only differ in indentation or spacing.</small></span>
@@ -383,6 +398,7 @@
 
   .row { display: flex; align-items: center; gap: 16px; margin: 8px 0; }
   .label { width: 110px; color: var(--ink-2); flex: none; }
+  .row select { width: auto; }
   .seg { display: inline-flex; background: var(--surface-3); border-radius: 8px; padding: 2px; flex-wrap: wrap; }
   .seg button { padding: 4px 12px; border-radius: 6px; font-weight: 600; color: var(--ink-2); }
   .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }

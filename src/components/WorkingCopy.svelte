@@ -41,7 +41,6 @@
   $effect(() => {
     const sel = app.selectedFile;
     void app.version;
-    const settings = app.diffSettings;
     if (!sel) {
       diff = null;
       return;
@@ -49,6 +48,7 @@
     if (sel.area === "staged") selStaged = selStaged.has(sel.path) ? selStaged : new Set([sel.path]);
     else if (sel.area === "unstaged") selUnstaged = selUnstaged.has(sel.path) ? selUnstaged : new Set([sel.path]);
     const entry = st?.staged.find((f) => f.path === sel.path);
+    const settings = app.diffSettingsFor(`${app.path}|${sel.area}|${sel.path}`);
     loading = true;
     const req = sel.area === "staged"
       ? api.diffStaged(app.path, sel.path, entry?.oldPath ?? null, settings)
@@ -243,7 +243,7 @@
         <div class="empty"><div><strong>This file has conflicts</strong>Edit it to remove the conflict markers, then choose “Resolved”. Or keep one side entirely with “Mine” or “Theirs”.</div></div>
       {:else}
         <div class="dv">
-          <DiffView {diff} loading={diffKey !== `${app.selectedFile.area}:${app.selectedFile.path}`} mode={app.selectedFile.area} onaction={lineAction}
+          <DiffView {diff} onshowall={() => app.largeDiffs.add(`${app.path}|${app.selectedFile!.area}|${app.selectedFile!.path}`)} loading={diffKey !== `${app.selectedFile.area}:${app.selectedFile.path}`} mode={app.selectedFile.area} onaction={lineAction}
             image={{ old: app.selectedFile.area === "staged" || st?.head ? "HEAD" : null, new: null }} />
         </div>
       {/if}

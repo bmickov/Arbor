@@ -1,6 +1,6 @@
 [package]
 name = "arbor"
-version = "0.4.1"
+version = "0.4.2"
 description = "A Git client for Linux"
 edition = "2021"
 rust-version = "1.80"

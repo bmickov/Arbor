@@ -234,7 +234,7 @@ fn file_header(path: &str, new_file: bool) -> String {
 pub fn stage_lines(repo_path: &str, path: &str, sel: &[Selection], s: DiffSettings) -> Result<()> {
     let repo = open(repo_path)?;
     let d = diff::raw_unstaged(&repo, path, s)?;
-    let Some(fd) = (0..d.deltas().len()).find_map(|i| diff::file_diff(&d, i, true).ok().filter(|f| f.path == path)) else {
+    let Some(fd) = (0..d.deltas().len()).find_map(|i| diff::file_diff(&d, i, true, None).ok().filter(|f| f.path == path)) else {
         return err("That file has no unstaged changes any more.");
     };
     let map = selected_map(sel);
@@ -255,7 +255,7 @@ pub fn stage_lines(repo_path: &str, path: &str, sel: &[Selection], s: DiffSettin
 pub fn unstage_lines(repo_path: &str, path: &str, old_path: Option<&str>, sel: &[Selection], s: DiffSettings) -> Result<()> {
     let repo = open(repo_path)?;
     let d = diff::raw_staged(&repo, path, old_path, s)?;
-    let Some(fd) = (0..d.deltas().len()).find_map(|i| diff::file_diff(&d, i, true).ok().filter(|f| f.path == path)) else {
+    let Some(fd) = (0..d.deltas().len()).find_map(|i| diff::file_diff(&d, i, true, None).ok().filter(|f| f.path == path)) else {
         return err("That file has no staged changes any more.");
     };
     let map = selected_map(sel);
@@ -279,7 +279,7 @@ pub fn unstage_lines(repo_path: &str, path: &str, old_path: Option<&str>, sel: &
 pub fn discard_lines(repo_path: &str, path: &str, sel: &[Selection], s: DiffSettings) -> Result<()> {
     let repo = open(repo_path)?;
     let d = diff::raw_unstaged(&repo, path, s)?;
-    let Some(fd) = (0..d.deltas().len()).find_map(|i| diff::file_diff(&d, i, true).ok().filter(|f| f.path == path)) else {
+    let Some(fd) = (0..d.deltas().len()).find_map(|i| diff::file_diff(&d, i, true, None).ok().filter(|f| f.path == path)) else {
         return err("That file has no unstaged changes any more.");
     };
     let map = selected_map(sel);

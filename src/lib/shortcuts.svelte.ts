@@ -40,11 +40,12 @@ export const COMMANDS: Command[] = [
   { id: "undo", label: "Undo the last operation", group: "General", keys: ["Ctrl+Z"], repo: true, run: () => app.undo() },
 
   // Text size
-  { id: "ui.bigger", label: "Larger interface text", group: "Text size", keys: ["Ctrl+=", "Ctrl+Shift+="], inInputs: true, run: () => app.setUiSize(app.settings.uiSize + 1) },
-  { id: "ui.smaller", label: "Smaller interface text", group: "Text size", keys: ["Ctrl+-"], inInputs: true, run: () => app.setUiSize(app.settings.uiSize - 1) },
+  { id: "ui.bigger", label: "Larger text", group: "Text size", keys: ["Ctrl+=", "Ctrl+Shift+="], inInputs: true, run: () => app.setUiSize(app.settings.uiSize + 1) },
+  { id: "ui.smaller", label: "Smaller text", group: "Text size", keys: ["Ctrl+-"], inInputs: true, run: () => app.setUiSize(app.settings.uiSize - 1) },
   { id: "ui.reset", label: "Reset text sizes", group: "Text size", keys: ["Ctrl+0"], inInputs: true, run: () => {
     app.settings.codeSize = CODE_SIZES.default;
-    app.setUiSize(UI_SIZES.default);
+    app.settings.uiSize = UI_SIZES.default;
+    app.saveSettings();
   } },
   { id: "code.bigger", label: "Larger code text", group: "Text size", keys: ["Ctrl+Alt+="], inInputs: true, run: () => app.setCodeSize(app.settings.codeSize + 1) },
   { id: "code.smaller", label: "Smaller code text", group: "Text size", keys: ["Ctrl+Alt+-"], inInputs: true, run: () => app.setCodeSize(app.settings.codeSize - 1) },

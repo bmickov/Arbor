@@ -633,3 +633,30 @@ fn missing_newline_survives_the_wire_format() {
     assert_eq!(h["text"], "one\ntwo\ntwo\nthree");
     assert_eq!(h["noNl"], serde_json::json!([1, 3]));
 }
+
+#[test]
+fn large_diffs_are_held_back_until_asked_for() {
+    let r = Repo::new();
+    r.write("a.txt", "x\n");
+    r.commit_all("init");
+    r.write("a.txt", &lines(500));
+    let capped = DiffSettings { max_lines: Some(100), ..Default::default() };
+
+    let fd = git::diff::unstaged_file(&r.path, "a.txt", capped).unwrap().unwrap();
+    assert!(fd.held_back && fd.hunks.is_empty());
+    assert_eq!((fd.additions, fd.deletions), (500, 1), "counts are still filled in");
+
+    // Asking without a cap (the "Show diff" button) returns the lines.
+    let fd = git::diff::unstaged_file(&r.path, "a.txt", s()).unwrap().unwrap();
+    assert!(!fd.held_back && fd.hunks[0].lines.len() == 501);
+
+    // A cap above the change size changes nothing; 0 means no cap.
+    let fd = git::diff::unstaged_file(&r.path, "a.txt", DiffSettings { max_lines: Some(1000), ..Default::default() }).unwrap().unwrap();
+    assert!(!fd.held_back);
+    let fd = git::diff::unstaged_file(&r.path, "a.txt", DiffSettings { max_lines: Some(0), ..Default::default() }).unwrap().unwrap();
+    assert!(!fd.held_back);
+
+    // Staging lines works regardless of the cap (it never holds back).
+    git::patch::stage_lines(&r.path, "a.txt", &[Selection { hunk: 0, lines: vec![1] }], capped).unwrap();
+    assert_eq!(r.staged_content("a.txt"), "x\nline 1\n");
+}

@@ -3,6 +3,7 @@
 // `app.run`, which handles busy state, errors, auth prompts and refreshes.
 
 import { listen } from "@tauri-apps/api/event";
+import { SvelteSet } from "svelte/reactivity";
 import {
   api, type CommitRow, type Creds, type DiffSettings, type Refs, type RepoInfo,
   type StashEntry, type UndoEntry, type WorkingStatus,
@@ -83,6 +84,10 @@ export interface Settings {
   codeFont: "commit" | "system";
   /** Code and diff text size in px (default 12). */
   codeSize: number;
+  /** Changing the interface size changes the code size by the same amount. */
+  codeFollowsUi: boolean;
+  /** Ask before showing diffs with more changed lines than this; 0 never asks. */
+  largeDiffLines: number;
   /** Custom key bindings by command id; missing ids use the defaults. */
   shortcuts: Record<string, string[]>;
   /** Reopen tabs, views, selections, layout and window size on startup. */
@@ -91,7 +96,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false,
   theme: "system", uiFont: "atkinson", uiSize: 13, codeFont: "commit", codeSize: 12, shortcuts: {},
-  restoreSession: true,
+  restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000,
 };
 export const UI_SIZES = { min: 10, max: 20, default: 13 };
 export const CODE_SIZES = { min: 9, max: 22, default: 12 };
@@ -177,7 +182,16 @@ class App {
   }
 
   get diffSettings(): DiffSettings {
-    return { context: this.settings.context, ignoreWhitespace: this.settings.ignoreWhitespace };
+    return { context: this.settings.context, ignoreWhitespace: this.settings.ignoreWhitespace, maxLines: this.settings.largeDiffLines };
+  }
+
+  /** Large diffs the user chose to show this session ("repo|commit or area|path"). */
+  largeDiffs = new SvelteSet<string>();
+
+  /** Diff settings for one file: no line cap once its large diff was shown. */
+  diffSettingsFor(key: string): DiffSettings {
+    const s = this.diffSettings;
+    return this.largeDiffs.has(key) ? { ...s, maxLines: 0 } : s;
   }
 
   saveSettings() {
@@ -185,11 +199,20 @@ class App {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
     } catch {}
     applyAppearance(this.settings);
-    this.version++;
+    // No reload needed: diffs re-fetch on their own when a setting they use
+    // (context, whitespace, large-diff limit) changes, and text-size changes
+    // are pure CSS — reloading would refetch big diffs on every Ctrl+=.
   }
 
   setUiSize(n: number) {
+    const before = this.settings.uiSize;
     this.settings.uiSize = Math.min(UI_SIZES.max, Math.max(UI_SIZES.min, Math.round(n)));
+    // Code keeps its offset from the interface size (12 vs 13 by default), so
+    // zooming with Ctrl+= / Ctrl+- scales diffs too.
+    if (this.settings.codeFollowsUi) {
+      const d = this.settings.uiSize - before;
+      this.settings.codeSize = Math.min(CODE_SIZES.max, Math.max(CODE_SIZES.min, this.settings.codeSize + d));
+    }
     this.saveSettings();
   }
 

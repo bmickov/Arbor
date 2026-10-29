@@ -39,6 +39,8 @@ pub struct FileDiff {
     pub status: &'static str,
     pub binary: bool,
     pub too_large: bool,
+    /// Bigger than the caller's `max_lines`: lines left out until asked for.
+    pub held_back: bool,
     pub additions: usize,
     pub deletions: usize,
     pub old_mode: u32,
@@ -87,6 +89,9 @@ impl Serialize for Hunk {
 pub struct DiffSettings {
     pub context: Option<u32>,
     pub ignore_whitespace: Option<bool>,
+    /// Leave the lines out (`held_back`) when more lines than this changed.
+    /// None or 0 always includes them.
+    pub max_lines: Option<usize>,
 }
 
 fn status_name(d: Delta) -> &'static str {
@@ -119,8 +124,9 @@ fn find_renames(diff: &mut Diff) -> Result<()> {
 }
 
 /// Convert delta `idx` of `diff` into a FileDiff. With `with_lines` false only
-/// the summary (paths, status, counts) is filled in.
-pub fn file_diff(diff: &Diff, idx: usize, with_lines: bool) -> Result<FileDiff> {
+/// the summary (paths, status, counts) is filled in; the same happens, with
+/// `held_back` set, when more than `max_lines` lines changed.
+pub fn file_diff(diff: &Diff, idx: usize, with_lines: bool, max_lines: Option<usize>) -> Result<FileDiff> {
     let delta = diff.get_delta(idx).expect("delta index in range");
     let new_path = delta.new_file().path().map(|p| p.to_string_lossy().to_string());
     let old_path = delta.old_file().path().map(|p| p.to_string_lossy().to_string());
@@ -131,6 +137,7 @@ pub fn file_diff(diff: &Diff, idx: usize, with_lines: bool) -> Result<FileDiff> 
         status: status_name(delta.status()),
         binary: false,
         too_large: false,
+        held_back: false,
         additions: 0,
         deletions: 0,
         old_mode: u32::from(delta.old_file().mode()),
@@ -149,6 +156,10 @@ pub fn file_diff(diff: &Diff, idx: usize, with_lines: bool) -> Result<FileDiff> 
     fd.additions = adds;
     fd.deletions = dels;
     if !with_lines {
+        return Ok(fd);
+    }
+    if max_lines.is_some_and(|m| m > 0 && adds + dels > m) {
+        fd.held_back = true;
         return Ok(fd);
     }
     if patch.size(true, false, false) > MAX_TEXT_BYTES {
@@ -185,13 +196,13 @@ pub fn file_diff(diff: &Diff, idx: usize, with_lines: bool) -> Result<FileDiff> 
     Ok(fd)
 }
 
-fn pick(diff: &Diff, path: &str) -> Result<Option<FileDiff>> {
+fn pick(diff: &Diff, path: &str, max_lines: Option<usize>) -> Result<Option<FileDiff>> {
     for i in 0..diff.deltas().len() {
         let d = diff.get_delta(i).unwrap();
         let np = d.new_file().path().map(|p| p.to_string_lossy().to_string());
         let op = d.old_file().path().map(|p| p.to_string_lossy().to_string());
         if np.as_deref() == Some(path) || (np.is_none() && op.as_deref() == Some(path)) {
-            return Ok(Some(file_diff(diff, i, true)?));
+            return Ok(Some(file_diff(diff, i, true, max_lines)?));
         }
     }
     Ok(None)
@@ -226,13 +237,13 @@ pub fn raw_staged<'a>(repo: &'a Repository, path: &str, old_path: Option<&str>, 
 pub fn unstaged_file(repo_path: &str, path: &str, s: DiffSettings) -> Result<Option<FileDiff>> {
     let repo = open(repo_path)?;
     let d = raw_unstaged(&repo, path, s)?;
-    pick(&d, path)
+    pick(&d, path, s.max_lines)
 }
 
 pub fn staged_file(repo_path: &str, path: &str, old_path: Option<&str>, s: DiffSettings) -> Result<Option<FileDiff>> {
     let repo = open(repo_path)?;
     let d = raw_staged(&repo, path, old_path, s)?;
-    pick(&d, path)
+    pick(&d, path, s.max_lines)
 }
 
 /// Diffs that make up a commit: against its first parent (or nothing for a
@@ -261,7 +272,7 @@ pub fn commit_files(repo_path: &str, id: &str) -> Result<Vec<FileDiff>> {
     let mut out = vec![];
     for d in commit_diffs(&repo, id, DiffSettings::default())? {
         for i in 0..d.deltas().len() {
-            let f = file_diff(&d, i, false)?;
+            let f = file_diff(&d, i, false, None)?;
             if out.iter().any(|x: &FileDiff| x.path == f.path) {
                 continue;
             }
@@ -274,7 +285,7 @@ pub fn commit_files(repo_path: &str, id: &str) -> Result<Vec<FileDiff>> {
 pub fn commit_file(repo_path: &str, id: &str, path: &str, s: DiffSettings) -> Result<Option<FileDiff>> {
     let repo = open(repo_path)?;
     for d in commit_diffs(&repo, id, s)? {
-        if let Some(f) = pick(&d, path)? {
+        if let Some(f) = pick(&d, path, s.max_lines)? {
             return Ok(Some(f));
         }
     }

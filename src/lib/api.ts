@@ -36,7 +36,10 @@ export interface DiffLine { origin: " " | "+" | "-"; content: string; nl: boolea
 export interface Hunk { header: string; oldStart: number; oldLines: number; newStart: number; newLines: number; lines: DiffLine[] }
 export interface FileDiff {
   path: string; oldPath: string | null; status: FileStatus;
-  binary: boolean; tooLarge: boolean; additions: number; deletions: number;
+  binary: boolean; tooLarge: boolean;
+  /** More lines changed than `maxLines`: the hunks were left out until asked for. */
+  heldBack: boolean;
+  additions: number; deletions: number;
   oldMode: number; newMode: number; hunks: Hunk[];
 }
 /** A hunk as the backend sends it: column-wise, see `impl Serialize for Hunk`. */
@@ -66,7 +69,7 @@ function decodeHunk(w: WireHunk): Hunk {
 
 const decodeDiff = (d: WireDiff | null): FileDiff | null => (d ? { ...d, hunks: d.hunks.map(decodeHunk) } : null);
 
-export interface DiffSettings { context?: number; ignoreWhitespace?: boolean }
+export interface DiffSettings { context?: number; ignoreWhitespace?: boolean; maxLines?: number }
 export interface Selection { hunk: number; lines: number[] }
 
 export interface RefLabel { kind: "head" | "local" | "remote" | "tag"; name: string }

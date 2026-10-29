@@ -29,7 +29,7 @@
     const s = sel;
     if (!s) return;
     const k = `${s.commit.oid}:${s.path}`;
-    api.commitFileDiff(app.path, s.commit.oid, s.path, app.diffSettings)
+    api.commitFileDiff(app.path, s.commit.oid, s.path, app.diffSettingsFor(`${app.path}|${s.commit.oid}|${s.path}`))
       .then((d) => { if (sel === s) { diff = d; diffKey = k; } })
       .catch(() => { if (sel === s) { diff = null; diffKey = k; } });
   });
@@ -90,7 +90,7 @@
           {/each}
         </div>
         <div class="diff">
-          <DiffView {diff} loading={!!sel && diffKey !== `${sel.commit.oid}:${sel.path}`} mode="readonly" split={app.settings.splitDiff} image={sel ? { old: sel.commit.parents[0] ?? null, new: sel.commit.oid } : null} />
+          <DiffView {diff} onshowall={() => sel && app.largeDiffs.add(`${app.path}|${sel.commit.oid}|${sel.path}`)} loading={!!sel && diffKey !== `${sel.commit.oid}:${sel.path}`} mode="readonly" split={app.settings.splitDiff} image={sel ? { old: sel.commit.parents[0] ?? null, new: sel.commit.oid } : null} />
         </div>
       </div>
     {:else if blame}
