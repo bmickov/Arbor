@@ -10,6 +10,7 @@ pub mod branches;
 pub mod commit;
 pub mod diff;
 pub mod hooks;
+pub mod library;
 pub mod log;
 pub mod merge;
 pub mod patch;
@@ -149,4 +150,13 @@ pub fn advance_head(repo: &Repository, new: Oid, reflog: &str) -> Result<()> {
 /// A commit's first line ("" when it can't be decoded).
 pub fn summary(c: &git2::Commit) -> String {
     c.summary().ok().flatten().unwrap_or("").to_string()
+}
+
+/// Where Arbor keeps its settings (`~/.config/arbor`). `ARBOR_CONFIG_DIR`
+/// overrides it, which the tests use to stay out of the real config.
+pub fn config_dir() -> Option<std::path::PathBuf> {
+    if let Some(d) = std::env::var_os("ARBOR_CONFIG_DIR") {
+        return Some(d.into());
+    }
+    dirs::config_dir().map(|d| d.join("arbor"))
 }

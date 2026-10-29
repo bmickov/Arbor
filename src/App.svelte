@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "./lib/api";
+  import { library } from "./lib/library.svelte";
   import { app } from "./lib/state.svelte";
   import { dialog, menu } from "./lib/ui.svelte";
   import Dialog from "./components/Dialog.svelte";
@@ -11,26 +12,29 @@
   import StashView from "./components/StashView.svelte";
   import Toasts from "./components/Toasts.svelte";
   import Toolbar from "./components/Toolbar.svelte";
-  import Welcome from "./components/Welcome.svelte";
+  import RepoManager from "./components/RepoManager.svelte";
+  import TabBar from "./components/TabBar.svelte";
   import WorkingCopy from "./components/WorkingCopy.svelte";
 
   let sideW = $state(240);
 
-  // Open the folder given on the command line, or else the last repository.
+  // Load the library, then reopen last session's tabs (plus any folder
+  // given on the command line).
   $effect(() => {
-    api.startupPath().catch(() => null).then((p) => {
-      let last: string | null = null;
-      try {
-        last = localStorage.getItem("arbor.last");
-      } catch {}
-      const target = p ?? last;
-      if (target && !app.repo) app.open(target);
-    });
+    (async () => {
+      await library.ensure().catch(() => {});
+      const p = await api.startupPath().catch(() => null);
+      await app.restoreTabs(p);
+    })();
   });
+
+  // Keep the status dots on background tabs reasonably fresh.
   $effect(() => {
-    try {
-      if (app.repo) localStorage.setItem("arbor.last", app.repo.path);
-    } catch {}
+    const t = setInterval(() => {
+      const bg = app.tabs.filter((_, i) => i !== app.active).map((t) => t.path);
+      if (bg.length && document.hasFocus() && app.active >= 0) library.refreshSummaries(bg);
+    }, 30000);
+    return () => clearInterval(t);
   });
 
   // Pick up changes made in an editor or terminal.
@@ -50,10 +54,33 @@
   });
 
   function key(e: KeyboardEvent) {
-    if (!app.repo || dialog.spec) return;
+    if (dialog.spec) return;
     const t = e.target as HTMLElement;
     const typing = t.closest("input, textarea, select, [contenteditable]");
     const mod = e.ctrlKey || e.metaKey;
+    // Tabs work everywhere, including the repository manager.
+    if (mod && e.key.toLowerCase() === "t") {
+      e.preventDefault();
+      app.switchTo(-1);
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "w") {
+      e.preventDefault();
+      if (app.active >= 0) app.closeTab(app.active);
+      return;
+    }
+    if ((mod && (e.key === "Tab" || e.code === "Tab")) || (mod && (e.key === "PageDown" || e.key === "PageUp"))) {
+      e.preventDefault();
+      app.cycleTab(e.key === "PageUp" || e.shiftKey ? -1 : 1);
+      return;
+    }
+    if (e.altKey && /^[1-9]$/.test(e.key)) {
+      e.preventDefault();
+      const i = Number(e.key) - 1;
+      app.switchTo(e.key === "9" ? app.tabs.length - 1 : Math.min(i, app.tabs.length - 1));
+      return;
+    }
+    if (!app.repo) return;
     if (mod && e.key.toLowerCase() === "z" && !e.shiftKey && !typing) {
       e.preventDefault();
       app.undo();
@@ -78,27 +105,30 @@
 <!-- The UI has its own menus; suppress the browser's. -->
 <svelte:document oncontextmenu={(e) => { if (!(e.target as HTMLElement).closest("input, textarea")) e.preventDefault(); }} />
 
-{#if app.repo}
-  <div class="shell" style:--side-w="{sideW}px">
-    <div class="top"><Toolbar /></div>
-    <aside><Sidebar /></aside>
-    <div class="resize" role="separator" aria-orientation="vertical" onpointerdown={resizeSide}></div>
-    <main>
-      {#if app.view === "changes"}
-        <WorkingCopy />
-      {:else if app.view === "history"}
-        <History />
-      {:else}
-        <StashView />
-      {/if}
-    </main>
-  </div>
-  {#if app.fileHistoryPath}
-    <FileHistory path={app.fileHistoryPath} onclose={() => (app.fileHistoryPath = null)} />
+<div class="window">
+  <TabBar />
+  {#if app.repo}
+    <div class="shell" style:--side-w="{sideW}px">
+      <div class="top"><Toolbar /></div>
+      <aside><Sidebar /></aside>
+      <div class="resize" role="separator" aria-orientation="vertical" onpointerdown={resizeSide}></div>
+      <main>
+        {#if app.view === "changes"}
+          <WorkingCopy />
+        {:else if app.view === "history"}
+          <History />
+        {:else}
+          <StashView />
+        {/if}
+      </main>
+    </div>
+    {#if app.fileHistoryPath}
+      <FileHistory path={app.fileHistoryPath} onclose={() => (app.fileHistoryPath = null)} />
+    {/if}
+  {:else}
+    <div class="home"><RepoManager /></div>
   {/if}
-{:else}
-  <Welcome />
-{/if}
+</div>
 
 <Menu />
 <Dialog />
@@ -106,8 +136,10 @@
 <DragGhost />
 
 <style>
+  .window { display: flex; flex-direction: column; height: 100%; }
+  .home { flex: 1; min-height: 0; }
   .shell {
-    display: grid; height: 100%;
+    display: grid; flex: 1; min-height: 0;
     grid-template-columns: var(--side-w) 1px 1fr;
     grid-template-rows: auto 1fr;
     grid-template-areas: "top top top" "side resize main";

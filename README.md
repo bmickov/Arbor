@@ -9,6 +9,17 @@ contains none of their code or artwork.
 
 ## Features
 
+**Many repositories**
+- A repository manager (Ctrl+T) lists every repository you've added, with its
+  branch, commits to push and pull, uncommitted changes, stashes and latest commit
+- Organise repositories into groups by dragging them; rename or reorder groups
+- "Find repositories in a folder" scans something like `~/code` and adds
+  everything inside it in one go, optionally as a group
+- Fetch all repositories (or one group) at once
+- Open repositories in tabs; each tab keeps its own view, selection and history
+  position. Your tabs come back next time you start Arbor
+- Folders that moved or were deleted are flagged, with Locate… and Remove
+
 **Working copy**
 - Stage, unstage or discard whole files, single hunks, or individual lines
   (click a line, shift-click or drag to extend, ctrl-click to toggle)
@@ -69,13 +80,19 @@ sudo dnf install ./Arbor-0.1.0-1.x86_64.rpm
 chmod +x Arbor_0.1.0_amd64.AppImage && ./Arbor_0.1.0_amd64.AppImage
 ```
 
-Run `arbor /path/to/repo` to open a repository directly. Without an argument,
-Arbor reopens the last repository you used.
+Run `arbor /path/to/repo` to open a repository directly in a new tab.
+Without an argument, Arbor reopens the tabs from your last session.
+
+The repository list lives in `~/.config/arbor/library.json`.
 
 ## Keyboard
 
 | Keys | Action |
 | --- | --- |
+| Ctrl+T | Show all repositories |
+| Ctrl+W | Close the current tab |
+| Ctrl+Tab, Ctrl+PageDown / PageUp | Next / previous tab |
+| Alt+1 … Alt+9 | Go to tab 1–8, or the last tab |
 | Ctrl+Z | Undo the last operation |
 | Ctrl+Enter | Commit (in the message fields) |
 | Ctrl+R | Refresh |

@@ -7,7 +7,10 @@ export type Payload =
   | { kind: "remote-branch"; fullName: string }
   | { kind: "commit"; oid: string; summary: string }
   | { kind: "files"; paths: string[]; from: "staged" | "unstaged" }
-  | { kind: "stash"; index: number; message: string };
+  | { kind: "stash"; index: number; message: string }
+  | { kind: "repos"; paths: string[] }
+  | { kind: "group"; id: string }
+  | { kind: "tab"; index: number };
 
 interface Target {
   accepts: (p: Payload) => boolean;

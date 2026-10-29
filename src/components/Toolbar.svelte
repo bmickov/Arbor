@@ -2,15 +2,20 @@
   import { open as pickFolder } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
   import * as act from "../lib/actions";
+  import { library } from "../lib/library.svelte";
   import { app } from "../lib/state.svelte";
   import { menu, type MenuItem } from "../lib/ui.svelte";
   import Icon from "./Icon.svelte";
 
   const st = $derived(app.status);
 
-  async function repoMenu(e: MouseEvent) {
-    const recent = (await api.recentRepos()).filter((r) => r.path !== app.path).slice(0, 8);
+  function repoMenu(e: MouseEvent) {
+    const recent = [...library.repos]
+      .filter((r) => r.path !== app.path && r.opened)
+      .sort((a, b) => b.opened - a.opened)
+      .slice(0, 8);
     const items: MenuItem[] = [
+      { label: "All repositories", hint: "Ctrl+T", action: () => app.switchTo(-1) },
       { label: "Open repository…", action: async () => {
         const d = await pickFolder({ directory: true });
         if (typeof d === "string") app.open(d);
@@ -22,7 +27,7 @@
       { label: "Open terminal here", action: () => api.openTerminal(app.path) },
       { label: "Add remote…", action: act.addRemote },
       { separator: true },
-      { label: "Close repository", action: () => app.close() },
+      { label: "Close tab", hint: "Ctrl+W", action: () => app.closeTab(app.active) },
     ];
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     menu.open(r.left, r.bottom + 4, items);

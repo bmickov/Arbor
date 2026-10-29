@@ -213,7 +213,7 @@
         <div class="ftitle">
           <span class="path" title={entry.path}>
             {#if entry.oldPath}<span class="faint">{entry.oldPath} →</span>{/if}
-            {entry.path}
+            <bdi>{entry.path}</bdi>
           </span>
           {#if diff && !diff.binary}
             <span class="stats"><span class="plus">+{diff.additions}</span> <span class="minus">−{diff.deletions}</span></span>
