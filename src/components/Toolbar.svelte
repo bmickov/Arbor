@@ -91,7 +91,7 @@
       <span class="busy" role="status"><span class="spinner"></span>{app.busy}{app.progress ? ` · ${app.progress}` : "…"}</span>
     {/if}
     <button class="icon" onclick={() => app.refresh(true)} title="Refresh (Ctrl+R)" aria-label="Refresh"><Icon name="refresh" /></button>
-    <button class="icon" onclick={() => (app.prefs = "appearance")} title="Preferences (Ctrl+,)" aria-label="Preferences"><Icon name="settings" /></button>
+    <button class="icon" onclick={() => (app.prefs = "general")} title="Preferences (Ctrl+,)" aria-label="Preferences"><Icon name="settings" /></button>
   </div>
 </header>
 

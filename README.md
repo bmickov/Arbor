@@ -17,8 +17,18 @@ contains none of their code or artwork.
   everything inside it in one go, optionally as a group
 - Fetch all repositories (or one group) at once
 - Open repositories in tabs; each tab keeps its own view, selection and history
-  position. Your tabs come back next time you start Arbor
+  position
 - Folders that moved or were deleted are flagged, with Locate… and Remove
+
+**Pick up where you left off**
+- When you quit and start Arbor again, it reopens your tabs on the same tab,
+  and each one comes back on the same view (Changes, History or Stashes), with
+  the same selected commit, file or stash, history search, branch filter and
+  scroll position
+- The sidebar width and hidden state, the history split, expanded sidebar
+  sections, and the window's size, position and maximised state come back too
+- On by default; turn it off in Preferences → General to start on the
+  repository list every time
 
 **Working copy**
 - Stage, unstage or discard whole files, single hunks, or individual lines
@@ -71,24 +81,26 @@ Pick the package for your distribution from the release files:
 
 ```sh
 # Debian, Ubuntu, Mint, Pop!_OS
-sudo apt install ./Arbor_0.3.0_amd64.deb
+sudo apt install ./Arbor_0.4.0_amd64.deb
 
 # Fedora, openSUSE
-sudo dnf install ./Arbor-0.3.0-1.x86_64.rpm
+sudo dnf install ./Arbor-0.4.0-1.x86_64.rpm
 
 # Anything else
-chmod +x Arbor_0.3.0_amd64.AppImage && ./Arbor_0.3.0_amd64.AppImage
+chmod +x Arbor_0.4.0_amd64.AppImage && ./Arbor_0.4.0_amd64.AppImage
 ```
 
 Run `arbor /path/to/repo` to open a repository directly in a new tab.
-Without an argument, Arbor reopens the tabs from your last session.
+Without an argument, Arbor picks up where you left off (unless that's turned off).
 
-The repository list lives in `~/.config/arbor/library.json`.
+The repository list lives in `~/.config/arbor/library.json`; the window's
+size and position in `~/.config/app.arbor.git/.window-state.json`.
 
 ## Preferences
 
 Open with **Ctrl+,** or the sliders button.
 
+- **General:** pick up where you left off (on by default)
 - **Theme:** System (follows your desktop), Arbor Light, Arbor Dark, or
   **Ubuntu Dark**, which matches Ubuntu's Yaru dark style with Ubuntu orange accents
 - **Interface text:** Atkinson Hyperlegible or your system font, 10–20 px

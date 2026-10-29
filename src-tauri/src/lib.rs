@@ -7,7 +7,7 @@ use git::patch::Selection;
 use git::rebase::Step;
 use git::remote::{Creds, Progress};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 type R<T> = std::result::Result<T, String>;
 
@@ -377,6 +377,22 @@ fn open_terminal(path: String) -> R<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Window size and position are saved on exit; the UI decides whether
+        // to restore them (the "pick up where you left off" preference).
+        .plugin(tauri_plugin_window_state::Builder::default().skip_initial_state("main").build())
+        .setup(|app| {
+            // The window starts hidden so restoring its size doesn't flicker.
+            // The UI shows it once ready; this is a fallback if it never does.
+            if let Some(w) = app.get_webview_window("main") {
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    if !w.is_visible().unwrap_or(true) {
+                        let _ = w.show();
+                    }
+                });
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_repo, init_repo, clone_repo, recent_repos, forget_repo,
             library_get, library_save, library_add_many, scan_folder, repo_summaries,
