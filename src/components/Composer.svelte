@@ -93,11 +93,32 @@
   }
 
   const over = $derived(subject.length > 72);
+
+  // Commit and focus requests from keyboard shortcuts.
+  let summaryEl = $state<HTMLInputElement>();
+  const fresh = (t: number) => Date.now() - t < 1500;
+  let seenCommit = 0;
+  let seenFocus = 0;
+  $effect(() => {
+    const t = app.commitRequest;
+    if (t > seenCommit && fresh(t) && summaryEl) {
+      seenCommit = t;
+      if (canCommit) commit();
+      else summaryEl.focus();
+    }
+  });
+  $effect(() => {
+    const t = app.focusComposer;
+    if (t > seenFocus && fresh(t) && summaryEl) {
+      seenFocus = t;
+      summaryEl.focus();
+    }
+  });
 </script>
 
 <div class="composer">
   <div class="subject">
-    <input placeholder={amend ? "Message of the amended commit" : "Summary"} bind:value={subject} onkeydown={key} spellcheck="true" aria-label="Commit summary" />
+    <input bind:this={summaryEl} placeholder={amend ? "Message of the amended commit" : "Summary"} bind:value={subject} onkeydown={key} spellcheck="true" aria-label="Commit summary" />
     <span class="len" class:over title="Keep the summary under 72 characters">{subject.length || ""}</span>
   </div>
   <textarea rows="3" placeholder="Description" bind:value={body} onkeydown={key} spellcheck="true" aria-label="Commit description"></textarea>
@@ -113,9 +134,9 @@
   .composer { border-top: 1px solid var(--line); padding: 10px; display: flex; flex-direction: column; gap: 6px; background: var(--surface-2); }
   .subject { position: relative; }
   .subject input { font-weight: 600; padding-right: 36px; }
-  .len { position: absolute; right: 9px; top: 50%; translate: 0 -50%; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .len { position: absolute; right: 9px; top: 50%; translate: 0 -50%; font-size: calc(var(--fs) * 11); color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .len.over { color: var(--danger); font-weight: 700; }
-  .row { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--ink-2); }
+  .row { display: flex; align-items: center; gap: 12px; font-size: calc(var(--fs) * 12); color: var(--ink-2); }
   label { display: flex; align-items: center; gap: 5px; }
   .sp { flex: 1; }
 </style>

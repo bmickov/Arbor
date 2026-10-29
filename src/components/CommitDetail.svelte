@@ -95,33 +95,32 @@
 <style>
   .cd { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .head { padding: 14px 16px 10px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
-  h2 { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.35; }
+  h2 { margin: 0; font-size: calc(var(--fs) * 15); font-weight: 700; line-height: 1.35; }
   .body {
     margin: 0; font-family: var(--font-ui); white-space: pre-wrap; color: var(--ink-2);
     max-height: 140px; overflow: auto;
   }
   .meta { display: flex; align-items: center; gap: 10px; }
-  .who { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 12px; }
+  .who { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: calc(var(--fs) * 12); }
   .who > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .avatar {
     width: 30px; height: 30px; border-radius: 50%; flex: none; display: grid; place-items: center;
-    font-size: 11px; font-weight: 700; background: hsl(var(--h) 45% 88%); color: hsl(var(--h) 45% 28%);
+    font-size: calc(var(--fs) * 11); font-weight: 700; background: hsl(var(--h) var(--av-bg-s) var(--av-bg-l)); color: hsl(var(--h) var(--av-ink-s) var(--av-ink-l));
   }
-  @media (prefers-color-scheme: dark) { .avatar { background: hsl(var(--h) 30% 26%); color: hsl(var(--h) 55% 82%); } }
   .sha { padding: 3px 7px; border-radius: 5px; border: 1px solid var(--line); color: var(--ink-2); }
   .sha:hover { background: var(--surface-2); }
-  .parents { font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .parents { font-size: calc(var(--fs) * 12); display: flex; gap: 6px; align-items: center; }
   .plink { color: var(--accent); }
   .plink:hover { text-decoration: underline; }
 
   .files { max-height: 34%; overflow-y: auto; padding: 4px 6px 6px; border-bottom: 1px solid var(--line); flex: none; }
-  .fsum { font-size: 12px; padding: 4px 8px 4px; }
+  .fsum { font-size: calc(var(--fs) * 12); padding: 4px 8px 4px; }
   .file { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; padding: 0 8px; border-radius: 5px; text-align: left; }
   .file:hover { background: var(--surface-2); }
   .file.sel { background: var(--sel); }
   .st {
     width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center;
-    font-size: 10px; font-weight: 700; font-family: var(--font-mono); color: var(--ink-2); background: var(--surface-3);
+    font-size: calc(var(--fs) * 10); font-weight: 700; font-family: var(--font-mono); color: var(--ink-2); background: var(--surface-3);
   }
   .st.added, .st.untracked { color: var(--add-ink); background: var(--add-bg-strong); }
   .st.deleted { color: var(--del-ink); background: var(--del-bg-strong); }
@@ -129,8 +128,8 @@
   .st.renamed { color: var(--lane-3); background: color-mix(in srgb, var(--lane-3) 18%, transparent); }
   .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .name b { font-weight: 600; }
-  .dir { color: var(--ink-3); font-size: 12px; }
-  .counts { font-size: 11px; white-space: nowrap; }
+  .dir { color: var(--ink-3); font-size: calc(var(--fs) * 12); }
+  .counts { font-size: calc(var(--cs) * 11); white-space: nowrap; }
   .plus { color: var(--add-ink); }
   .minus { color: var(--del-ink); }
   .diff { flex: 1; min-height: 0; }

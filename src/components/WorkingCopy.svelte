@@ -259,13 +259,13 @@
     border-radius: 8px; background: var(--warn-soft); color: var(--ink);
   }
   .banner :global(svg) { color: var(--warn); flex: none; margin-top: 1px; }
-  .banner div { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+  .banner div { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: calc(var(--fs) * 12); }
   section header { display: flex; align-items: baseline; gap: 6px; padding: 12px 14px 4px; }
-  h3 { margin: 0; font-size: 12px; font-weight: 700; color: var(--ink-2); }
+  h3 { margin: 0; font-size: calc(var(--fs) * 12); font-weight: 700; color: var(--ink-2); }
   h3.conf { color: var(--danger); }
-  .n { font-size: 12px; color: var(--ink-3); }
+  .n { font-size: calc(var(--fs) * 12); color: var(--ink-3); }
   .sp { flex: 1; }
-  .link { font-size: 12px; color: var(--accent); font-weight: 600; }
+  .link { font-size: calc(var(--fs) * 12); color: var(--accent); font-weight: 600; }
   .link:hover { text-decoration: underline; }
   .files { padding: 2px 6px; }
   .cfile { display: flex; align-items: center; gap: 4px; padding: 3px 4px 3px 8px; border-radius: 5px; }
@@ -279,7 +279,7 @@
   }
   .ftitle { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
   .path { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
-  .stats { font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
+  .stats { font-family: var(--font-mono); font-size: calc(var(--cs) * 11); white-space: nowrap; }
   .plus { color: var(--add-ink); }
   .minus { color: var(--del-ink); }
   .factions { display: flex; gap: 6px; }

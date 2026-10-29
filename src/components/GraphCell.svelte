@@ -6,7 +6,7 @@
     g: GraphRow; h: number; lane: number; lanes: number; head?: boolean; merge?: boolean;
   } = $props();
 
-  const pad = 8;
+  const pad = 6;
   const x = (i: number) => pad + i * lane + lane / 2;
   const cy = $derived(h / 2);
 
@@ -27,16 +27,16 @@
   {/each}
   {#if g.col < lanes}
     {#if merge}
-      <circle cx={x(g.col)} cy={cy} r="3.6" fill={laneVar(g.color)} />
+      <circle cx={x(g.col)} cy={cy} r="2.6" fill={laneVar(g.color)} />
     {:else}
-      <circle cx={x(g.col)} cy={cy} r={head ? 6 : 5} class:head fill={head ? laneVar(g.color) : "var(--surface)"} stroke={laneVar(g.color)} />
+      <circle cx={x(g.col)} cy={cy} r={head ? 4.5 : 3.6} class:head fill={head ? laneVar(g.color) : "var(--surface)"} stroke={laneVar(g.color)} />
     {/if}
   {/if}
 </svg>
 
 <style>
   svg { display: block; flex: none; overflow: visible; }
-  path { fill: none; stroke-width: 2.6; stroke-linecap: round; }
-  circle { stroke-width: 2.6; }
-  circle.head { stroke: var(--surface); stroke-width: 2; filter: drop-shadow(0 0 0 currentColor); }
+  path { fill: none; stroke-width: 2; stroke-linecap: round; }
+  circle { stroke-width: 2; }
+  circle.head { stroke: var(--surface); stroke-width: 1.5; }
 </style>

@@ -558,3 +558,28 @@ fn library_scan_and_summaries() {
     assert!(!missing.ok);
     assert_eq!(missing.error.as_deref(), Some("Folder not found"));
 }
+
+#[test]
+fn conflicting_stash_pop_keeps_the_stash() {
+    let r = Repo::new();
+    r.write("f.txt", "base\n");
+    r.commit_all("base");
+    r.write("f.txt", "stashed version\n");
+    git::stash::save(&r.path, Some("mine"), false, false, true).unwrap();
+    r.write("f.txt", "committed version\n");
+    r.commit_all("other");
+    let e = git::stash::pop(&r.path, 0, true).unwrap_err().to_string();
+    assert!(e.contains("kept"), "{e}");
+    assert_eq!(git::stash::list(&r.path).unwrap().len(), 1, "stash must survive a conflicted pop");
+    // A clean pop still drops it.
+    r.git(&["checkout", "-q", "-f", "HEAD"]);
+    r.write("g.txt", "x\n");
+    r.git(&["add", "g.txt"]);
+    r.commit_all("g");
+    git::stash::drop(&r.path, 0).unwrap();
+    r.write("g.txt", "y\n");
+    git::stash::save(&r.path, None, false, false, true).unwrap();
+    git::stash::pop(&r.path, 0, true).unwrap();
+    assert!(git::stash::list(&r.path).unwrap().is_empty());
+    assert_eq!(r.read("g.txt"), "y\n");
+}

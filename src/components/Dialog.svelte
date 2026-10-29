@@ -79,7 +79,7 @@
 <style>
   .backdrop {
     position: fixed; inset: 0; z-index: 100; display: grid; place-items: start center;
-    padding-top: 14vh; background: rgba(10, 18, 22, 0.32);
+    padding-top: 14vh; background: var(--backdrop);
   }
   .dialog {
     width: min(480px, calc(100vw - 32px)); background: var(--surface); border-radius: 10px;
@@ -88,10 +88,10 @@
     animation: rise 0.14s ease-out;
   }
   @keyframes rise { from { transform: translateY(6px); opacity: 0; } }
-  h2 { margin: 0; font-size: 15px; font-weight: 700; }
+  h2 { margin: 0; font-size: calc(var(--fs) * 15); font-weight: 700; }
   .body { margin: 0; color: var(--ink-2); white-space: pre-wrap; user-select: text; }
   .field { display: flex; flex-direction: column; gap: 5px; }
-  .field span { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+  .field span { font-size: calc(var(--fs) * 12); color: var(--ink-2); font-weight: 600; }
   .check { display: flex; align-items: center; gap: 8px; }
   .error { margin: 0; color: var(--danger); }
   .buttons { display: flex; gap: 8px; align-items: center; margin-top: 4px; }

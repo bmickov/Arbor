@@ -66,7 +66,7 @@
   .item:hover { background: var(--surface-2); }
   .item.sel { background: var(--sel); }
   .msg { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .meta { font-size: 12px; }
+  .meta { font-size: calc(var(--fs) * 12); }
   .detail { min-width: 0; min-height: 0; }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
   .sp { flex: 1; }

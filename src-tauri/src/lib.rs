@@ -325,6 +325,13 @@ async fn undo_list(repo: String) -> R<Vec<git::undo::Entry>> {
 
 // ------------------------------------------------------------------ system
 
+/// Print a message from the web view (console errors, uncaught exceptions)
+/// to stderr, so problems in the UI show up when Arbor runs from a terminal.
+#[tauri::command]
+fn log_ui(level: String, message: String) {
+    eprintln!("[arbor ui {level}] {message}");
+}
+
 /// A folder passed on the command line (`arbor ~/code/project`), if any.
 #[tauri::command]
 fn startup_path() -> Option<String> {
@@ -385,7 +392,7 @@ pub fn run() {
             fetch, pull, push, push_tag, delete_remote_branch,
             stash_list, stash_save, stash_apply, stash_pop, stash_drop, stash_branch,
             undo, undo_list,
-            open_external, open_terminal, startup_path,
+            open_external, open_terminal, startup_path, log_ui,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Arbor");
