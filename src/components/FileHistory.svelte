@@ -11,7 +11,8 @@
   let tab = $state<"history" | "blame">("history");
   let entries = $state<FileHistoryEntry[]>([]);
   let sel = $state<FileHistoryEntry | null>(null);
-  let diff = $state<FileDiff | null>(null);
+  let diff = $state.raw<FileDiff | null>(null);
+  let diffKey = $state("");
   let blame = $state<Blame | null>(null);
   let loading = $state(true);
 
@@ -27,7 +28,10 @@
   $effect(() => {
     const s = sel;
     if (!s) return;
-    api.commitFileDiff(app.path, s.commit.oid, s.path, app.diffSettings).then((d) => (diff = d)).catch(() => (diff = null));
+    const k = `${s.commit.oid}:${s.path}`;
+    api.commitFileDiff(app.path, s.commit.oid, s.path, app.diffSettings)
+      .then((d) => { if (sel === s) { diff = d; diffKey = k; } })
+      .catch(() => { if (sel === s) { diff = null; diffKey = k; } });
   });
 
   $effect(() => {
@@ -86,7 +90,7 @@
           {/each}
         </div>
         <div class="diff">
-          <DiffView {diff} mode="readonly" split={app.settings.splitDiff} image={sel ? { old: sel.commit.parents[0] ?? null, new: sel.commit.oid } : null} />
+          <DiffView {diff} loading={!!sel && diffKey !== `${sel.commit.oid}:${sel.path}`} mode="readonly" split={app.settings.splitDiff} image={sel ? { old: sel.commit.parents[0] ?? null, new: sel.commit.oid } : null} />
         </div>
       </div>
     {:else if blame}

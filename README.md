@@ -41,6 +41,10 @@ contains none of their code or artwork.
 **History**
 - Commit graph for all branches, the current branch, or any single branch
 - Commit details with per-file diffs, unified or side by side, and image previews
+- Diffs of any size: a file with hundreds of thousands or millions of changed
+  lines opens in a second or two and scrolls smoothly, and you can still stage
+  single lines deep inside it. (In very large side-by-side diffs, long lines
+  are cut off instead of wrapped; switch to unified to scroll sideways.)
 - File history (follows renames) and blame
 - Right-click a commit to check out, branch, tag, cherry-pick, revert, reset,
   edit its message, squash or fixup into its parent, or remove it
@@ -81,13 +85,13 @@ Pick the package for your distribution from the release files:
 
 ```sh
 # Debian, Ubuntu, Mint, Pop!_OS
-sudo apt install ./Arbor_0.4.0_amd64.deb
+sudo apt install ./Arbor_0.4.1_amd64.deb
 
 # Fedora, openSUSE
-sudo dnf install ./Arbor-0.4.0-1.x86_64.rpm
+sudo dnf install ./Arbor-0.4.1-1.x86_64.rpm
 
 # Anything else
-chmod +x Arbor_0.4.0_amd64.AppImage && ./Arbor_0.4.0_amd64.AppImage
+chmod +x Arbor_0.4.1_amd64.AppImage && ./Arbor_0.4.1_amd64.AppImage
 ```
 
 Run `arbor /path/to/repo` to open a repository directly in a new tab.

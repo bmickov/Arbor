@@ -4,8 +4,10 @@ use super::{oid, open, Result};
 use git2::{Delta, Diff, DiffFindOptions, DiffOptions, Patch, Repository};
 use serde::{Deserialize, Serialize};
 
-/// Files with more lines than this are summarized instead of rendered.
-const MAX_LINES: usize = 25_000;
+/// Diffs whose text is bigger than this are summarized instead of rendered.
+/// It only guards against running the UI out of memory: a million lines of
+/// typical code is around 40 MB.
+const MAX_TEXT_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -19,8 +21,7 @@ pub struct Line {
     pub new_no: Option<u32>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug)]
 pub struct Hunk {
     pub header: String,
     pub old_start: u32,
@@ -43,6 +44,42 @@ pub struct FileDiff {
     pub old_mode: u32,
     pub new_mode: u32,
     pub hunks: Vec<Hunk>,
+}
+
+/// Hunks go to the UI in a compact, column-wise form, because a diff can run
+/// to millions of lines and one JSON object per line is several times larger
+/// and slower to parse:
+/// - `origins`: one character per line (' ', '+' or '-')
+/// - `text`: the line contents joined with '\n'
+/// - `noNl`: indexes of lines without a trailing newline
+/// Line numbers aren't sent; the UI counts them up from `oldStart`/`newStart`.
+impl Serialize for Hunk {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut origins = String::with_capacity(self.lines.len());
+        let mut text = String::with_capacity(self.lines.iter().map(|l| l.content.len() + 1).sum());
+        let mut no_nl = vec![];
+        for (i, l) in self.lines.iter().enumerate() {
+            origins.push(l.origin);
+            if i > 0 {
+                text.push('\n');
+            }
+            text.push_str(&l.content);
+            if !l.nl {
+                no_nl.push(i);
+            }
+        }
+        let mut st = ser.serialize_struct("Hunk", 8)?;
+        st.serialize_field("header", &self.header)?;
+        st.serialize_field("oldStart", &self.old_start)?;
+        st.serialize_field("oldLines", &self.old_lines)?;
+        st.serialize_field("newStart", &self.new_start)?;
+        st.serialize_field("newLines", &self.new_lines)?;
+        st.serialize_field("origins", &origins)?;
+        st.serialize_field("text", &text)?;
+        st.serialize_field("noNl", &no_nl)?;
+        st.end()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Default)]
@@ -114,11 +151,7 @@ pub fn file_diff(diff: &Diff, idx: usize, with_lines: bool) -> Result<FileDiff> 
     if !with_lines {
         return Ok(fd);
     }
-    let mut total = 0;
-    for h in 0..patch.num_hunks() {
-        total += patch.num_lines_in_hunk(h)?;
-    }
-    if total > MAX_LINES {
+    if patch.size(true, false, false) > MAX_TEXT_BYTES {
         fd.too_large = true;
         return Ok(fd);
     }
@@ -132,6 +165,7 @@ pub fn file_diff(diff: &Diff, idx: usize, with_lines: bool) -> Result<FileDiff> 
                 ' ' | '+' | '-' => {
                     let raw = String::from_utf8_lossy(line.content());
                     let nl = raw.ends_with('\n');
+                    // Strip the line ending. Any other '\n' can't occur inside a line.
                     let content = raw.trim_end_matches('\n').trim_end_matches('\r').to_string();
                     lines.push(Line { origin, content, nl, old_no: line.old_lineno(), new_no: line.new_lineno() });
                 }
