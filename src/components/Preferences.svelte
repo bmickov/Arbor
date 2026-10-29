@@ -6,8 +6,9 @@
   import { THEMES, resolveTheme, type Theme, type ThemeId } from "../lib/themes";
   import Icon from "./Icon.svelte";
 
-  type Section = "appearance" | "diffs" | "keyboard";
+  type Section = "general" | "appearance" | "diffs" | "keyboard";
   const SECTIONS: { id: Section; label: string; icon: string }[] = [
+    { id: "general", label: "General", icon: "history" },
     { id: "appearance", label: "Appearance", icon: "settings" },
     { id: "diffs", label: "Diffs & Git", icon: "split" },
     { id: "keyboard", label: "Keyboard", icon: "grid" },
@@ -132,7 +133,28 @@
       </header>
 
       <div class="scroll">
-        {#if app.prefs === "appearance"}
+        {#if app.prefs === "general"}
+          <section>
+            <h4>Startup</h4>
+            <label class="toggle">
+              <input type="checkbox" checked={s.restoreSession}
+                onchange={() => {
+                  s.restoreSession = !s.restoreSession;
+                  save();
+                  if (s.restoreSession) app.saveSession();
+                  else app.forgetSession();
+                }} />
+              <span>
+                <b>Pick up where you left off</b>
+                <small>
+                  When Arbor starts, reopen your tabs and bring back each one's view, selected commit or file,
+                  search and scroll position, plus the panel layout and window size.
+                  Turn this off to start on the repository list every time.
+                </small>
+              </span>
+            </label>
+          </section>
+        {:else if app.prefs === "appearance"}
           <section>
             <h4>Theme</h4>
             <div class="themes" role="radiogroup" aria-label="Theme">

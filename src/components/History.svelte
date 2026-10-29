@@ -16,11 +16,9 @@
   const LANE = $derived(Math.max(9, Math.round(11 * scale)));
   const MAX_LANES = 14;
 
-  let query = $state("");
   let scroller = $state<HTMLDivElement>();
   let scrollTop = $state(0);
   let viewH = $state(600);
-  let listW = $state(55); // percent
   let rebaseFrom = $state<CommitRow | null>(null);
   let searchEl = $state<HTMLInputElement>();
   let seenSearch = 0;
@@ -34,7 +32,7 @@
   });
   let dropLine = $state<{ oid: string; below: boolean } | null>(null);
 
-  const q = $derived(query.trim().toLowerCase());
+  const q = $derived(app.historyQuery.trim().toLowerCase());
   const rows = $derived(
     q ? app.log.filter((r) => r.summary.toLowerCase().includes(q) || r.author.toLowerCase().includes(q) || r.oid.startsWith(q) || r.refs.some((l) => l.name.toLowerCase().includes(q))) : app.log,
   );
@@ -45,6 +43,17 @@
   const rewritableIds = $derived(new Set(act.rewritable().map((c) => c.oid)));
   const pushed = $derived(act.pushedSet());
   const head = $derived(app.status?.head);
+
+  // Put the list back where this tab left it (once the commits are loaded).
+  let scrollRestored = false;
+  $effect(() => {
+    if (scrollRestored || !scroller || !rows.length) return;
+    scrollRestored = true;
+    if (app.historyScroll > 0) {
+      scroller.scrollTop = app.historyScroll;
+      scrollTop = scroller.scrollTop;
+    }
+  });
 
   // Keep the selected commit in view when it changes from elsewhere.
   $effect(() => {
@@ -120,27 +129,27 @@
   function startResize(e: PointerEvent) {
     const host = (e.currentTarget as HTMLElement).parentElement!;
     const r = host.getBoundingClientRect();
-    const move = (ev: PointerEvent) => (listW = Math.min(80, Math.max(30, ((ev.clientX - r.left) / r.width) * 100)));
+    const move = (ev: PointerEvent) => (app.layout.listW = Math.min(80, Math.max(30, ((ev.clientX - r.left) / r.width) * 100)));
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", () => window.removeEventListener("pointermove", move), { once: true });
   }
 </script>
 
-<div class="history" style:--list-w="{listW}%" style:--row-h="{ROW}px">
+<div class="history" style:--list-w="{app.layout.listW}%" style:--row-h="{ROW}px">
   <div class="list">
     <div class="tools">
       <button class="scope" onclick={scopeMenu}><Icon name="history" size={14} /> {scopeLabel} <Icon name="down" size={12} /></button>
       <div class="search">
         <Icon name="search" size={14} />
-        <input bind:this={searchEl} placeholder="Search message, author, ID" bind:value={query} spellcheck="false"
-          onkeydown={(e) => { if (e.key === "Escape") { query = ""; scroller?.focus(); } if (e.key === "Enter") scroller?.focus(); }} />
-        {#if query}<button class="clear" onclick={() => (query = "")} aria-label="Clear search"><Icon name="x" size={12} /></button>{/if}
+        <input bind:this={searchEl} placeholder="Search message, author, ID" bind:value={app.historyQuery} spellcheck="false"
+          onkeydown={(e) => { if (e.key === "Escape") { app.historyQuery = ""; scroller?.focus(); } if (e.key === "Enter") scroller?.focus(); }} />
+        {#if app.historyQuery}<button class="clear" onclick={() => (app.historyQuery = "")} aria-label="Clear search"><Icon name="x" size={12} /></button>{/if}
       </div>
     </div>
 
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div class="rows" tabindex="0" role="listbox" aria-label="Commits" bind:this={scroller} bind:clientHeight={viewH}
-      onscroll={(e) => (scrollTop = (e.currentTarget as HTMLElement).scrollTop)} onkeydown={key}>
+      onscroll={(e) => { scrollTop = (e.currentTarget as HTMLElement).scrollTop; app.historyScroll = Math.round(scrollTop); }} onkeydown={key}>
       <div class="spacer" style:height="{rows.length * ROW + (app.logMore ? 56 : 12)}px">
         {#each visible as row, k (row.oid)}
           {@const i = first + k}

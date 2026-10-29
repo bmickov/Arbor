@@ -28,14 +28,14 @@ function view(v: View) {
 
 export const COMMANDS: Command[] = [
   // General
-  { id: "prefs", label: "Open preferences", group: "General", keys: ["Ctrl+,"], inInputs: true, run: () => (app.prefs = "appearance") },
+  { id: "prefs", label: "Open preferences", group: "General", keys: ["Ctrl+,"], inInputs: true, run: () => (app.prefs = "general") },
   { id: "shortcuts", label: "Show keyboard shortcuts", group: "General", keys: ["Ctrl+/"], inInputs: true, run: () => (app.prefs = "keyboard") },
   { id: "repos", label: "Show all repositories", group: "General", keys: ["Ctrl+T"], inInputs: true, run: () => app.switchTo(-1) },
   { id: "open", label: "Open a repository…", group: "General", keys: ["Ctrl+O"], run: async () => {
     const d = await pickFolder({ directory: true, title: "Open a repository" });
     if (typeof d === "string") app.open(d);
   } },
-  { id: "sidebar", label: "Show or hide the sidebar", group: "General", keys: ["Ctrl+\\"], repo: true, run: () => (app.sidebarHidden = !app.sidebarHidden) },
+  { id: "sidebar", label: "Show or hide the sidebar", group: "General", keys: ["Ctrl+\\"], repo: true, run: () => (app.layout.sidebarHidden = !app.layout.sidebarHidden) },
   { id: "refresh", label: "Refresh", group: "General", keys: ["Ctrl+R", "F5"], repo: true, inInputs: true, run: () => app.refresh(true) },
   { id: "undo", label: "Undo the last operation", group: "General", keys: ["Ctrl+Z"], repo: true, run: () => app.undo() },
 

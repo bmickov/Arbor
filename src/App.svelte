@@ -19,7 +19,6 @@
   import TabBar from "./components/TabBar.svelte";
   import WorkingCopy from "./components/WorkingCopy.svelte";
 
-  let sideW = $state(240);
 
   // Load the library, then reopen last session's tabs (plus any folder
   // given on the command line).
@@ -56,8 +55,25 @@
     };
   });
 
+  // Save the session shortly after anything in it changes, and on quit.
+  $effect(() => {
+    JSON.stringify(app.session()); // read everything in the session so changes re-run this
+    void app.settings.restoreSession;
+    const t = setTimeout(() => app.saveSession(), 400);
+    return () => clearTimeout(t);
+  });
+  $effect(() => {
+    const save = () => app.saveSession();
+    window.addEventListener("pagehide", save);
+    window.addEventListener("beforeunload", save);
+    return () => {
+      window.removeEventListener("pagehide", save);
+      window.removeEventListener("beforeunload", save);
+    };
+  });
+
   function resizeSide(e: PointerEvent) {
-    const move = (ev: PointerEvent) => (sideW = Math.min(420, Math.max(180, ev.clientX)));
+    const move = (ev: PointerEvent) => (app.layout.sideW = Math.min(420, Math.max(180, ev.clientX)));
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", () => window.removeEventListener("pointermove", move), { once: true });
   }
@@ -70,20 +86,23 @@
 <div class="window">
   <TabBar />
   {#if app.repo}
-    <div class="shell" class:noside={app.sidebarHidden} style:--side-w="{sideW}px">
+    <div class="shell" class:noside={app.layout.sidebarHidden} style:--side-w="{app.layout.sideW}px">
       <div class="top"><Toolbar /></div>
-      {#if !app.sidebarHidden}
+      {#if !app.layout.sidebarHidden}
         <aside><Sidebar /></aside>
         <div class="resize" role="separator" aria-orientation="vertical" onpointerdown={resizeSide}></div>
       {/if}
       <main>
-        {#if app.view === "changes"}
-          <WorkingCopy />
-        {:else if app.view === "history"}
-          <History />
-        {:else}
-          <StashView />
-        {/if}
+        <!-- Remount per tab so each view restores that tab's scroll and selection. -->
+        {#key app.repo.path}
+          {#if app.view === "changes"}
+            <WorkingCopy />
+          {:else if app.view === "history"}
+            <History />
+          {:else}
+            <StashView />
+          {/if}
+        {/key}
       </main>
     </div>
     {#if app.fileHistoryPath}

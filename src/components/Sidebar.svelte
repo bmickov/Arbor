@@ -6,8 +6,9 @@
   import Icon from "./Icon.svelte";
 
   let filter = $state("");
-  let open = $state<Record<string, boolean>>({ branches: true, remotes: true, tags: false });
-  let openRemote = $state<Record<string, boolean>>({});
+  // Expanded sections are part of the saved layout.
+  const open = $derived(app.layout.sections);
+  const openRemote = $derived(app.layout.remotes);
 
   const st = $derived(app.status);
   const refs = $derived(app.refs);

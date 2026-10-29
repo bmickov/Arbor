@@ -13,23 +13,32 @@ import { dialog, toasts } from "./ui.svelte";
 
 export type View = "changes" | "history" | "stashes";
 
-/** Per-repository state that is swapped in and out when switching tabs. */
-interface TabState {
+/** What a tab was showing. Saved across restarts when session restore is on. */
+export interface TabUI {
+  view: View;
+  scope: string;
+  selectedCommit: string | null;
+  selectedStash: number | null;
+  selectedFile: { path: string; area: "staged" | "unstaged" | "conflicted" } | null;
+  historyQuery: string;
+  historyScroll: number;
+  logLimit: number;
+  fileHistoryPath: string | null;
+}
+
+/** Data loaded for a tab, kept in memory so switching tabs is instant. */
+interface TabData {
   repo: RepoInfo;
   status: WorkingStatus | null;
   refs: Refs | null;
   stashes: StashEntry[];
   undoTop: UndoEntry | null;
-  view: View;
-  scope: string;
   log: CommitRow[];
   logMore: boolean;
-  logLimit: number;
-  selectedCommit: string | null;
-  selectedStash: number | null;
-  selectedFile: App["selectedFile"];
   lastSig: string;
 }
+
+type TabState = TabUI & Partial<TabData>;
 
 export interface Tab {
   path: string;
@@ -38,6 +47,27 @@ export interface Tab {
   saved: TabState | null;
 }
 
+/** Panel sizes and expanded sections, saved with the session. */
+export interface Layout {
+  sideW: number;
+  listW: number;
+  sidebarHidden: boolean;
+  sections: { branches: boolean; remotes: boolean; tags: boolean };
+  remotes: Record<string, boolean>;
+}
+const DEFAULT_LAYOUT: Layout = {
+  sideW: 240, listW: 55, sidebarHidden: false,
+  sections: { branches: true, remotes: true, tags: false }, remotes: {},
+};
+
+interface Session {
+  version: 1;
+  active: number;
+  tabs: { path: string; ui: TabUI | null }[];
+  layout: Layout;
+}
+
+const SESSION_KEY = "arbor.session";
 const TABS_KEY = "arbor.tabs";
 
 const SETTINGS_KEY = "arbor.settings";
@@ -55,10 +85,13 @@ export interface Settings {
   codeSize: number;
   /** Custom key bindings by command id; missing ids use the defaults. */
   shortcuts: Record<string, string[]>;
+  /** Reopen tabs, views, selections, layout and window size on startup. */
+  restoreSession: boolean;
 }
 export const DEFAULT_SETTINGS: Settings = {
   context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false,
   theme: "system", uiFont: "atkinson", uiSize: 13, codeFont: "commit", codeSize: 12, shortcuts: {},
+  restoreSession: true,
 };
 export const UI_SIZES = { min: 10, max: 20, default: 13 };
 export const CODE_SIZES = { min: 9, max: 22, default: 12 };
@@ -109,9 +142,12 @@ class App {
   selectedFile = $state<{ path: string; area: "staged" | "unstaged" | "conflicted" } | null>(null);
   /** File whose history/blame panel is open. */
   fileHistoryPath = $state<string | null>(null);
+  historyQuery = $state("");
+  historyScroll = $state(0);
+  layout = $state<Layout>(structuredClone(DEFAULT_LAYOUT));
 
   /** Preferences window: closed, or open at a section. */
-  prefs = $state<null | "appearance" | "diffs" | "keyboard">(null);
+  prefs = $state<null | "general" | "appearance" | "diffs" | "keyboard">(null);
   /** Branch switcher (Ctrl+P) visibility. */
   switcher = $state(false);
   /** Times (ms) of requests from shortcuts, picked up by the views even if
@@ -119,7 +155,6 @@ class App {
   commitRequest = $state(0);
   focusComposer = $state(0);
   focusSearch = $state(0);
-  sidebarHidden = $state(false);
 
   busy = $state<string | null>(null);
   progress = $state("");
@@ -191,13 +226,20 @@ class App {
     if (!opts.background) this.switchTo(at, info);
   }
 
+  private uiSnapshot(): TabUI {
+    return {
+      view: this.view, scope: this.scope, selectedCommit: this.selectedCommit, selectedStash: this.selectedStash,
+      selectedFile: this.selectedFile, historyQuery: this.historyQuery, historyScroll: this.historyScroll,
+      logLimit: this.logLimit, fileHistoryPath: this.fileHistoryPath,
+    };
+  }
+
   private snapshot(): TabState | null {
     if (!this.repo) return null;
     return {
+      ...this.uiSnapshot(),
       repo: this.repo, status: this.status, refs: this.refs, stashes: this.stashes, undoTop: this.undoTop,
-      view: this.view, scope: this.scope, log: this.log, logMore: this.logMore, logLimit: this.logLimit,
-      selectedCommit: this.selectedCommit, selectedStash: this.selectedStash, selectedFile: this.selectedFile,
-      lastSig: this.lastSig,
+      log: this.log, logMore: this.logMore, lastSig: this.lastSig,
     };
   }
 
@@ -216,7 +258,9 @@ class App {
     this.selectedStash = t?.selectedStash ?? null;
     this.selectedFile = t?.selectedFile ?? null;
     this.lastSig = t?.lastSig ?? "";
-    this.fileHistoryPath = null;
+    this.historyQuery = t?.historyQuery ?? "";
+    this.historyScroll = t?.historyScroll ?? 0;
+    this.fileHistoryPath = t?.fileHistoryPath ?? null;
   }
 
   /** Make tab `i` active (-1 shows the repository manager). */
@@ -288,37 +332,82 @@ class App {
     if (this.repo?.path === path) document.title = `${name} — Arbor`;
   }
 
-  private persistTabs() {
+  /** Everything needed to pick up where the user left off. */
+  session(): Session {
+    const pick = (t: TabState | null): TabUI | null =>
+      t ? {
+        view: t.view, scope: t.scope, selectedCommit: t.selectedCommit, selectedStash: t.selectedStash,
+        selectedFile: t.selectedFile, historyQuery: t.historyQuery, historyScroll: t.historyScroll,
+        logLimit: t.logLimit, fileHistoryPath: t.fileHistoryPath,
+      } : null;
+    return {
+      version: 1,
+      active: this.active,
+      tabs: this.tabs.map((t, i) => ({ path: t.path, ui: i === this.active && this.repo ? this.uiSnapshot() : pick(t.saved) })),
+      layout: $state.snapshot(this.layout),
+    };
+  }
+
+  saveSession() {
     try {
-      localStorage.setItem(TABS_KEY, JSON.stringify({ paths: this.tabs.map((t) => t.path), active: this.active }));
+      if (this.settings.restoreSession) localStorage.setItem(SESSION_KEY, JSON.stringify(this.session()));
+      else localStorage.removeItem(SESSION_KEY);
     } catch {}
   }
 
-  /** Reopen the tabs from last time, plus a folder given on the command line. */
-  async restoreTabs(extra: string | null) {
-    let saved: { paths: string[]; active: number } = { paths: [], active: -1 };
+  forgetSession() {
     try {
-      saved = JSON.parse(localStorage.getItem(TABS_KEY) || "null") ?? saved;
-      // Earlier versions remembered a single repository.
+      for (const k of [SESSION_KEY, TABS_KEY, "arbor.last"]) localStorage.removeItem(k);
+    } catch {}
+  }
+
+  private persistTabs() {
+    this.saveSession();
+  }
+
+  private loadSession(): Session | null {
+    try {
+      const s = JSON.parse(localStorage.getItem(SESSION_KEY) || "null") as Session | null;
+      if (s?.version === 1) return s;
+      // Older versions saved only the open tabs, or a single repository.
+      const tabs = JSON.parse(localStorage.getItem(TABS_KEY) || "null") as { paths: string[]; active: number } | null;
       const last = localStorage.getItem("arbor.last");
-      if (!saved.paths.length && last) saved = { paths: [last], active: 0 };
+      const paths = tabs?.paths?.length ? tabs.paths : last ? [last] : [];
+      return { version: 1, active: tabs?.active ?? 0, tabs: paths.map((path) => ({ path, ui: null })), layout: structuredClone(DEFAULT_LAYOUT) };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * On startup: reopen last session's tabs and layout (when session restore
+   * is on), then a folder given on the command line.
+   */
+  async restoreTabs(extra: string | null) {
+    const session = this.settings.restoreSession ? this.loadSession() : null;
+    if (!this.settings.restoreSession) this.forgetSession();
+    try {
+      localStorage.removeItem(TABS_KEY);
       localStorage.removeItem("arbor.last");
     } catch {}
-    for (const p of saved.paths) {
-      try {
-        const info = await api.openRepo(p);
-        if (!this.tabs.some((t) => t.path === info.path)) {
-          this.tabs.push({ path: info.path, name: library.repos.find((r) => r.path === info.path)?.name ?? info.name, saved: null });
+    if (session) {
+      this.layout = { ...structuredClone(DEFAULT_LAYOUT), ...session.layout, sections: { ...DEFAULT_LAYOUT.sections, ...session.layout?.sections } };
+      for (const t of session.tabs) {
+        try {
+          const info = await api.openRepo(t.path);
+          if (this.tabs.some((x) => x.path === info.path)) continue;
+          const name = library.repos.find((r) => r.path === info.path)?.name ?? info.name;
+          this.tabs.push({ path: info.path, name, saved: t.ui ? { ...t.ui } : null });
+        } catch {
+          // The folder is gone; drop the tab quietly.
         }
-      } catch {
-        // The folder is gone; drop the tab quietly.
       }
     }
     if (extra) {
       await this.open(extra);
       return;
     }
-    const idx = Math.min(saved.active, this.tabs.length - 1);
+    const idx = Math.min(session?.active ?? -1, this.tabs.length - 1);
     this.switchTo(this.tabs.length ? idx : -1);
   }
 
