@@ -207,6 +207,8 @@ export const api = {
   undoList: (repo: string) => call<UndoEntry[]>("undo_list", { repo }),
 
   startupPath: () => call<string | null>("startup_path"),
+  /** Exit the app (call after saving the session). */
+  quit: () => call<void>("quit"),
   openExternal: (path: string) => call<void>("open_external", { path }),
   openTerminal: (path: string) => call<void>("open_terminal", { path }),
 };

@@ -3,6 +3,7 @@
 // `app.run`, which handles busy state, errors, auth prompts and refreshes.
 
 import { listen } from "@tauri-apps/api/event";
+import { saveWindowState, StateFlags } from "@tauri-apps/plugin-window-state";
 import { SvelteSet } from "svelte/reactivity";
 import {
   api, type CommitRow, type Creds, type DiffSettings, type Refs, type RepoInfo,
@@ -160,6 +161,10 @@ class App {
   commitRequest = $state(0);
   focusComposer = $state(0);
   focusSearch = $state(0);
+  /** Set to focus the repository list's filter box. */
+  focusRepoFilter = $state(0);
+  /** Recently closed tabs, newest last, for "Reopen closed tab". */
+  closedTabs: { path: string; name: string; ui: TabUI | null }[] = [];
 
   busy = $state<string | null>(null);
   progress = $state("");
@@ -226,7 +231,7 @@ class App {
   }
 
   /** Open a repository in a tab (switching to it if it's already open). */
-  async open(path: string, opts: { background?: boolean } = {}) {
+  async open(path: string, opts: { background?: boolean; ui?: TabUI | null } = {}) {
     let info: RepoInfo;
     try {
       info = await api.openRepo(path);
@@ -243,10 +248,16 @@ class App {
     const name = library.repos.find((r) => r.path === info.path)?.name ?? info.name;
     // Open next to the current tab, like a browser.
     const at = this.active >= 0 ? this.active + 1 : this.tabs.length;
-    this.tabs.splice(at, 0, { path: info.path, name, saved: null });
+    this.tabs.splice(at, 0, { path: info.path, name, saved: opts.ui ? { ...opts.ui } : null });
     if (this.active >= at) this.active++;
     this.persistTabs();
     if (!opts.background) this.switchTo(at, info);
+  }
+
+  /** Just the view-and-selection part of a tab's saved state. */
+  private pickUI(t: TabState): TabUI {
+    const { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath } = t;
+    return { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath };
   }
 
   private uiSnapshot(): TabUI {
@@ -316,6 +327,9 @@ class App {
       return;
     }
     const wasActive = i === this.active;
+    // Remember it (with its view and selection) for "Reopen closed tab".
+    const ui = wasActive && this.repo ? this.uiSnapshot() : t.saved ? this.pickUI(t.saved) : null;
+    this.closedTabs = [...this.closedTabs.filter((c) => c.path !== t.path), { path: t.path, name: t.name, ui }].slice(-10);
     if (wasActive) {
       // Don't save the closing tab's state.
       this.active = -1;
@@ -329,6 +343,40 @@ class App {
     }
     const next = this.tabs.length ? Math.min(i, this.tabs.length - 1) : -1;
     this.switchTo(next);
+  }
+
+  /** Reopen the most recently closed tab, as it was. */
+  async reopenClosedTab() {
+    const c = this.closedTabs.pop();
+    if (!c) {
+      toasts.push("info", "No closed tabs to reopen.");
+      return;
+    }
+    await this.open(c.path, { ui: c.ui });
+  }
+
+  /** Move the current tab one place left (-1) or right (1). */
+  shiftTab(dir: 1 | -1) {
+    const i = this.active;
+    const to = i + dir;
+    if (i < 0 || to < 0 || to >= this.tabs.length) return;
+    this.moveTab(i, dir > 0 ? i + 2 : i - 1);
+  }
+
+  /** Save the session and window size, then exit. Asks first if an operation is still running. */
+  async quit() {
+    if (this.busy) {
+      const ok = await dialog.confirm(
+        "Quit while Arbor is busy?",
+        `“${this.busy}” hasn't finished yet. Quitting now may stop it halfway.`,
+        "Quit anyway",
+        true,
+      );
+      if (!ok) return;
+    }
+    this.saveSession();
+    await saveWindowState(StateFlags.ALL).catch(() => {});
+    await api.quit();
   }
 
   moveTab(from: number, to: number) {
@@ -371,7 +419,13 @@ class App {
     };
   }
 
+  /** False until startup has restored the last session. Saving before then
+   *  would overwrite the saved tabs with the empty startup state, and lose
+   *  them when restoring is slow (many repositories, a slow disk). */
+  private sessionRestored = false;
+
   saveSession() {
+    if (!this.sessionRestored) return;
     try {
       if (this.settings.restoreSession) localStorage.setItem(SESSION_KEY, JSON.stringify(this.session()));
       else localStorage.removeItem(SESSION_KEY);
@@ -407,6 +461,15 @@ class App {
    * is on), then a folder given on the command line.
    */
   async restoreTabs(extra: string | null) {
+    try {
+      await this.restoreTabsInner(extra);
+    } finally {
+      this.sessionRestored = true;
+      this.saveSession();
+    }
+  }
+
+  private async restoreTabsInner(extra: string | null) {
     const session = this.settings.restoreSession ? this.loadSession() : null;
     if (!this.settings.restoreSession) this.forgetSession();
     try {

@@ -1,14 +1,16 @@
 // Keyboard shortcuts: one registry of commands with default key bindings,
 // user overrides from settings, and a single keydown dispatcher.
 
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import { keyParts } from "./platform";
 import * as act from "./actions";
+import { library } from "./library.svelte";
 import { app, CODE_SIZES, UI_SIZES, type View } from "./state.svelte";
-import { dialog, menu } from "./ui.svelte";
+import { dialog, menu, toasts } from "./ui.svelte";
 
-export type Group = "General" | "Text size" | "Tabs" | "Views" | "Working copy" | "Remote" | "Branches & history";
+export type Group = "General" | "Text size" | "Tabs" | "Views" | "Repository" | "Working copy" | "Remote" | "Branches & history";
 
 export interface Command {
   id: string;
@@ -30,7 +32,7 @@ function view(v: View) {
 export const COMMANDS: Command[] = [
   // General
   { id: "prefs", label: "Open preferences", group: "General", keys: ["Ctrl+,"], inInputs: true, run: () => (app.prefs = "general") },
-  { id: "shortcuts", label: "Show keyboard shortcuts", group: "General", keys: ["Ctrl+/"], inInputs: true, run: () => (app.prefs = "keyboard") },
+  { id: "shortcuts", label: "Show keyboard shortcuts", group: "General", keys: ["Ctrl+/", "F1"], inInputs: true, run: () => (app.prefs = "keyboard") },
   { id: "repos", label: "Show all repositories", group: "General", keys: ["Ctrl+T"], inInputs: true, run: () => app.switchTo(-1) },
   { id: "open", label: "Open a repository…", group: "General", keys: ["Ctrl+O"], run: async () => {
     const d = await pickFolder({ directory: true, title: "Open a repository" });
@@ -39,6 +41,11 @@ export const COMMANDS: Command[] = [
   { id: "sidebar", label: "Show or hide the sidebar", group: "General", keys: ["Ctrl+\\"], repo: true, run: () => (app.layout.sidebarHidden = !app.layout.sidebarHidden) },
   { id: "refresh", label: "Refresh", group: "General", keys: ["Ctrl+R", "F5"], repo: true, inInputs: true, run: () => app.refresh(true) },
   { id: "undo", label: "Undo the last operation", group: "General", keys: ["Ctrl+Z"], repo: true, run: () => app.undo() },
+  { id: "fullscreen", label: "Full screen", group: "General", keys: ["F11"], inInputs: true, run: async () => {
+    const w = getCurrentWindow();
+    await w.setFullscreen(!(await w.isFullscreen()));
+  } },
+  { id: "quit", label: "Quit Arbor", group: "General", keys: ["Ctrl+Q"], inInputs: true, run: () => app.quit() },
 
   // Text size
   { id: "ui.bigger", label: "Larger text", group: "Text size", keys: ["Ctrl+=", "Ctrl+Shift+="], inInputs: true, run: () => app.setUiSize(app.settings.uiSize + 1) },
@@ -55,6 +62,9 @@ export const COMMANDS: Command[] = [
   { id: "tab.close", label: "Close tab", group: "Tabs", keys: ["Ctrl+W"], inInputs: true, run: () => app.active >= 0 && app.closeTab(app.active) },
   { id: "tab.next", label: "Next tab", group: "Tabs", keys: ["Ctrl+Tab", "Ctrl+PageDown"], inInputs: true, run: () => app.cycleTab(1) },
   { id: "tab.prev", label: "Previous tab", group: "Tabs", keys: ["Ctrl+Shift+Tab", "Ctrl+PageUp"], inInputs: true, run: () => app.cycleTab(-1) },
+  { id: "tab.reopen", label: "Reopen closed tab", group: "Tabs", keys: ["Ctrl+Shift+T"], inInputs: true, run: () => app.reopenClosedTab() },
+  { id: "tab.left", label: "Move tab left", group: "Tabs", keys: ["Ctrl+Shift+PageUp"], inInputs: true, run: () => app.shiftTab(-1) },
+  { id: "tab.right", label: "Move tab right", group: "Tabs", keys: ["Ctrl+Shift+PageDown"], inInputs: true, run: () => app.shiftTab(1) },
 
   // Views
   { id: "view.changes", label: "Show changes", group: "Views", keys: ["Ctrl+1"], repo: true, inInputs: true, run: () => view("changes") },
@@ -64,6 +74,14 @@ export const COMMANDS: Command[] = [
     app.settings.splitDiff = !app.settings.splitDiff;
     app.saveSettings();
   } },
+
+  // Repository
+  { id: "repo.clone", label: "Clone a repository…", group: "Repository", keys: ["Ctrl+Shift+O"], run: async () => {
+    const p = await library.clone();
+    if (p) app.open(p);
+  } },
+  { id: "repo.files", label: "Show in file manager", group: "Repository", keys: ["Ctrl+Shift+E"], repo: true, run: () => api.openExternal(app.path).catch((e) => toasts.push("error", String(e))) },
+  { id: "repo.terminal", label: "Open terminal here", group: "Repository", keys: ["Ctrl+Shift+`"], repo: true, run: () => api.openTerminal(app.path).catch((e) => toasts.push("error", String(e))) },
 
   // Working copy
   { id: "commit", label: "Commit", group: "Working copy", keys: ["Ctrl+Enter"], repo: true, inInputs: true, run: () => {
@@ -82,20 +100,29 @@ export const COMMANDS: Command[] = [
   } },
 
   // Remote
-  { id: "fetch", label: "Fetch", group: "Remote", keys: ["Ctrl+Shift+F"], repo: true, run: () => act.fetchAll() },
+  { id: "fetch", label: "Fetch (all repositories when on the list)", group: "Remote", keys: ["Ctrl+Shift+F"], run: () => (app.repo ? act.fetchAll() : library.fetchAll()) },
   { id: "pull", label: "Pull", group: "Remote", keys: ["Ctrl+Shift+Down"], repo: true, run: () => act.pull() },
   { id: "push", label: "Push", group: "Remote", keys: ["Ctrl+Shift+Up"], repo: true, run: () => act.push() },
 
   // Branches & history
   { id: "branch.switch", label: "Switch branch…", group: "Branches & history", keys: ["Ctrl+P"], repo: true, inInputs: true, run: () => (app.switcher = true) },
   { id: "branch.new", label: "New branch…", group: "Branches & history", keys: ["Ctrl+B"], repo: true, run: () => act.newBranch() },
-  { id: "history.search", label: "Search history", group: "Branches & history", keys: ["Ctrl+F"], repo: true, inInputs: true, run: () => {
+  { id: "history.search", label: "Search history (filter repositories when on the list)", group: "Branches & history", keys: ["Ctrl+F"], inInputs: true, run: () => {
+    if (!app.repo) {
+      app.focusRepoFilter = Date.now();
+      return;
+    }
     view("history");
     app.focusSearch = Date.now();
   } },
+  { id: "commit.copyId", label: "Copy the selected commit's ID", group: "Branches & history", keys: ["Ctrl+Shift+C"], repo: true, run: () => {
+    const id = app.view === "history" ? app.selectedCommit : null;
+    if (!id) return toasts.push("info", "Select a commit in History first.");
+    navigator.clipboard.writeText(id).then(() => toasts.push("info", `Copied ${id.slice(0, 7)}.`));
+  } },
 ];
 
-export const GROUPS: Group[] = ["General", "Text size", "Tabs", "Views", "Working copy", "Remote", "Branches & history"];
+export const GROUPS: Group[] = ["General", "Text size", "Tabs", "Views", "Repository", "Working copy", "Remote", "Branches & history"];
 
 /** Shortcuts that can't be rebound, listed for reference. */
 export const FIXED: { label: string; keys: string }[] = [
@@ -164,9 +191,16 @@ export function resetBindings() {
 export const recording = $state({ active: false });
 
 export function handleKey(e: KeyboardEvent) {
-  if (recording.active || dialog.spec || menu.items.length || e.defaultPrevented) return;
+  if (recording.active || e.defaultPrevented) return;
   const combo = comboFromEvent(e);
   if (!combo) return;
+  // Quit works from anywhere, even with a dialog or menu open.
+  if (bindings("quit").includes(combo)) {
+    e.preventDefault();
+    app.quit();
+    return;
+  }
+  if (dialog.spec || menu.items.length) return;
   const target = e.target as HTMLElement;
   const typing = !!target.closest?.("input, textarea, select, [contenteditable]");
 
@@ -184,7 +218,7 @@ export function handleKey(e: KeyboardEvent) {
   if (typing && !cmd.inInputs) return;
   if (cmd.repo && !app.repo) return;
   // While a modal (preferences, switcher) is open, only its own keys apply.
-  if ((app.prefs || app.switcher) && !["prefs", "shortcuts"].includes(cmd.id)) return;
+  if ((app.prefs || app.switcher) && !["prefs", "shortcuts", "fullscreen"].includes(cmd.id)) return;
   e.preventDefault();
   cmd.run();
 }

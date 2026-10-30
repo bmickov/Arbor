@@ -357,6 +357,12 @@ fn startup_path() -> Option<String> {
     abs.is_dir().then(|| abs.to_string_lossy().to_string())
 }
 
+/// Quit Arbor. The UI saves the session and window state first.
+#[tauri::command]
+fn quit(app: AppHandle) {
+    app.exit(0);
+}
+
 /// Open a file or folder with the desktop's default application.
 #[tauri::command]
 fn open_external(path: String) -> R<()> {
@@ -404,7 +410,7 @@ pub fn run() {
             fetch, pull, push, push_tag, delete_remote_branch,
             stash_list, stash_save, stash_apply, stash_pop, stash_drop, stash_drop_many, stash_branch,
             undo, undo_list,
-            open_external, open_terminal, startup_path, log_ui,
+            open_external, open_terminal, quit, startup_path, log_ui,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Arbor");
