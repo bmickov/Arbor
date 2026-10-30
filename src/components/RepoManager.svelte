@@ -10,6 +10,14 @@
   import Icon from "./Icon.svelte";
 
   let query = $state("");
+  let filterBox = $state<HTMLInputElement>();
+  // Ctrl+F on the repository list focuses the filter.
+  $effect(() => {
+    if (app.focusRepoFilter) {
+      filterBox?.focus();
+      filterBox?.select();
+    }
+  });
   let sort = $state<"name" | "recent">((() => {
     try {
       return (localStorage.getItem("arbor.repoSort") as "name" | "recent") || "name";
@@ -246,7 +254,7 @@
       </div>
       <div class="search">
         <Icon name="search" size={14} />
-        <input placeholder="Filter by name, path or branch" bind:value={query} spellcheck="false" />
+        <input placeholder="Filter by name, path or branch" bind:value={query} bind:this={filterBox} spellcheck="false" />
         {#if query}<button class="clear" onclick={() => (query = "")} aria-label="Clear filter"><Icon name="x" size={12} /></button>{/if}
       </div>
       <div class="actions">

@@ -10,6 +10,8 @@
     "dialog:default",
     "dialog:allow-open",
     "window-state:default",
-    "core:window:allow-show"
+    "core:window:allow-show",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen"
   ]
 }

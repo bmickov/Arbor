@@ -155,22 +155,30 @@ On macOS, Ctrl in the table below is ⌘ (Command), Alt is ⌥ and Shift is ⇧.
 
 | Keys | Action |
 | --- | --- |
+| Ctrl+Q | Quit (saves your tabs and window first) |
+| F11 | Full screen |
 | Ctrl+, | Preferences |
-| Ctrl+/ | Show keyboard shortcuts |
+| Ctrl+/, F1 | Show keyboard shortcuts |
 | Ctrl+T | Show all repositories |
 | Ctrl+O | Open a repository |
+| Ctrl+Shift+O | Clone a repository |
+| Ctrl+Shift+E | Show the repository in your file manager |
+| Ctrl+Shift+` | Open a terminal in the repository |
 | Ctrl+W | Close tab |
+| Ctrl+Shift+T | Reopen the last closed tab, as it was |
 | Ctrl+Tab, Ctrl+PageDown / Ctrl+Shift+Tab, Ctrl+PageUp | Next / previous tab |
+| Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Move the tab left / right |
 | Alt+1 … Alt+9 | Go to tab 1–8, or the last tab |
 | Ctrl+1 / 2 / 3 | Changes / History / Stashes |
 | Ctrl+P | Switch branch (type to filter, or to create a new one) |
 | Ctrl+B | New branch |
-| Ctrl+F | Search history |
+| Ctrl+F | Search history (on the repository list: filter it) |
+| Ctrl+Shift+C | Copy the selected commit's ID |
 | Ctrl+Enter | Commit |
 | Ctrl+M | Write commit message |
 | Ctrl+Shift+A / Ctrl+Shift+U | Stage all / unstage all |
 | Ctrl+Shift+S / Ctrl+Alt+S | Stash / apply and remove the latest stash |
-| Ctrl+Shift+F | Fetch |
+| Ctrl+Shift+F | Fetch (on the repository list: fetch all) |
 | Ctrl+Shift+↓ / Ctrl+Shift+↑ | Pull / push |
 | Ctrl+Z | Undo the last operation |
 | Ctrl+R, F5 | Refresh |
@@ -222,7 +230,7 @@ cd src-tauri && cargo test
   GitHub release with all installers and checksums:
 
   ```sh
-  git tag v0.6.0 && git push origin main v0.6.0
+  git tag v0.6.1 && git push origin main v0.6.1
   ```
 
   Tags with a suffix (`v0.7.0-beta.1`) are published as pre-releases.
