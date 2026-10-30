@@ -68,6 +68,13 @@ contains none of their code or artwork.
   The limit is in Preferences → Diffs & Git, including "Always show"
 - File history (follows renames) and blame
 - Restore any file to how it was in a commit, or just before it
+- **Browse files** at any commit, branch or tag: a folder tree with a fast file
+  viewer (even for huge files), and **Export as ZIP**
+- **Compare branches**: the commits each side has that the other doesn't, and
+  every file the branch would change, with one-click merge
+- **Reflog**: everywhere HEAD or a branch pointed recently. Commits that are on
+  no branch any more (after a reset, rebase or deleted branch) are marked
+  *lost*; **Recover as new branch** brings them back
 - Right-click a commit to check out, branch, tag, cherry-pick, revert, reset,
   edit its message, squash or fixup into its parent, or remove it
 - **Drag a commit up or down to reorder it**
@@ -90,6 +97,14 @@ contains none of their code or artwork.
 - SSH via ssh-agent or `~/.ssh/id_*` keys; HTTPS via your git credential helper,
   or a username and token prompt
 - Clone, init, add and remove remotes, track upstream branches, push and delete tags
+
+**Branches Review**
+- Every local branch in one table: merged into a base branch or not
+  (including squash and rebase merges, which plain Git can't tell), commits
+  ahead and behind, upstream status (flags branches whose remote branch was
+  deleted), and when it was last touched
+- Filter by merged, not merged, stale (30 days to a year) or upstream gone,
+  select, and delete in bulk; one Undo restores them
 
 **Stashes**
 - Stash with a message, optionally including new files or keeping staged changes
@@ -193,6 +208,7 @@ On macOS, Ctrl in the table below is ⌘ (Command), Alt is ⌥ and Shift is ⇧.
 | Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Move the tab left / right |
 | Alt+1 … Alt+9 | Go to tab 1–8, or the last tab |
 | Ctrl+1 / 2 / 3 | Changes / History / Stashes |
+| Ctrl+4 / 5 | Branches Review / Reflog |
 | Ctrl+P | Switch branch (type to filter, or to create a new one) |
 | Ctrl+B | New branch |
 | Ctrl+F | Search history (on the repository list: filter it) |
@@ -254,10 +270,10 @@ cd src-tauri && cargo test
   GitHub release with all installers and checksums:
 
   ```sh
-  git tag v0.7.0 && git push origin main v0.7.0
+  git tag v0.8.0 && git push origin main v0.8.0
   ```
 
-  Tags with a suffix (`v0.7.0-beta.1`) are published as pre-releases.
+  Tags with a suffix (`v0.8.0-beta.1`) are published as pre-releases.
 - **Code signing** is optional. macOS builds are ad-hoc signed; to sign and
   notarize with an Apple Developer ID, add the repository secrets listed in
   `build.yml`.

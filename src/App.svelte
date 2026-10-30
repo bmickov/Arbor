@@ -6,6 +6,10 @@
   import { dialog, menu } from "./lib/ui.svelte";
   import BranchSwitcher from "./components/BranchSwitcher.svelte";
   import QuickActions from "./components/QuickActions.svelte";
+  import BranchesReview from "./components/BranchesReview.svelte";
+  import BrowseView from "./components/BrowseView.svelte";
+  import CompareView from "./components/CompareView.svelte";
+  import ReflogView from "./components/ReflogView.svelte";
   import Preferences from "./components/Preferences.svelte";
   import Dialog from "./components/Dialog.svelte";
   import DragGhost from "./components/DragGhost.svelte";
@@ -111,6 +115,14 @@
             <WorkingCopy />
           {:else if app.view === "history"}
             <History />
+          {:else if app.view === "review"}
+            <BranchesReview />
+          {:else if app.view === "reflog"}
+            <ReflogView />
+          {:else if app.view === "compare"}
+            <CompareView />
+          {:else if app.view === "browse"}
+            <BrowseView />
           {:else}
             <StashView />
           {/if}

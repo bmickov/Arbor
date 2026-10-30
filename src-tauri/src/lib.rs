@@ -225,6 +225,35 @@ async fn apply_patch(repo: String, file: String) -> R<git::files::Applied> {
 }
 
 #[tauri::command]
+async fn reflog(repo: String, refname: String, limit: usize) -> R<Vec<git::review::ReflogEntry>> {
+    blocking(move || git::review::reflog(&repo, &refname, limit)).await
+}
+#[tauri::command]
+async fn branches_review(repo: String, base: Option<String>) -> R<git::review::Review> {
+    blocking(move || git::review::branches_review(&repo, base.as_deref())).await
+}
+#[tauri::command]
+async fn compare_branches(repo: String, base: String, target: String) -> R<git::review::Comparison> {
+    blocking(move || git::review::compare(&repo, &base, &target)).await
+}
+#[tauri::command]
+async fn compare_file_diff(repo: String, base: String, target: String, path: String, settings: Option<DiffSettings>) -> R<Option<git::diff::FileDiff>> {
+    blocking(move || git::review::compare_file(&repo, &base, &target, &path, settings.unwrap_or_default())).await
+}
+#[tauri::command]
+async fn tree_at(repo: String, rev: String) -> R<Vec<git::tree::TreeEntry>> {
+    blocking(move || git::tree::tree_at(&repo, &rev)).await
+}
+#[tauri::command]
+async fn file_content(repo: String, rev: String, path: String) -> R<git::tree::FileContent> {
+    blocking(move || git::tree::file_content(&repo, &rev, &path)).await
+}
+#[tauri::command]
+async fn export_zip(repo: String, rev: String, dest: String, folder: String) -> R<usize> {
+    blocking(move || git::tree::export_zip(&repo, &rev, &dest, &folder)).await
+}
+
+#[tauri::command]
 async fn tracked_files(repo: String) -> R<Vec<String>> {
     blocking(move || git::tree::tracked_files(&repo)).await
 }
@@ -453,7 +482,8 @@ pub fn run() {
             stage_files, unstage_files, stage_all, unstage_all, discard_files,
             stage_lines, unstage_lines, discard_lines, resolve_conflict,
             commit, head_message, cherry_pick, revert_commit, reset_to,
-            get_log, commit_info, tracked_files, ignore_pattern, untrack_files, restore_file,
+            get_log, commit_info, tracked_files, reflog, branches_review, compare_branches, compare_file_diff,
+            tree_at, file_content, export_zip, ignore_pattern, untrack_files, restore_file,
             save_commit_patch, save_changes_patch, apply_patch, get_identity, set_identity, commit_template, commit_file_diff, file_history, blame,
             get_refs, checkout_branch, checkout_commit, checkout_remote, create_branch,
             delete_branch, delete_branches, unmerged_branches, rename_branch, set_upstream, create_tag, delete_tag,

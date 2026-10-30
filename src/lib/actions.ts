@@ -257,6 +257,9 @@ export function branchMenu(e: MouseEvent, name: string) {
     { label: "New branch from here…", action: () => newBranch(name, name) },
     { label: "Rename…", action: () => renameBranch(name) },
     { label: "Show history", action: () => showHistory(name) },
+    { label: `Compare with ${head ?? "HEAD"}`, disabled: name === head, action: () => compareWith(name) },
+    { label: "Browse files", action: () => browseAt(name, name) },
+    { label: "Export as ZIP…", action: () => exportZip(name, name) },
     { separator: true },
     { label: "Delete…", danger: true, disabled: name === head, action: () => deleteBranch(name) },
   ];
@@ -273,6 +276,8 @@ export function remoteBranchMenu(e: MouseEvent, fullName: string) {
     { label: `Rebase ${head} onto it`, disabled: !head, action: () => rebaseOnto(head!, fullName) },
     { separator: true },
     { label: "Show history", action: () => showHistory(fullName) },
+    { label: `Compare with ${head ?? "HEAD"}`, action: () => compareWith(fullName) },
+    { label: "Browse files", action: () => browseAt(fullName, fullName) },
     { label: "Delete on remote…", danger: true, action: () => deleteRemoteBranch(fullName) },
   ], fullName);
 }
@@ -281,6 +286,32 @@ export function showHistory(scope: string) {
   app.scope = scope;
   app.view = "history";
   app.loadLog();
+}
+
+// ------------------------------------------------- compare, browse, export
+
+/** Compare `target` with `base` (the current branch by default). */
+export function compareWith(target: string, base?: string) {
+  const b = base ?? app.headBranch ?? app.status?.head ?? "HEAD";
+  if (b === target) return toasts.push("info", `Pick a branch other than ${target} to compare it with.`);
+  app.compare = { base: b, target };
+  app.view = "compare";
+}
+
+/** Show the repository's files as they were at `rev`. */
+export function browseAt(rev: string, label: string) {
+  app.browse = { rev, label };
+  app.view = "browse";
+}
+
+/** Save the files at `rev` as a ZIP archive. */
+export async function exportZip(rev: string, label: string) {
+  const name = `${app.repo?.name ?? "repository"}-${slug(label)}`;
+  const dest = await pickSaveFile({ title: `Export ${label} as ZIP`, defaultPath: `${name}.zip`, filters: [{ name: "ZIP archive", extensions: ["zip"] }] });
+  if (!dest) return;
+  await app.act("Exporting ZIP", () => api.exportZip(P(), rev, dest, name), {
+    success: (n) => `Exported ${n} file${n === 1 ? "" : "s"} to ${fileName(dest)}.`,
+  });
 }
 
 // -------------------------------------------------------------------- tags
@@ -307,6 +338,9 @@ export function tagMenu(e: MouseEvent, name: string, oid: string) {
   menu.fromEvent(e, [
     { label: "Show commit", action: () => selectCommit(oid) },
     { label: "Check out", action: () => app.act("Checking out", () => api.checkoutCommit(P(), oid)) },
+    { label: "Browse files", action: () => browseAt(oid, name) },
+    { label: "Export as ZIP…", action: () => exportZip(oid, name) },
+    { label: `Compare with ${app.headBranch ?? "HEAD"}`, action: () => compareWith(name) },
     ...remotes.map((r) => ({ label: `Push to ${r.name}`, action: () => app.act("Pushing tag", (c) => api.pushTag(P(), name, r.name, c), { success: `Pushed ${name} to ${r.name}.` }) })),
     { separator: true },
     { label: "Delete", danger: true, action: () => app.act("Deleting tag", () => api.deleteTag(P(), name), { success: `Deleted tag ${name}.` }) },
@@ -457,7 +491,7 @@ export async function moveCommit(oid: string, afterOid: string | null) {
   await rewrite(`Move “${moved.summary}”`, () => order.map((o) => ({ oid: o, action: "pick" as RebaseAction })), touched, "Commit moved.");
 }
 
-export async function resetTo(c: CommitRow) {
+export async function resetTo(c: Pick<CommitRow, "oid" | "short">) {
   const r = await dialog.show({
     title: `Reset ${app.headBranch ?? "HEAD"} to ${c.short}`,
     body: "Moves the branch to this commit. Choose what happens to the changes in the commits after it.",
@@ -493,6 +527,8 @@ export function commitMenu(e: MouseEvent, c: CommitRow, openRebase: (from: Commi
     { label: "Remove commit…", danger: true, disabled: !canRewrite, action: () => dropCommit(c) },
     { label: "Rewrite from here…", disabled: !canRewrite, action: () => openRebase(c) },
     { separator: true },
+    { label: "Browse files at this commit", action: () => browseAt(c.oid, c.short) },
+    { label: "Export as ZIP…", action: () => exportZip(c.oid, c.short) },
     { label: "Save as patch…", disabled: c.parents.length > 1, action: () => saveCommitPatch(c) },
     { label: "Copy commit ID", action: () => navigator.clipboard.writeText(c.oid).then(() => toasts.push("info", "Copied commit ID.")) },
   ], `${c.short} ${c.summary}`);
