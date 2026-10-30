@@ -46,6 +46,13 @@
     <form class="dialog" bind:this={form} onsubmit={submit} aria-labelledby="dlg-title">
       <h2 id="dlg-title">{s.title}</h2>
       {#if s.body}<p class="body">{s.body}</p>{/if}
+      {#if s.items?.length}
+        <ul class="items">
+          {#each s.items as it}
+            <li><span class="itext">{it.text}</span>{#if it.note}<span class="inote" class:warn={it.warn}>{it.note}</span>{/if}</li>
+          {/each}
+        </ul>
+      {/if}
       {#each s.fields ?? [] as f (f.key)}
         {#if f.type === "checkbox"}
           <label class="check"><input type="checkbox" bind:checked={values[f.key] as boolean} /> {f.label}</label>
@@ -89,6 +96,14 @@
   }
   @keyframes rise { from { transform: translateY(6px); opacity: 0; } }
   h2 { margin: 0; font-size: calc(var(--fs) * 15); font-weight: 700; }
+  .items {
+    list-style: none; margin: 0; padding: 4px 0; max-height: 220px; overflow-y: auto;
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2);
+  }
+  .items li { display: flex; align-items: center; gap: 10px; padding: 3px 10px; min-height: 26px; }
+  .itext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; user-select: text; }
+  .inote { flex: none; font-size: calc(var(--fs) * 11.5); color: var(--ink-3); }
+  .inote.warn { color: var(--warn); border: 1px solid currentColor; border-radius: 4px; padding: 0 5px; font-weight: 600; }
   .body { margin: 0; color: var(--ink-2); white-space: pre-wrap; user-select: text; }
   .field { display: flex; flex-direction: column; gap: 5px; }
   .field span { font-size: calc(var(--fs) * 12); color: var(--ink-2); font-weight: 600; }

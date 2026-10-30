@@ -46,6 +46,8 @@ export interface Field {
 export interface DialogSpec {
   title: string;
   body?: string;
+  /** A short scrollable list shown under the body (what's about to be deleted, say). */
+  items?: { text: string; note?: string; warn?: boolean }[];
   fields?: Field[];
   confirm: string;
   cancel?: string | null;

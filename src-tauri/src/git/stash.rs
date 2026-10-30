@@ -16,6 +16,14 @@ pub struct StashEntry {
     pub has_untracked: bool,
 }
 
+/// "On main: message" → "message", as shown in the stash list.
+fn pretty(message: &str) -> String {
+    match message.split_once(": ") {
+        Some((_, rest)) => rest.to_string(),
+        None => message.to_string(),
+    }
+}
+
 pub fn list(repo_path: &str) -> Result<Vec<StashEntry>> {
     let mut repo = open(repo_path)?;
     let mut raw: Vec<(usize, String, Oid)> = vec![];
@@ -32,14 +40,10 @@ pub fn list(repo_path: &str) -> Result<Vec<StashEntry>> {
             .or_else(|| message.strip_prefix("On "))
             .and_then(|r| r.split_once(':'))
             .map(|(b, _)| b.to_string());
-        let pretty = match message.split_once(": ") {
-            Some((_, rest)) => rest.to_string(),
-            None => message.clone(),
-        };
         out.push(StashEntry {
             index,
             oid: id.to_string(),
-            message: pretty,
+            message: pretty(&message),
             branch,
             time: c.time().seconds(),
             has_untracked: c.parent_count() > 2,
@@ -157,7 +161,7 @@ pub fn pop(repo_path: &str, index: usize, quiet: bool) -> Result<()> {
     applied.map_err(map_apply)?;
     repo.stash_drop(index)?;
     if !quiet {
-        undo::record(&repo, format!("Pop stash \"{msg}\""), Action::RestoreStash { oid: id.to_string(), message: msg, reset_worktree: clean });
+        undo::record(&repo, format!("Pop stash \"{}\"", pretty(&msg)), Action::RestoreStash { oid: id.to_string(), message: msg, reset_worktree: clean });
     }
     Ok(())
 }
@@ -166,8 +170,48 @@ pub fn drop(repo_path: &str, index: usize) -> Result<()> {
     let mut repo = open(repo_path)?;
     let (id, msg) = entry_at(&mut repo, index)?;
     repo.stash_drop(index)?;
-    undo::record(&repo, format!("Delete stash \"{msg}\""), Action::RestoreStash { oid: id.to_string(), message: msg, reset_worktree: false });
+    undo::record(&repo, format!("Delete stash \"{}\"", pretty(&msg)), Action::RestoreStash { oid: id.to_string(), message: msg, reset_worktree: false });
     Ok(())
+}
+
+/// Delete several stashes, identified by commit id (indexes shift as entries
+/// are dropped), as one undoable step. Undo puts them back in their original
+/// relative order, on top of the list.
+pub fn drop_many(repo_path: &str, oids: &[String]) -> Result<usize> {
+    let mut repo = open(repo_path)?;
+    let mut entries: Vec<(usize, Oid, String)> = vec![];
+    repo.stash_foreach(|i, msg, id| {
+        if oids.iter().any(|o| *o == id.to_string()) {
+            entries.push((i, *id, msg.to_string()));
+        }
+        true
+    })?;
+    if entries.len() != oids.len() {
+        return err("Some of those stashes no longer exist. Nothing was deleted.");
+    }
+    // Drop from the highest index down so the remaining indexes stay valid.
+    entries.sort_by_key(|e| std::cmp::Reverse(e.0));
+    for (i, _, _) in &entries {
+        repo.stash_drop(*i)?;
+    }
+    // Undo runs a batch backwards; record newest-first so the oldest is
+    // restored first and ends up lowest in the list.
+    entries.reverse();
+    let n = entries.len();
+    let label = match entries.first() {
+        Some((_, _, msg)) if n == 1 => format!("Delete stash \"{}\"", pretty(msg)),
+        _ => format!("Delete {n} stashes"),
+    };
+    let mut actions: Vec<Action> = entries
+        .into_iter()
+        .map(|(_, id, message)| Action::RestoreStash { oid: id.to_string(), message, reset_worktree: false })
+        .collect();
+    if n == 1 {
+        undo::record(&repo, label, actions.pop().unwrap());
+    } else if n > 1 {
+        undo::record(&repo, label, Action::Batch { actions });
+    }
+    Ok(n)
 }
 
 /// Create a branch from a stash and apply it there (like `git stash branch`).

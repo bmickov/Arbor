@@ -46,6 +46,9 @@ pub enum Action {
     RemoveRemote { name: String },
     RecreateRemote { name: String, url: String },
     SetUpstream { branch: String, previous: Option<String> },
+    /// Several actions recorded as one step (e.g. deleting several branches);
+    /// undone in reverse order.
+    Batch { actions: Vec<Action> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -292,6 +295,11 @@ fn apply(repo: &Repository, action: &Action) -> Result<()> {
         Action::SetUpstream { branch, previous } => {
             let mut b = repo.find_branch(branch, git2::BranchType::Local)?;
             b.set_upstream(previous.as_deref())?;
+        }
+        Action::Batch { actions } => {
+            for a in actions.iter().rev() {
+                apply(repo, a)?;
+            }
         }
     }
     Ok(())

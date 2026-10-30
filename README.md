@@ -56,6 +56,9 @@ contains none of their code or artwork.
   then keep, edit message, squash, fixup or remove each commit
 
 **Branches and remotes**
+- Select several branches with Ctrl+click or Shift+click and delete them at
+  once. One confirmation lists them, flags any with unmerged commits (with a
+  "Delete only merged" choice), and one Undo brings them all back
 - **Drag a branch onto another branch** to merge or rebase
 - **Drag a branch onto a remote** to push it there
 - Drag a commit onto the current branch to cherry-pick it
@@ -67,6 +70,9 @@ contains none of their code or artwork.
 **Stashes**
 - Stash with a message, optionally including new files or keeping staged changes
 - Apply, apply-and-remove, delete, or turn a stash into a branch
+- Select several stashes (Ctrl+click, Shift+click, Ctrl+A) and delete them
+  together with the Delete key or the Delete button. Deleting always asks
+  first, and one Undo restores them all
 - Drag a stash onto Changes to apply it
 
 **Undo**
@@ -88,13 +94,13 @@ Pick the package for your distribution from the release files:
 
 ```sh
 # Debian, Ubuntu, Mint, Pop!_OS
-sudo apt install ./Arbor_0.4.2_amd64.deb
+sudo apt install ./Arbor_0.5.0_amd64.deb
 
 # Fedora, openSUSE
-sudo dnf install ./Arbor-0.4.2-1.x86_64.rpm
+sudo dnf install ./Arbor-0.5.0-1.x86_64.rpm
 
 # Anything else
-chmod +x Arbor_0.4.2_amd64.AppImage && ./Arbor_0.4.2_amd64.AppImage
+chmod +x Arbor_0.5.0_amd64.AppImage && ./Arbor_0.5.0_amd64.AppImage
 ```
 
 Run `arbor /path/to/repo` to open a repository directly in a new tab.
