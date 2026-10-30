@@ -108,6 +108,19 @@
       <Icon name="stash" /><span>Stashes</span>
       {#if app.stashes.length}<b class="badge plain">{app.stashes.length}</b>{/if}
     </button>
+    <button class="nav" class:on={app.view === "review"} onclick={() => go("review")} title="Which branches are merged, stale or gone">
+      <Icon name="branch" /><span>Branches Review</span>
+    </button>
+    <button class="nav" class:on={app.view === "reflog"} onclick={() => go("reflog")} title="Recent positions of HEAD; recover lost commits">
+      <Icon name="undo" /><span>Reflog</span>
+    </button>
+    {#if app.view === "compare" || app.view === "browse"}
+      <button class="nav on">
+        <Icon name={app.view === "compare" ? "split" : "folder"} />
+        <span>{app.view === "compare" ? "Compare" : "Files"}</span>
+        <span class="scope faint">{app.view === "compare" ? app.compare?.target : app.browse?.label}</span>
+      </button>
+    {/if}
   </div>
 
   <div class="lists">

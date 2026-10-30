@@ -69,6 +69,20 @@ function decodeHunk(w: WireHunk): Hunk {
 
 const decodeDiff = (d: WireDiff | null): FileDiff | null => (d ? { ...d, hunks: d.hunks.map(decodeHunk) } : null);
 
+export interface ReflogEntry { oid: string; short: string; message: string; time: number; summary: string | null; author: string | null; lost: boolean }
+export interface ReviewRow {
+  name: string; isHead: boolean; isBase: boolean; merged: "merged" | "squashed" | "unmerged";
+  ahead: number; behind: number; upstream: string | null; upstreamGone: boolean; toPush: number; toPull: number;
+  time: number; author: string; summary: string;
+}
+export interface Review { base: string; rows: ReviewRow[] }
+export interface CompareCommit { oid: string; short: string; summary: string; author: string; time: number }
+export interface Comparison {
+  base: string; target: string; mergeBase: string | null;
+  ahead: CompareCommit[]; behind: CompareCommit[]; aheadTotal: number; behindTotal: number; files: FileDiff[];
+}
+export interface TreeEntry { path: string; kind: "file" | "link" | "submodule"; size: number; executable: boolean }
+export interface FileContent { text: string | null; binary: boolean; size: number }
 export interface Applied { files: number; subject: string | null; body: string | null }
 export interface Identity { name: string | null; email: string | null; local: boolean }
 export interface DiffSettings { context?: number; ignoreWhitespace?: boolean; maxLines?: number }
@@ -195,6 +209,14 @@ export const api = {
   saveCommitPatch: (repo: string, oid: string, dest: string) => call<void>("save_commit_patch", { repo, oid, dest }),
   saveChangesPatch: (repo: string, staged: boolean, dest: string) => call<number>("save_changes_patch", { repo, staged, dest }),
   applyPatch: (repo: string, file: string) => call<Applied>("apply_patch", { repo, file }),
+  reflog: (repo: string, refname: string, limit = 300) => call<ReflogEntry[]>("reflog", { repo, refname, limit }),
+  branchesReview: (repo: string, base: string | null) => call<Review>("branches_review", { repo, base }),
+  compareBranches: (repo: string, base: string, target: string) => call<Comparison>("compare_branches", { repo, base, target }),
+  compareFileDiff: (repo: string, base: string, target: string, path: string, settings?: DiffSettings) =>
+    call<WireDiff | null>("compare_file_diff", { repo, base, target, path, settings }).then(decodeDiff),
+  treeAt: (repo: string, rev: string) => call<TreeEntry[]>("tree_at", { repo, rev }),
+  fileContent: (repo: string, rev: string, path: string) => call<FileContent>("file_content", { repo, rev, path }),
+  exportZip: (repo: string, rev: string, dest: string, folder: string) => call<number>("export_zip", { repo, rev, dest, folder }),
   trackedFiles: (repo: string) => call<string[]>("tracked_files", { repo }),
   fetch: (repo: string, remote: string | null, prune: boolean, creds?: Creds) => call<void>("fetch", { repo, remote, prune, creds }),
   pull: (repo: string, rebase: boolean, creds?: Creds) => call<PullOutcome>("pull", { repo, rebase, creds }),

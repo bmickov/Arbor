@@ -907,3 +907,116 @@ fn patches_round_trip() {
     assert_eq!(r.read("a.txt"), "completely different\n");
     assert!(!Path::new(&r.path).join("c.txt").exists());
 }
+
+#[test]
+fn reflog_finds_commits_of_a_deleted_branch() {
+    let r = Repo::new();
+    r.write("f.txt", "1\n");
+    r.commit_all("base");
+    r.git(&["checkout", "-q", "-b", "experiment"]);
+    r.write("f.txt", "2\n");
+    r.commit_all("precious work");
+    let lost = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["branch", "-D", "experiment"]);
+
+    let log = git::review::reflog(&r.path, "HEAD", 100).unwrap();
+    let e = log.iter().find(|e| e.oid == lost).expect("the deleted branch's commit is in HEAD's reflog");
+    assert!(e.lost, "nothing else points at it");
+    assert_eq!(e.summary.as_deref(), Some("precious work"));
+    assert!(!log[0].lost, "the current commit is on main");
+    // Recovering it is just making a branch there.
+    git::branches::create_branch(&r.path, "rescued", Some(&lost), false).unwrap();
+    let log = git::review::reflog(&r.path, "HEAD", 100).unwrap();
+    assert!(!log.iter().find(|e| e.oid == lost).unwrap().lost);
+}
+
+#[test]
+fn branches_review_detects_merged_squashed_and_stale() {
+    let r = Repo::new();
+    r.write("f.txt", "base\n");
+    r.commit_all("base");
+    // Merged normally.
+    r.git(&["checkout", "-q", "-b", "merged"]);
+    r.write("a.txt", "a\n");
+    r.commit_all("a");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["merge", "-q", "--no-ff", "-m", "merge a", "merged"]);
+    // Squash-merged: its commits never reach main, but its changes do.
+    r.git(&["checkout", "-q", "-b", "squashed"]);
+    r.write("b.txt", "b1\n");
+    r.commit_all("b1");
+    r.write("b.txt", "b2\n");
+    r.commit_all("b2");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["merge", "-q", "--squash", "squashed"]);
+    r.git(&["commit", "-q", "-m", "squash b"]);
+    // Not merged.
+    r.git(&["checkout", "-q", "-b", "wip"]);
+    r.write("c.txt", "c\n");
+    r.commit_all("c");
+    r.git(&["checkout", "-q", "main"]);
+
+    let rev = git::review::branches_review(&r.path, None).unwrap();
+    assert_eq!(rev.base, "main");
+    let row = |n: &str| rev.rows.iter().find(|x| x.name == n).unwrap();
+    assert_eq!(row("merged").merged, "merged");
+    assert_eq!(row("squashed").merged, "squashed");
+    assert_eq!(row("wip").merged, "unmerged");
+    assert_eq!((row("wip").ahead, row("wip").behind), (1, 0));
+    assert!(row("main").is_base && row("main").is_head);
+}
+
+#[test]
+fn compare_two_branches() {
+    let r = Repo::new();
+    r.write("f.txt", "base\n");
+    r.commit_all("base");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("f.txt", "feature\n");
+    r.commit_all("feature 1");
+    r.write("g.txt", "g\n");
+    r.commit_all("feature 2");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("h.txt", "h\n");
+    r.commit_all("main moved on");
+
+    let c = git::review::compare(&r.path, "main", "feature").unwrap();
+    assert_eq!(c.ahead.iter().map(|x| x.summary.as_str()).collect::<Vec<_>>(), vec!["feature 2", "feature 1"]);
+    assert_eq!(c.behind.iter().map(|x| x.summary.as_str()).collect::<Vec<_>>(), vec!["main moved on"]);
+    // Files are what feature brings (since the merge base), not main's own change.
+    let mut files: Vec<_> = c.files.iter().map(|f| f.path.as_str()).collect();
+    files.sort();
+    assert_eq!(files, vec!["f.txt", "g.txt"]);
+    let d = git::review::compare_file(&r.path, "main", "feature", "f.txt", Default::default()).unwrap().unwrap();
+    assert_eq!((d.additions, d.deletions), (1, 1));
+    assert!(git::review::compare(&r.path, "main", "main").is_err());
+}
+
+#[test]
+fn browse_and_export_zip() {
+    let r = Repo::new();
+    r.write("README.md", "hello\n");
+    r.write("src/main.rs", "fn main() {}\n");
+    r.commit_all("v1");
+    r.write("src/main.rs", "fn main() { println!(\"v2\"); }\n");
+    r.commit_all("v2");
+
+    let files = git::tree::tree_at(&r.path, "HEAD^").unwrap();
+    let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, vec!["README.md", "src/main.rs"]);
+    assert_eq!(files[0].size, 6);
+    let old = git::tree::file_content(&r.path, "HEAD^", "src/main.rs").unwrap();
+    assert_eq!(old.text.as_deref(), Some("fn main() {}\n"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let zip_path = dir.path().join("v1.zip").to_string_lossy().to_string();
+    assert_eq!(git::tree::export_zip(&r.path, "HEAD^", &zip_path, "project-v1").unwrap(), 2);
+    let out = Command::new("unzip").args(["-l", &zip_path]).output();
+    if let Ok(out) = out {
+        let list = String::from_utf8_lossy(&out.stdout);
+        assert!(list.contains("project-v1/src/main.rs") && list.contains("project-v1/README.md"), "{list}");
+        let content = Command::new("unzip").args(["-p", &zip_path, "project-v1/src/main.rs"]).output().unwrap().stdout;
+        assert_eq!(String::from_utf8_lossy(&content), "fn main() {}\n");
+    }
+}

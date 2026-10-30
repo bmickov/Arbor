@@ -1,6 +1,6 @@
 [package]
 name = "arbor"
-version = "0.7.0"
+version = "0.8.0"
 description = "A friendly Git client for Linux, the BSDs, macOS and Windows"
 license = "0BSD"
 authors = ["The Arbor authors"]
@@ -25,6 +25,7 @@ thiserror = "2"
 dirs = "6"
 open = "5"
 chrono = "0.4"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # macOS: build OpenSSL (used by libgit2 and libssh2) into the app. Otherwise it
 # would link against Homebrew's copy, which users don't have, and the Intel

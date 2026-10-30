@@ -19,6 +19,7 @@ pub mod patch;
 pub mod rebase;
 pub mod remote;
 pub mod repo;
+pub mod review;
 pub mod stash;
 pub mod status;
 pub mod tree;

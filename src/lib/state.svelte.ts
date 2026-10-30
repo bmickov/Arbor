@@ -13,7 +13,7 @@ import { library } from "./library.svelte";
 import { applyTheme, type ThemeId } from "./themes";
 import { dialog, toasts } from "./ui.svelte";
 
-export type View = "changes" | "history" | "stashes";
+export type View = "changes" | "history" | "stashes" | "review" | "reflog" | "compare" | "browse";
 
 /** What a tab was showing. Saved across restarts when session restore is on. */
 export interface TabUI {
@@ -26,6 +26,10 @@ export interface TabUI {
   historyScroll: number;
   logLimit: number;
   fileHistoryPath: string | null;
+  /** The two branches being compared (Compare view). */
+  compare?: { base: string; target: string } | null;
+  /** The commit, branch or tag whose files are shown (Browse view). */
+  browse?: { rev: string; label: string } | null;
 }
 
 /** Data loaded for a tab, kept in memory so switching tabs is instant. */
@@ -155,6 +159,8 @@ class App {
   selectedFile = $state<{ path: string; area: "staged" | "unstaged" | "conflicted" } | null>(null);
   /** File whose history/blame panel is open. */
   fileHistoryPath = $state<string | null>(null);
+  compare = $state<{ base: string; target: string } | null>(null);
+  browse = $state<{ rev: string; label: string } | null>(null);
   historyQuery = $state("");
   historyScroll = $state(0);
   layout = $state<Layout>(structuredClone(DEFAULT_LAYOUT));
@@ -272,8 +278,8 @@ class App {
 
   /** Just the view-and-selection part of a tab's saved state. */
   private pickUI(t: TabState): TabUI {
-    const { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath } = t;
-    return { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath };
+    const { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath, compare, browse } = t;
+    return { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath, compare, browse };
   }
 
   private uiSnapshot(): TabUI {
@@ -281,6 +287,7 @@ class App {
       view: this.view, scope: this.scope, selectedCommit: this.selectedCommit, selectedStash: this.selectedStash,
       selectedFile: this.selectedFile, historyQuery: this.historyQuery, historyScroll: this.historyScroll,
       logLimit: this.logLimit, fileHistoryPath: this.fileHistoryPath,
+      compare: this.compare ? { ...this.compare } : null, browse: this.browse ? { ...this.browse } : null,
     };
   }
 
@@ -311,6 +318,10 @@ class App {
     this.historyQuery = t?.historyQuery ?? "";
     this.historyScroll = t?.historyScroll ?? 0;
     this.fileHistoryPath = t?.fileHistoryPath ?? null;
+    this.compare = t?.compare ?? null;
+    this.browse = t?.browse ?? null;
+    // A view that needs something it no longer has falls back to history.
+    if ((this.view === "compare" && !this.compare) || (this.view === "browse" && !this.browse)) this.view = "history";
   }
 
   /** Make tab `i` active (-1 shows the repository manager). */
@@ -456,12 +467,7 @@ class App {
 
   /** Everything needed to pick up where the user left off. */
   session(): Session {
-    const pick = (t: TabState | null): TabUI | null =>
-      t ? {
-        view: t.view, scope: t.scope, selectedCommit: t.selectedCommit, selectedStash: t.selectedStash,
-        selectedFile: t.selectedFile, historyQuery: t.historyQuery, historyScroll: t.historyScroll,
-        logLimit: t.logLimit, fileHistoryPath: t.fileHistoryPath,
-      } : null;
+    const pick = (t: TabState | null): TabUI | null => (t ? this.pickUI(t) : null);
     return {
       version: 1,
       active: this.active,

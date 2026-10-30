@@ -71,6 +71,15 @@ export const COMMANDS: Command[] = [
   { id: "view.changes", label: "Show changes", group: "Views", keys: ["Ctrl+1"], repo: true, inInputs: true, run: () => view("changes") },
   { id: "view.history", label: "Show history", group: "Views", keys: ["Ctrl+2"], repo: true, inInputs: true, run: () => view("history") },
   { id: "view.stashes", label: "Show stashes", group: "Views", keys: ["Ctrl+3"], repo: true, inInputs: true, run: () => view("stashes") },
+  { id: "view.review", label: "Show Branches Review", group: "Views", keys: ["Ctrl+4"], repo: true, inInputs: true, run: () => view("review") },
+  { id: "view.reflog", label: "Show the reflog (recover lost commits)", group: "Views", keys: ["Ctrl+5"], repo: true, inInputs: true, run: () => view("reflog") },
+  { id: "compare", label: "Compare branches…", group: "Branches & history", keys: [], repo: true, run: () => {
+    const other = app.refs?.local.find((b) => !b.isHead)?.name;
+    if (other) return act.compareWith(other);
+    app.compare = { base: app.headBranch ?? "HEAD", target: "" };
+    app.view = "compare";
+  } },
+  { id: "browse", label: "Browse files at the current commit", group: "Branches & history", keys: [], repo: true, run: () => act.browseAt(app.status?.head ?? "HEAD", app.headBranch ?? "HEAD") },
   { id: "diff.split", label: "Side-by-side diffs in history", group: "Views", keys: ["Ctrl+Shift+D"], repo: true, run: () => {
     app.settings.splitDiff = !app.settings.splitDiff;
     app.saveSettings();
