@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { keyText, shortPath } from "../lib/platform";
   import { api } from "../lib/api";
   import { draggable, dropTarget } from "../lib/drag.svelte";
   import { library } from "../lib/library.svelte";
@@ -30,13 +31,13 @@
       { label: "Show in file manager", action: () => api.openExternal(t.path) },
       { label: "Open terminal here", action: () => api.openTerminal(t.path) },
       { label: "Copy path", action: () => navigator.clipboard.writeText(t.path) },
-    ], t.path.replace(/^\/home\/[^/]+/, "~"));
+    ], shortPath(t.path));
   }
 </script>
 
 <div class="tabs" role="tablist" aria-label="Open repositories">
   <button class="home" class:on={app.active === -1} role="tab" aria-selected={app.active === -1}
-    title="All repositories (Ctrl+T)" onclick={() => app.switchTo(-1)}>
+    title={keyText("All repositories (Ctrl+T)")} onclick={() => app.switchTo(-1)}>
     <Icon name="grid" size={14} /><span>Repositories</span>
   </button>
 
@@ -69,14 +70,14 @@
         {/if}
         <span class="name">{t.name}</span>
         {#if st?.behind}<span class="behind" title="{st.behind} to pull">↓{st.behind}</span>{/if}
-        <button class="x" aria-label="Close {t.name}" title="Close (Ctrl+W)" onclick={(e) => { e.stopPropagation(); app.closeTab(i); }}><Icon name="x" size={12} /></button>
+        <button class="x" aria-label="Close {t.name}" title={keyText("Close (Ctrl+W)")} onclick={(e) => { e.stopPropagation(); app.closeTab(i); }}><Icon name="x" size={12} /></button>
       </div>
     {/each}
   </div>
   <button class="plus" title="Open another repository" aria-label="Open another repository" onclick={() => app.switchTo(-1)}><Icon name="plus" size={14} /></button>
   <span class="grow"></span>
   {#if !app.repo}
-    <button class="gear" title="Preferences (Ctrl+,)" aria-label="Preferences" onclick={() => (app.prefs = "general")}><Icon name="settings" size={15} /></button>
+    <button class="gear" title={keyText("Preferences (Ctrl+,)")} aria-label="Preferences" onclick={() => (app.prefs = "general")}><Icon name="settings" size={15} /></button>
   {/if}
 </div>
 

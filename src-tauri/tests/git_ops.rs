@@ -27,6 +27,9 @@ impl Repo {
         r.git(&["config", "user.name", "Test"]);
         r.git(&["config", "user.email", "test@example.com"]);
         r.git(&["config", "commit.gpgsign", "false"]);
+        // Git for Windows defaults to converting line endings, which would
+        // change the file contents these tests compare.
+        r.git(&["config", "core.autocrlf", "false"]);
         r
     }
     fn git(&self, args: &[&str]) -> String {
@@ -215,8 +218,12 @@ fn hooks_run_and_can_block() {
     r.commit_all("init");
     let hook = Path::new(&r.path).join(".git/hooks/pre-commit");
     std::fs::write(&hook, "#!/bin/sh\necho 'lint failed' >&2\nexit 1\n").unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Unix needs the hook to be executable; Windows runs it through Git's sh.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     r.write("a.txt", "b\n");
     git::patch::stage_all(&r.path).unwrap();
     let e = git::commit::commit(&r.path, "x", false, false).unwrap_err().to_string();
@@ -529,6 +536,7 @@ fn library_scan_and_summaries() {
         std::fs::create_dir_all(&p).unwrap();
         let run = |args: &[&str]| assert!(Command::new("git").args(args).current_dir(&p).output().unwrap().status.success());
         run(&["init", "-q", "-b", "main"]);
+        run(&["config", "core.autocrlf", "false"]);
         run(&["config", "user.name", "T"]);
         run(&["config", "user.email", "t@example.com"]);
         std::fs::write(p.join("f.txt"), "x\n").unwrap();

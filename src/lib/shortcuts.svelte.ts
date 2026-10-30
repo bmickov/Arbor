@@ -3,6 +3,7 @@
 
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
+import { keyParts } from "./platform";
 import * as act from "./actions";
 import { app, CODE_SIZES, UI_SIZES, type View } from "./state.svelte";
 import { dialog, menu } from "./ui.svelte";
@@ -137,7 +138,7 @@ export function comboFromEvent(e: KeyboardEvent): string | null {
 
 const PRETTY: Record<string, string> = { Up: "↑", Down: "↓", Left: "←", Right: "→", Enter: "Enter", Backspace: "⌫" };
 export function prettyKeys(combo: string): string[] {
-  return combo.split("+").map((k) => PRETTY[k] ?? k);
+  return keyParts(combo).map((k) => PRETTY[k] ?? k);
 }
 
 /** The command bound to `combo`, other than `except`. */

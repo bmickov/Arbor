@@ -4,7 +4,6 @@
 use super::{Error, Result};
 use git2::Repository;
 use std::path::PathBuf;
-use std::process::Command;
 
 fn hooks_dir(repo: &Repository) -> PathBuf {
     let wd = repo.workdir().map(|p| p.to_path_buf()).unwrap_or_else(|| repo.path().to_path_buf());
@@ -34,7 +33,8 @@ fn run(repo: &Repository, name: &str, args: &[&str]) -> Result<()> {
         return Ok(());
     }
     let wd = repo.workdir().unwrap();
-    let out = Command::new(&hook)
+    let out = crate::platform::hook_command(&hook)
+        .map_err(Error::Msg)?
         .args(args)
         .current_dir(wd)
         .env("GIT_DIR", repo.path())

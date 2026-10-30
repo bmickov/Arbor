@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { keyParts, keyText } from "../lib/platform";
   import { app, CODE_SIZES, UI_SIZES } from "../lib/state.svelte";
   import {
     bindings, COMMANDS, commandFor, comboFromEvent, FIXED, GROUPS, prettyKeys, recording, resetBindings, setBinding,
@@ -211,7 +212,7 @@
                 <button class="link" disabled={s.uiSize === UI_SIZES.default} onclick={() => app.setUiSize(UI_SIZES.default)}>Reset</button>
               </div>
             </div>
-            <p class="hint">Also with <span class="kbd">Ctrl</span> <span class="kbd">=</span> and <span class="kbd">Ctrl</span> <span class="kbd">-</span> anywhere in Arbor{s.codeFollowsUi ? ", which resize code and diffs along with it" : ""}.</p>
+            <p class="hint">Also with {#each keyParts("Ctrl+=") as k}<span class="kbd">{k}</span> {/each}and {#each keyParts("Ctrl+-") as k}<span class="kbd">{k}</span> {/each}anywhere in Arbor{s.codeFollowsUi ? ", which resize code and diffs along with it" : ""}.</p>
           </section>
 
           <section>
@@ -236,7 +237,7 @@
             </div>
             <label class="toggle">
               <input type="checkbox" checked={s.codeFollowsUi} onchange={() => { s.codeFollowsUi = !s.codeFollowsUi; save(); }} />
-              <span><b>Scale with interface text</b><small>When interface text gets bigger or smaller (here or with Ctrl+= and Ctrl+-), code and diffs change by the same amount, keeping the difference you set above. Turn this off to keep code at a fixed size. Ctrl+Alt+= and Ctrl+Alt+- always change code alone.</small></span>
+              <span><b>Scale with interface text</b><small>{keyText("When interface text gets bigger or smaller (here or with Ctrl+= and Ctrl+-), code and diffs change by the same amount, keeping the difference you set above. Turn this off to keep code at a fixed size. Ctrl+Alt+= and Ctrl+Alt+- always change code alone.")}</small></span>
             </label>
             <div class="sample mono" aria-hidden="true">
               <div class="sl"><span class="n">12</span><span class="c">  const total = items.reduce((a, b) =&gt; a + b, 0);</span></div>

@@ -1,6 +1,7 @@
 //! Tauri entry point: exposes the git module as commands the UI can invoke.
 
 pub mod git;
+pub mod platform;
 
 use git::diff::DiffSettings;
 use git::patch::Selection;
@@ -359,33 +360,13 @@ fn startup_path() -> Option<String> {
 /// Open a file or folder with the desktop's default application.
 #[tauri::command]
 fn open_external(path: String) -> R<()> {
-    std::process::Command::new("xdg-open").arg(&path).spawn().map_err(|e| e.to_string())?;
-    Ok(())
+    platform::open_path(&path)
 }
 
-/// Open a terminal in `path`, trying common terminal emulators.
+/// Open a terminal window in `path`.
 #[tauri::command]
 fn open_terminal(path: String) -> R<()> {
-    let candidates: [(&str, &[&str]); 7] = [
-        ("x-terminal-emulator", &[]),
-        ("gnome-terminal", &["--working-directory"]),
-        ("konsole", &["--workdir"]),
-        ("kgx", &["--working-directory"]),
-        ("xfce4-terminal", &["--working-directory"]),
-        ("alacritty", &["--working-directory"]),
-        ("kitty", &["--directory"]),
-    ];
-    for (bin, flag) in candidates {
-        let mut cmd = std::process::Command::new(bin);
-        cmd.current_dir(&path);
-        if let Some(f) = flag.first() {
-            cmd.arg(f).arg(&path);
-        }
-        if cmd.spawn().is_ok() {
-            return Ok(());
-        }
-    }
-    Err("No terminal emulator was found.".into())
+    platform::open_terminal(&path)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

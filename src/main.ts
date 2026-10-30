@@ -13,6 +13,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { restoreStateCurrent, saveWindowState, StateFlags } from "@tauri-apps/plugin-window-state";
 import { toasts } from "./lib/ui.svelte";
 import { app as state, applyAppearance } from "./lib/state.svelte";
+import { initPlatform } from "./lib/platform";
 
 // Apply the saved theme and fonts before the first paint.
 applyAppearance(state.settings);
@@ -36,6 +37,7 @@ window.addEventListener("unhandledrejection", (e) => {
   toasts.push("error", `Unexpected error: ${String(e.reason)}`);
 });
 
+await initPlatform();
 const app = mount(App, { target: document.getElementById("app")! });
 
 // The window starts hidden. Put it back where it was last time (if session

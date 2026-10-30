@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { shortPath } from "../lib/platform";
   import type { Bookmark, RepoSummary } from "../lib/api";
   import { api } from "../lib/api";
   import { draggable, dropTarget } from "../lib/drag.svelte";
@@ -171,7 +172,7 @@
   }
 
   const total = $derived(library.repos.length);
-  const shortPath = (p: string) => p.replace(/^\/home\/[^/]+/, "~");
+
 
   // Each row is its own grid, so columns can't size to their content by
   // themselves. Measure the longest name/path and branch (in characters) and
