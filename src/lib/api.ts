@@ -115,6 +115,56 @@ export interface Refs { local: LocalBranch[]; remotes: Remote[]; tags: Tag[] }
 
 export interface StashEntry { index: number; oid: string; message: string; branch: string | null; time: number; hasUntracked: boolean }
 export interface UndoEntry { label: string; time: number; action: { kind: string } }
+export interface WorktreeInfo {
+  name: string | null;
+  path: string;
+  branch: string | null;
+  head: string | null;
+  summary: string;
+  isMain: boolean;
+  isCurrent: boolean;
+  changes: number;
+  locked: string | null;
+  missing: boolean;
+}
+export interface SubmoduleInfo {
+  name: string;
+  path: string;
+  fullPath: string;
+  url: string | null;
+  branch: string | null;
+  recorded: string | null;
+  checkedOut: string | null;
+  state: "uninitialized" | "moved" | "dirty" | "ok";
+  dirty: boolean;
+}
+export interface SigningSettings {
+  enabled: boolean;
+  format: "openpgp" | "ssh" | "x509";
+  key: string;
+  /** Where commit.gpgsign is set. */
+  scope: "local" | "global" | "";
+  gpgAvailable: boolean;
+  sshAvailable: boolean;
+  allowedSigners: string;
+}
+export interface Verification {
+  format: "openpgp" | "ssh" | "x509";
+  status: "good" | "unverified" | "bad" | "error";
+  signer: string | null;
+  key: string | null;
+  detail: string;
+}
+export interface ConflictFile {
+  path: string;
+  /** The working-tree file, when it exists and is text. */
+  text: string | null;
+  /** The stages merged afresh, with diff3 markers. */
+  merged: string | null;
+  hasBase: boolean; hasOurs: boolean; hasTheirs: boolean; binary: boolean;
+  oursLabel: string; theirsLabel: string;
+  operation: "merge" | "cherry-pick" | "revert" | "rebase" | "stash";
+}
 export interface MergeOutcome { result: "up-to-date" | "fast-forward" | "merged" | "conflicts"; conflicts: string[] }
 export interface RebaseOutcome { result: "up-to-date" | "fast-forward" | "rebased" | "unchanged"; head: string }
 export interface PullOutcome { result: string; conflicts: string[] }
@@ -156,9 +206,22 @@ export const api = {
   discardLines: (repo: string, path: string, selection: Selection[], settings?: DiffSettings) =>
     call<void>("discard_lines", { repo, path, selection, settings }),
   resolveConflict: (repo: string, path: string, side: "ours" | "theirs") => call<void>("resolve_conflict", { repo, path, side }),
+  conflictFile: (repo: string, path: string) => call<ConflictFile>("conflict_file", { repo, path }),
+  resolveWithContent: (repo: string, path: string, content: string) => call<void>("resolve_with_content", { repo, path, content }),
 
-  commit: (repo: string, message: string, amend: boolean, skipHooks: boolean) =>
-    call<CommitResult>("commit", { repo, message, amend, skipHooks }),
+  commit: (repo: string, message: string, amend: boolean, skipHooks: boolean, sign?: boolean) =>
+    call<CommitResult>("commit", { repo, message, amend, skipHooks, sign: sign ?? null }),
+  signingSettings: (repo: string) => call<SigningSettings>("signing_settings", { repo }),
+  setSigning: (repo: string, enabled: boolean, format: string, key: string, global: boolean) =>
+    call<void>("set_signing", { repo, enabled, format, key, global }),
+  verifyCommit: (repo: string, id: string) => call<Verification | null>("verify_commit", { repo, id }),
+  worktrees: (repo: string) => call<WorktreeInfo[]>("worktrees", { repo }),
+  addWorktree: (repo: string, path: string, branch: string, create: boolean, start: string | null) =>
+    call<string>("add_worktree", { repo, path, branch, create, start }),
+  removeWorktree: (repo: string, name: string, force: boolean) => call<void>("remove_worktree", { repo, name, force }),
+  pruneWorktrees: (repo: string) => call<number>("prune_worktrees", { repo }),
+  submodules: (repo: string) => call<SubmoduleInfo[]>("submodules", { repo }),
+  updateSubmodules: (repo: string, paths: string[], creds?: Creds) => call<number>("update_submodules", { repo, paths, creds }),
   headMessage: (repo: string) => call<string | null>("head_message", { repo }),
   cherryPick: (repo: string, oid: string) => call<CommitResult>("cherry_pick", { repo, oid }),
   revert: (repo: string, oid: string) => call<CommitResult>("revert_commit", { repo, oid }),

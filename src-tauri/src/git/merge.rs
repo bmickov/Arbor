@@ -75,7 +75,8 @@ pub fn merge(repo_path: &str, source: &str, no_ff: bool) -> Result<MergeOutcome>
         msg = msg.replacen(&first, &format!("{first} into {here}"), 1);
     }
     let theirs_commit = repo.find_commit(theirs)?;
-    let new = repo.commit(Some("HEAD"), &sig, &sig, &msg, &tree, &[&head, &theirs_commit])?;
+    let reflog = format!("merge {source}: Merge made by the 'ort' strategy.");
+    let new = super::sign::create(&repo, Some(&reflog), &sig, &sig, &msg, &tree, &[&head, &theirs_commit], super::sign::wanted(&repo, None))?;
     repo.cleanup_state()?;
     undo::record(
         &repo,

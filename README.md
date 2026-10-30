@@ -54,11 +54,24 @@ contains none of their code or artwork.
   (commits in `git format-patch` format), and apply patch files. Applying an
   emailed patch puts its message in the commit box
 - Runs your `pre-commit`, `commit-msg` and `post-commit` hooks (respects `core.hooksPath`)
-- Merge conflicts: keep mine, keep theirs, or mark resolved after editing; abort
+- **Conflict wizard**: every conflict in a file side by side, mine against
+  theirs (and the common base). Click a side to use it, take both in either
+  order, or write the result yourself, then save and mark the file resolved.
+  Works with half-edited files, and "Start over" merges the file afresh. Files
+  deleted on one side, or binary, get a keep-mine or keep-theirs choice
+- **Signed commits** with GPG or SSH keys (Preferences → Commits, for one
+  repository or all), using Git's own settings, so the command line agrees.
+  Each commit can opt out. Merges, cherry-picks, reverts and rewritten commits
+  are signed too
 
 **History**
 - Commit graph for all branches, the current branch, or any single branch
 - Commit details with per-file diffs, unified or side by side, and image previews
+- **Syntax highlighting** in diffs, the file browser and the conflict wizard,
+  for about 50 languages (turn it off in Preferences → Diffs & Git)
+- Signature checks: signed commits show **Verified** when the key is trusted
+  (your GPG keyring, or `gpg.ssh.allowedSignersFile` for SSH), **Signed** when
+  it can't be confirmed, and **Bad signature** when it doesn't match
 - Diffs of any size: a file with hundreds of thousands or millions of changed
   lines opens in a second or two and scrolls smoothly, and you can still stage
   single lines deep inside it. (In very large side-by-side diffs, long lines
@@ -97,6 +110,16 @@ contains none of their code or artwork.
 - SSH via ssh-agent or `~/.ssh/id_*` keys; HTTPS via your git credential helper,
   or a username and token prompt
 - Clone, init, add and remove remotes, track upstream branches, push and delete tags
+
+**Worktrees and submodules**
+- **Worktrees**: check out a branch in its own folder ("Check out in a new
+  worktree…" on any branch, or New worktree in Quick Actions), so you can work
+  on two branches at once. The sidebar lists them with uncommitted changes;
+  click one to open it in a tab. Remove deletes the folder and keeps the branch;
+  worktrees whose folder disappeared can be pruned
+- **Submodules**: listed in the sidebar with their state (not cloned, at a
+  different commit than recorded, or changed). Click to open one in a tab, or
+  to clone it; Update checks out the recorded commits, recursively
 
 **Branches Review**
 - Every local branch in one table: merged into a base branch or not
@@ -180,9 +203,9 @@ Open with **Ctrl+,** or the sliders button.
   difference you set; turn off "Scale with interface text" to keep it fixed.
   History rows and the graph scale with the interface size
 - **Diffs & Git:** context lines, when to ask before showing large diffs,
-  ignore whitespace, side-by-side history diffs, how often to fetch
+  syntax highlighting, ignore whitespace, side-by-side history diffs, how often to fetch
   automatically, pull with rebase
-- **Commits:** commit templates and author profiles
+- **Commits:** commit templates, author profiles, and commit signing
 - **Keyboard:** every shortcut below can be changed. Click it and press new keys;
   if another action used them, it's unassigned and you're told which
 
@@ -294,11 +317,13 @@ cd src-tauri && cargo test
 
 ## Known limits
 
-- Commit signing (GPG/SSH) isn't supported yet; commits are unsigned.
+- Signing uses the `gpg` and `ssh-keygen` programs, like Git. An SSH key with
+  a passphrase needs to be in ssh-agent; GnuPG asks in its own window.
 - Rebases that hit a conflict stop without changing anything instead of
   pausing for you to resolve. Merge instead, or finish that rebase with the git CLI.
 - Rebasing across merge commits isn't supported.
-- Submodules, worktrees, LFS and bisect aren't handled in the UI.
+- LFS and bisect aren't handled in the UI. Adding or removing submodules is
+  left to the git CLI (listing, cloning, updating and opening them works).
 - Pull requests and hosting-service integrations aren't included.
 - On Windows, Git hooks run through Git for Windows' `sh`, so hooks need
   [Git for Windows](https://git-scm.com) to be installed.

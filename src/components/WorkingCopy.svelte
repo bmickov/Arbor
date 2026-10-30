@@ -5,6 +5,7 @@
   import { app } from "../lib/state.svelte";
   import { menu, toasts } from "../lib/ui.svelte";
   import Composer from "./Composer.svelte";
+  import ConflictView from "./ConflictView.svelte";
   import DiffView from "./DiffView.svelte";
   import FileList from "./FileList.svelte";
   import Icon from "./Icon.svelte";
@@ -246,7 +247,7 @@
         </div>
       </div>
       {#if app.selectedFile.area === "conflicted"}
-        <div class="empty"><div><strong>This file has conflicts</strong>Edit it to remove the conflict markers, then choose “Resolved”. Or keep one side entirely with “Mine” or “Theirs”.</div></div>
+        <div class="dv"><ConflictView path={entry.path} onresolved={() => (app.selectedFile = null)} /></div>
       {:else}
         <div class="dv">
           <DiffView {diff} onshowall={() => app.largeDiffs.add(`${app.path}|${app.selectedFile!.area}|${app.selectedFile!.path}`)} loading={diffKey !== `${app.selectedFile.area}:${app.selectedFile.path}`} mode={app.selectedFile.area} onaction={lineAction}

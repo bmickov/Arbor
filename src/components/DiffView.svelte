@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type DiffLine, type FileDiff, type Selection } from "../lib/api";
   import { IMAGE_EXT } from "../lib/format";
+  import { Highlighter, languageFor } from "../lib/highlight";
   import { app } from "../lib/state.svelte";
   import Icon from "./Icon.svelte";
 
@@ -113,24 +114,61 @@
   const count = $derived(selected.size);
   const primary: Act = $derived(mode === "staged" ? "unstage" : "stage");
 
-  // Pair removed/added runs for the side-by-side view.
-  interface Row { left: DiffLine | null; right: DiffLine | null }
+  // Pair removed/added runs for the side-by-side view. li/ri are the line
+  // indexes within the hunk (-1 for an empty side).
+  interface Row { left: DiffLine | null; right: DiffLine | null; li: number; ri: number }
   function pairs(lines: DiffLine[]): Row[] {
     const rows: Row[] = [];
     let i = 0;
     while (i < lines.length) {
       if (lines[i].origin === " ") {
-        rows.push({ left: lines[i], right: lines[i] });
+        rows.push({ left: lines[i], right: lines[i], li: i, ri: i });
         i++;
         continue;
       }
-      const dels: DiffLine[] = [];
-      const adds: DiffLine[] = [];
-      while (i < lines.length && lines[i].origin === "-") dels.push(lines[i++]);
-      while (i < lines.length && lines[i].origin === "+") adds.push(lines[i++]);
-      for (let k = 0; k < Math.max(dels.length, adds.length); k++) rows.push({ left: dels[k] ?? null, right: adds[k] ?? null });
+      const dels: number[] = [];
+      const adds: number[] = [];
+      while (i < lines.length && lines[i].origin === "-") dels.push(i++);
+      while (i < lines.length && lines[i].origin === "+") adds.push(i++);
+      for (let k = 0; k < Math.max(dels.length, adds.length); k++) {
+        const d = dels[k] ?? -1, a = adds[k] ?? -1;
+        rows.push({ left: d < 0 ? null : lines[d], right: a < 0 ? null : lines[a], li: d, ri: a });
+      }
     }
     return rows;
+  }
+
+  // Syntax highlighting. Each hunk is highlighted as two continuous texts,
+  // the old side (context and removed lines) and the new side (context and
+  // added lines), so comments and strings spanning lines colour correctly.
+  // Lines are highlighted lazily in chunks as they come into view.
+  interface Side { pos: Int32Array; hl: Highlighter }
+  const lang = $derived(app.settings.syntax && diff && !diff.binary ? languageFor(diff.path) : null);
+  const sides = $derived.by(() => {
+    void diff;
+    return { lang, cache: new Map<string, Side>() };
+  });
+  function side(h: number, old: boolean): Side {
+    const k = `${h}${old ? "o" : "n"}`;
+    let sd = sides.cache.get(k);
+    if (sd) return sd;
+    const lines = diff!.hunks[h].lines;
+    const pos = new Int32Array(lines.length).fill(-1);
+    const seq: number[] = [];
+    const skip = old ? "+" : "-";
+    lines.forEach((ln, i) => {
+      if (ln.origin !== skip) { pos[i] = seq.length; seq.push(i); }
+    });
+    sd = { pos, hl: new Highlighter(sides.lang!, (i) => lines[seq[i]].content, seq.length) };
+    sides.cache.set(k, sd);
+    return sd;
+  }
+  /** HTML for line l of hunk h, or null to show it as plain text. */
+  function hl(h: number, l: number): string | null {
+    if (!sides.lang || l < 0) return null;
+    const sd = side(h, diff!.hunks[h].lines[l].origin === "-");
+    const p = sd.pos[l];
+    return p < 0 ? null : sd.hl.get(p);
   }
 
   // Big diffs are virtualized: every row has a fixed height, and only the
@@ -240,6 +278,7 @@
 {#snippet line(h: number, l: number)}
   {@const ln = diff!.hunks[h].lines[l]}
   {@const sel = selected.has(key(h, l))}
+  {@const html = hl(h, l)}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="line {ln.origin === '+' ? 'add' : ln.origin === '-' ? 'del' : ''}" class:sel
     onmousedown={(e) => isChange(ln) && down(e, h, l)}
@@ -247,16 +286,21 @@
     <span class="no">{ln.oldNo ?? ""}</span>
     <span class="no">{ln.newNo ?? ""}</span>
     <span class="sign">{ln.origin === " " ? "" : ln.origin}</span>
-    <span class="code">{ln.content}{#if !ln.nl}<span class="eof" title="No newline at end of file">⏎̸</span>{/if}</span>
+    <span class="code">{#if html != null}{@html html}{:else}{ln.content}{/if}{#if !ln.nl}<span class="eof" title="No newline at end of file">⏎̸</span>{/if}</span>
   </div>
 {/snippet}
 
-{#snippet pairRow(row: Row)}
+{#snippet sideCode(h: number, ln: DiffLine | null, i: number)}
+  {@const html = ln ? hl(h, i) : null}
+  {#if html != null}{@html html}{:else}{ln?.content ?? ""}{/if}
+{/snippet}
+
+{#snippet pairRow(h: number, row: Row)}
   <div class="prow">
     <span class="no">{row.left?.oldNo ?? ""}</span>
-    <span class="code {row.left ? (row.left.origin === '-' ? 'del' : '') : 'blank'}" title={row.left?.content}>{row.left?.content ?? ""}</span>
+    <span class="code {row.left ? (row.left.origin === '-' ? 'del' : '') : 'blank'}" title={row.left?.content}>{@render sideCode(h, row.left, row.li)}</span>
     <span class="no">{row.right?.newNo ?? ""}</span>
-    <span class="code {row.right ? (row.right.origin === '+' ? 'add' : '') : 'blank'}" title={row.right?.content}>{row.right?.content ?? ""}</span>
+    <span class="code {row.right ? (row.right.origin === '+' ? 'add' : '') : 'blank'}" title={row.right?.content}>{@render sideCode(h, row.right, row.ri)}</span>
   </div>
 {/snippet}
 
@@ -302,7 +346,7 @@
           {#if l < 0}
             {@render head(h)}
           {:else if layout.pairsOf}
-            {@render pairRow(layout.pairsOf[h][l])}
+            {@render pairRow(h, layout.pairsOf[h][l])}
           {:else}
             {@render line(h, l)}
           {/if}
@@ -318,9 +362,9 @@
             {#each pairs(hunk.lines) as row}
               <tr>
                 <td class="no">{row.left?.oldNo ?? ""}</td>
-                <td class="code {row.left ? (row.left.origin === '-' ? 'del' : '') : 'blank'}">{row.left?.content ?? ""}</td>
+                <td class="code {row.left ? (row.left.origin === '-' ? 'del' : '') : 'blank'}">{@render sideCode(h, row.left, row.li)}</td>
                 <td class="no">{row.right?.newNo ?? ""}</td>
-                <td class="code {row.right ? (row.right.origin === '+' ? 'add' : '') : 'blank'}">{row.right?.content ?? ""}</td>
+                <td class="code {row.right ? (row.right.origin === '+' ? 'add' : '') : 'blank'}">{@render sideCode(h, row.right, row.ri)}</td>
               </tr>
             {/each}
           </tbody>

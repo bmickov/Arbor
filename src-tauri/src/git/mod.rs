@@ -8,6 +8,7 @@
 pub mod blame;
 pub mod branches;
 pub mod commit;
+pub mod conflict;
 pub mod diff;
 pub mod files;
 pub mod hooks;
@@ -20,10 +21,12 @@ pub mod rebase;
 pub mod remote;
 pub mod repo;
 pub mod review;
+pub mod sign;
 pub mod stash;
 pub mod status;
 pub mod tree;
 pub mod undo;
+pub mod worktree;
 
 use git2::{Oid, Repository, Signature};
 use serde::Serialize;

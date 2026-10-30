@@ -1020,3 +1020,266 @@ fn browse_and_export_zip() {
         assert_eq!(String::from_utf8_lossy(&content), "fn main() {}\n");
     }
 }
+
+#[test]
+fn conflict_wizard_reads_sides_and_saves_a_resolution() {
+    let r = Repo::new();
+    r.write("a.txt", "top\nshared\nbottom\n");
+    r.write("gone.txt", "will be deleted\n");
+    r.commit_all("base");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("a.txt", "top\ntheirs\nbottom\n");
+    r.write("gone.txt", "changed on feature\n");
+    r.commit_all("feature");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("a.txt", "top\nmine\nbottom\n");
+    std::fs::remove_file(Path::new(&r.path).join("gone.txt")).unwrap();
+    r.commit_all("main");
+    let m = git::merge::merge(&r.path, "feature", false).unwrap();
+    assert_eq!(m.conflicts.len(), 2);
+
+    let f = git::conflict::conflict_file(&r.path, "a.txt").unwrap();
+    assert_eq!((f.ours_label.as_str(), f.theirs_label.as_str(), f.operation.as_str()), ("main", "feature", "merge"));
+    assert!(f.has_base && f.has_ours && f.has_theirs && !f.binary);
+    assert!(f.text.as_deref().unwrap().contains("<<<<<<< "));
+    // The fresh merge carries the base in diff3 style.
+    let merged = f.merged.unwrap();
+    assert!(merged.contains("<<<<<<< main\nmine\n||||||| base\nshared\n=======\ntheirs\n>>>>>>> feature\n"), "{merged}");
+
+    // A side that deleted the file is reported, with nothing to merge line by line.
+    let g = git::conflict::conflict_file(&r.path, "gone.txt").unwrap();
+    assert!(!g.has_ours && g.has_theirs && g.merged.is_none());
+
+    // Markers left in are refused; a clean result is written and staged.
+    assert!(git::conflict::resolve_with_content(&r.path, "a.txt", &merged).is_err());
+    git::conflict::resolve_with_content(&r.path, "a.txt", "top\nmine\ntheirs\nbottom\n").unwrap();
+    assert_eq!(r.read("a.txt"), "top\nmine\ntheirs\nbottom\n");
+    assert_eq!(r.staged_content("a.txt"), "top\nmine\ntheirs\nbottom\n");
+    assert!(git::conflict::conflict_file(&r.path, "a.txt").is_err());
+    git::patch::resolve_conflict(&r.path, "gone.txt", "ours").unwrap();
+    assert!(r.git(&["diff", "--name-only", "--diff-filter=U"]).trim().is_empty());
+}
+
+#[test]
+fn conflict_wizard_handles_add_add_conflicts() {
+    let r = Repo::new();
+    r.write("x", "x\n");
+    r.commit_all("base");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("new.txt", "one\ntheirs\n");
+    r.commit_all("feature adds");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("new.txt", "one\nmine\n");
+    r.commit_all("main adds");
+    git::merge::merge(&r.path, "feature", false).unwrap();
+    let f = git::conflict::conflict_file(&r.path, "new.txt").unwrap();
+    assert!(!f.has_base);
+    let merged = f.merged.unwrap();
+    assert!(merged.contains("<<<<<<< main") && merged.contains(">>>>>>> feature"), "{merged}");
+}
+
+fn have(program: &str, arg: &str) -> bool {
+    Command::new(program).arg(arg).output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+#[test]
+fn ssh_signed_commits_and_verification() {
+    if !have("ssh-keygen", "-V") && Command::new("ssh-keygen").arg("-?").output().is_err() {
+        eprintln!("ssh-keygen isn't installed; skipping");
+        return;
+    }
+    let r = Repo::new();
+    let keys = tempfile::tempdir().unwrap();
+    let key = keys.path().join("id_ed25519");
+    let ok = Command::new("ssh-keygen").args(["-q", "-t", "ed25519", "-N", "", "-C", "test", "-f"]).arg(&key).status().unwrap();
+    assert!(ok.success());
+    let key_s = key.to_string_lossy().replace('\\', "/");
+
+    // Use plain ssh-keygen whatever the machine's global git config says.
+    r.git(&["config", "gpg.ssh.program", "ssh-keygen"]);
+    r.write("a", "1\n");
+    r.commit_all("unsigned");
+    git::sign::set_settings(&r.path, true, "ssh", &key_s, false).unwrap();
+    let st = git::sign::settings(&r.path).unwrap();
+    assert!(st.enabled && st.format == "ssh" && st.scope == "local");
+
+    r.write("a", "2\n");
+    r.git(&["add", "a"]);
+    let c = git::commit::commit_signed(&r.path, "signed", false, false, None).unwrap();
+    assert!(r.git(&["cat-file", "commit", &c.oid]).contains("-----BEGIN SSH SIGNATURE-----"));
+    assert_eq!(r.subjects()[0], "signed");
+    // The reflog reads like git's.
+    assert!(r.git(&["reflog", "-1", "--format=%gs"]).starts_with("commit: signed"));
+
+    // Without an allowed signers file the signature is valid but the signer unknown.
+    let v = git::sign::verify(&r.path, &c.oid).unwrap().unwrap();
+    assert_eq!((v.format.as_str(), v.status.as_str()), ("ssh", "unverified"), "{v:?}");
+    // With one, it's good and names the signer.
+    let public = std::fs::read_to_string(keys.path().join("id_ed25519.pub")).unwrap();
+    let allowed = keys.path().join("allowed");
+    std::fs::write(&allowed, format!("test@example.com {}", public.trim())).unwrap();
+    r.git(&["config", "gpg.ssh.allowedSignersFile", &allowed.to_string_lossy()]);
+    let v = git::sign::verify(&r.path, &c.oid).unwrap().unwrap();
+    assert_eq!(v.status, "good", "{v:?}");
+    assert_eq!(v.signer.as_deref(), Some("test@example.com"));
+    // git agrees.
+    r.git(&["verify-commit", &c.oid]);
+
+    // An unsigned commit has nothing to verify; opting out per commit works.
+    let first = r.git(&["rev-parse", "HEAD~1"]);
+    assert!(git::sign::verify(&r.path, first.trim()).unwrap().is_none());
+    r.write("a", "3\n");
+    r.git(&["add", "a"]);
+    let u = git::commit::commit_signed(&r.path, "not signed", false, false, Some(false)).unwrap();
+    assert!(git::sign::verify(&r.path, &u.oid).unwrap().is_none());
+    // Amending signs too, and keeps the author.
+    let a = git::commit::commit_signed(&r.path, "amended", true, false, None).unwrap();
+    assert_eq!(git::sign::verify(&r.path, &a.oid).unwrap().unwrap().status, "good");
+    assert!(r.git(&["reflog", "-1", "--format=%gs"]).starts_with("commit (amend): amended"));
+}
+
+#[test]
+fn gpg_signed_commits_and_verification() {
+    if cfg!(windows) || !have("gpg", "--version") {
+        eprintln!("gpg isn't available; skipping");
+        return;
+    }
+    let r = Repo::new();
+    let home = tempfile::tempdir().unwrap();
+    // A wrapper keeps this test's keyring away from the real one without touching the environment.
+    let wrapper = home.path().join("gpg.sh");
+    std::fs::write(&wrapper, format!("#!/bin/sh\nexec gpg --homedir '{}' \"$@\"\n", home.path().display())).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let gen = Command::new(&wrapper)
+        .args(["--batch", "--passphrase", "", "--quick-gen-key", "Test <test@example.com>", "ed25519", "sign", "never"])
+        .output()
+        .unwrap();
+    assert!(gen.status.success(), "{}", String::from_utf8_lossy(&gen.stderr));
+    r.git(&["config", "gpg.program", &wrapper.to_string_lossy()]);
+    git::sign::set_settings(&r.path, true, "openpgp", "test@example.com", false).unwrap();
+
+    r.write("a", "1\n");
+    r.git(&["add", "a"]);
+    let c = git::commit::commit_signed(&r.path, "gpg signed", false, false, None).unwrap();
+    assert!(r.git(&["cat-file", "commit", &c.oid]).contains("-----BEGIN PGP SIGNATURE-----"));
+    let v = git::sign::verify(&r.path, &c.oid).unwrap().unwrap();
+    // A freshly generated key is ultimately trusted.
+    assert_eq!((v.format.as_str(), v.status.as_str()), ("openpgp", "good"), "{v:?}");
+    assert_eq!(v.signer.as_deref(), Some("Test <test@example.com>"));
+    r.git(&["verify-commit", &c.oid]);
+
+    // A tampered commit (same signature, different content) is reported as bad.
+    let raw = r.git(&["cat-file", "commit", &c.oid]).replace("gpg signed", "gpg signed!");
+    let mut child = Command::new("git").args(["hash-object", "-t", "commit", "-w", "--stdin"]).current_dir(&r.path)
+        .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
+    use std::io::Write;
+    child.stdin.take().unwrap().write_all(raw.as_bytes()).unwrap();
+    let forged = String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap();
+    let v = git::sign::verify(&r.path, forged.trim()).unwrap().unwrap();
+    assert_eq!(v.status, "bad", "{v:?}");
+
+    // Merges and cherry-picks are signed as well.
+    r.git(&["checkout", "-q", "-b", "side", "HEAD~0"]);
+    r.write("b", "b\n");
+    r.git(&["add", "b"]);
+    let side = git::commit::commit_signed(&r.path, "side", false, false, Some(false)).unwrap();
+    r.git(&["checkout", "-q", "main"]);
+    let p = git::commit::cherry_pick(&r.path, &side.oid).unwrap();
+    assert_eq!(git::sign::verify(&r.path, &p.oid).unwrap().unwrap().status, "good");
+}
+
+#[test]
+fn worktrees_add_list_and_remove() {
+    let r = Repo::new();
+    r.write("a", "1\n");
+    r.commit_all("first");
+    r.git(&["branch", "existing"]);
+    let parent = tempfile::tempdir().unwrap();
+    let wt1 = parent.path().join("feature wt");
+    let wt1_s = wt1.to_string_lossy().to_string();
+
+    // A new branch from HEAD in a new folder.
+    let made = git::worktree::add(&r.path, &wt1_s, "feature", true, None).unwrap();
+    assert!(Path::new(&made).join("a").exists());
+    assert_eq!(std::fs::read_to_string(Path::new(&made).join("a")).unwrap(), "1\n");
+    // An existing branch, into an empty folder that already exists.
+    let wt2 = parent.path().join("existing");
+    std::fs::create_dir(&wt2).unwrap();
+    git::worktree::add(&r.path, &wt2.to_string_lossy(), "existing", false, None).unwrap();
+    // A branch can only be checked out once, and a busy folder is refused.
+    assert!(git::worktree::add(&r.path, &parent.path().join("again").to_string_lossy(), "feature", false, None).is_err());
+    assert!(git::worktree::add(&r.path, &wt1_s, "other", true, None).is_err());
+
+    let list = git::worktree::list(&r.path).unwrap();
+    assert_eq!(list.len(), 3);
+    assert!(list[0].is_main && list[0].is_current && list[0].branch.as_deref() == Some("main"));
+    let f = list.iter().find(|w| w.branch.as_deref() == Some("feature")).unwrap();
+    assert!(!f.is_main && !f.is_current && f.name.is_some() && !f.missing);
+    // git sees them too.
+    assert!(r.git(&["worktree", "list"]).contains("[feature]"));
+
+    // Listing from inside a linked worktree shows the same set, with it current.
+    let inside = git::worktree::list(&made).unwrap();
+    assert_eq!(inside.len(), 3);
+    assert!(inside.iter().any(|w| w.is_current && w.branch.as_deref() == Some("feature")));
+    assert!(inside[0].is_main && !inside[0].is_current);
+
+    // Uncommitted changes block removal unless forced; the branch survives.
+    std::fs::write(Path::new(&made).join("a"), "changed\n").unwrap();
+    let name = f.name.clone().unwrap();
+    let e = git::worktree::remove(&r.path, &name, false).unwrap_err().to_string();
+    assert!(e.starts_with("DIRTY:"), "{e}");
+    git::worktree::remove(&r.path, &name, true).unwrap();
+    assert!(!wt1.exists());
+    assert_eq!(git::worktree::list(&r.path).unwrap().len(), 2);
+    r.git(&["rev-parse", "--verify", "feature"]);
+
+    // A worktree whose folder was deleted by hand is pruned.
+    std::fs::remove_dir_all(&wt2).unwrap();
+    assert!(git::worktree::list(&r.path).unwrap().iter().any(|w| w.missing));
+    assert_eq!(git::worktree::prune(&r.path).unwrap(), 1);
+    assert_eq!(git::worktree::list(&r.path).unwrap().len(), 1);
+}
+
+#[test]
+fn submodules_list_and_update() {
+    let lib = Repo::new();
+    lib.write("lib.txt", "v1\n");
+    lib.commit_all("lib v1");
+    let r = Repo::new();
+    r.write("app", "app\n");
+    r.commit_all("app");
+    r.git(&["-c", "protocol.file.allow=always", "submodule", "add", "-q", &lib.path, "vendor/lib"]);
+    r.commit_all("add lib");
+
+    let subs = git::worktree::submodules(&r.path).unwrap();
+    assert_eq!(subs.len(), 1);
+    assert_eq!((subs[0].path.as_str(), subs[0].state.as_str()), ("vendor/lib", "ok"));
+    assert_eq!(subs[0].url.as_deref(), Some(lib.path.as_str()));
+
+    // A fresh clone has it uninitialized; updating clones and checks it out.
+    let dest = tempfile::tempdir().unwrap();
+    let clone = dest.path().join("c");
+    Command::new("git").args(["clone", "-q"]).arg(&r.path).arg(&clone).status().unwrap();
+    let c = clone.to_string_lossy().to_string();
+    assert_eq!(git::worktree::submodules(&c).unwrap()[0].state, "uninitialized");
+    assert_eq!(git::worktree::update_submodules(&c, &[], None, None).unwrap(), 1);
+    assert_eq!(std::fs::read_to_string(clone.join("vendor/lib/lib.txt")).unwrap(), "v1\n");
+    assert_eq!(git::worktree::submodules(&c).unwrap()[0].state, "ok");
+
+    // New commits in the submodule's folder show as moved; update puts it back.
+    let sub = clone.join("vendor/lib");
+    Command::new("git").args(["-c", "user.name=T", "-c", "user.email=t@e", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "local"]).current_dir(&sub).status().unwrap();
+    assert_eq!(git::worktree::submodules(&c).unwrap()[0].state, "moved");
+    git::worktree::update_submodules(&c, &["vendor/lib".to_string()], None, None).unwrap();
+    assert_eq!(git::worktree::submodules(&c).unwrap()[0].state, "ok");
+    // Changed files inside block updating it.
+    std::fs::write(sub.join("lib.txt"), "edited\n").unwrap();
+    assert_eq!(git::worktree::submodules(&c).unwrap()[0].state, "dirty");
+    assert!(git::worktree::update_submodules(&c, &["vendor/lib".to_string()], None, None).is_err());
+}

@@ -133,11 +133,67 @@ async fn resolve_conflict(repo: String, path: String, side: String) -> R<()> {
     blocking(move || git::patch::resolve_conflict(&repo, &path, &side)).await
 }
 
+#[tauri::command]
+async fn conflict_file(repo: String, path: String) -> R<git::conflict::ConflictFile> {
+    blocking(move || git::conflict::conflict_file(&repo, &path)).await
+}
+
+#[tauri::command]
+async fn resolve_with_content(repo: String, path: String, content: String) -> R<()> {
+    blocking(move || git::conflict::resolve_with_content(&repo, &path, &content)).await
+}
+
 // ----------------------------------------------------------------- commits
 
 #[tauri::command]
-async fn commit(repo: String, message: String, amend: bool, skip_hooks: bool) -> R<git::commit::CommitResult> {
-    blocking(move || git::commit::commit(&repo, &message, amend, skip_hooks)).await
+async fn commit(repo: String, message: String, amend: bool, skip_hooks: bool, sign: Option<bool>) -> R<git::commit::CommitResult> {
+    blocking(move || git::commit::commit_signed(&repo, &message, amend, skip_hooks, sign)).await
+}
+
+#[tauri::command]
+async fn worktrees(repo: String) -> R<Vec<git::worktree::WorktreeInfo>> {
+    blocking(move || git::worktree::list(&repo)).await
+}
+
+#[tauri::command]
+async fn add_worktree(repo: String, path: String, branch: String, create: bool, start: Option<String>) -> R<String> {
+    blocking(move || git::worktree::add(&repo, &path, &branch, create, start.as_deref())).await
+}
+
+#[tauri::command]
+async fn remove_worktree(repo: String, name: String, force: bool) -> R<()> {
+    blocking(move || git::worktree::remove(&repo, &name, force)).await
+}
+
+#[tauri::command]
+async fn prune_worktrees(repo: String) -> R<usize> {
+    blocking(move || git::worktree::prune(&repo)).await
+}
+
+#[tauri::command]
+async fn submodules(repo: String) -> R<Vec<git::worktree::SubmoduleInfo>> {
+    blocking(move || git::worktree::submodules(&repo)).await
+}
+
+#[tauri::command]
+async fn update_submodules(app: AppHandle, repo: String, paths: Vec<String>, creds: Option<Creds>) -> R<usize> {
+    let p = progress(&app);
+    blocking(move || git::worktree::update_submodules(&repo, &paths, creds, p)).await
+}
+
+#[tauri::command]
+async fn signing_settings(repo: String) -> R<git::sign::SigningSettings> {
+    blocking(move || git::sign::settings(&repo)).await
+}
+
+#[tauri::command]
+async fn set_signing(repo: String, enabled: bool, format: String, key: String, global: bool) -> R<()> {
+    blocking(move || git::sign::set_settings(&repo, enabled, &format, &key, global)).await
+}
+
+#[tauri::command]
+async fn verify_commit(repo: String, id: String) -> R<Option<git::sign::Verification>> {
+    blocking(move || git::sign::verify(&repo, &id)).await
 }
 #[tauri::command]
 async fn head_message(repo: String) -> R<Option<String>> {
@@ -480,7 +536,7 @@ pub fn run() {
             library_get, library_save, library_add_many, scan_folder, repo_summaries,
             get_status, diff_unstaged, diff_staged, file_at,
             stage_files, unstage_files, stage_all, unstage_all, discard_files,
-            stage_lines, unstage_lines, discard_lines, resolve_conflict,
+            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
             commit, head_message, cherry_pick, revert_commit, reset_to,
             get_log, commit_info, tracked_files, reflog, branches_review, compare_branches, compare_file_diff,
             tree_at, file_content, export_zip, ignore_pattern, untrack_files, restore_file,

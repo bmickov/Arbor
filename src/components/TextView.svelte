@@ -1,6 +1,7 @@
 <script lang="ts">
   // A read-only text viewer with line numbers. Only the lines in view are in
   // the DOM, so files with hundreds of thousands of lines stay fast.
+  import { Highlighter, languageFor } from "../lib/highlight";
   import { app } from "../lib/state.svelte";
 
   let { text, path = "" }: { text: string; path?: string } = $props();
@@ -18,6 +19,13 @@
   const first = $derived(Math.max(0, Math.floor(scrollTop / lineH) - OVERSCAN));
   const last = $derived(Math.min(lines.length, Math.ceil((scrollTop + viewH) / lineH) + OVERSCAN));
 
+  // Colour by language, a chunk of lines at a time as they come into view.
+  const hl = $derived.by(() => {
+    const lang = app.settings.syntax ? languageFor(path) : null;
+    const ls = lines;
+    return lang ? new Highlighter(lang, (i) => ls[i], ls.length) : null;
+  });
+
   // A new file starts at the top.
   $effect(() => {
     void path;
@@ -30,7 +38,8 @@
   <div class="space" style="height: {lines.length * lineH + 40}px; min-width: calc({widest}ch + {digits}ch + 50px)">
     <div class="win" style="transform: translateY({first * lineH}px)">
       {#each lines.slice(first, last) as l, k (first + k)}
-        <div class="ln"><span class="no">{first + k + 1}</span><span class="code">{l}</span></div>
+        {@const html = hl?.get(first + k) ?? null}
+        <div class="ln"><span class="no">{first + k + 1}</span><span class="code">{#if html != null}{@html html}{:else}{l}{/if}</span></div>
       {/each}
     </div>
   </div>

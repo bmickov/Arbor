@@ -92,6 +92,8 @@ export const COMMANDS: Command[] = [
   } },
   { id: "repo.files", label: "Show in file manager", group: "Repository", keys: ["Ctrl+Shift+E"], repo: true, run: () => api.openExternal(app.path).catch((e) => toasts.push("error", String(e))) },
   { id: "patch.apply", label: "Apply a patch file…", group: "Repository", keys: [], repo: true, run: () => act.applyPatch() },
+  { id: "worktree.new", label: "New worktree…", group: "Repository", keys: [], repo: true, run: () => act.addWorktree() },
+  { id: "submodules.update", label: "Update submodules", group: "Repository", keys: [], repo: true, run: () => act.updateSubmodules([], "submodules") },
   { id: "patch.save", label: "Save uncommitted changes as a patch…", group: "Repository", keys: [], repo: true, run: () => act.saveChangesPatch() },
   { id: "repo.terminal", label: "Open terminal here", group: "Repository", keys: ["Ctrl+Shift+`"], repo: true, run: () => api.openTerminal(app.path).catch((e) => toasts.push("error", String(e))) },
 
