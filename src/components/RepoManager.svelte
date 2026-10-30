@@ -173,6 +173,19 @@
   const total = $derived(library.repos.length);
   const shortPath = (p: string) => p.replace(/^\/home\/[^/]+/, "~");
 
+  // Each row is its own grid, so columns can't size to their content by
+  // themselves. Measure the longest name/path and branch (in characters) and
+  // size those columns to fit, within limits.
+  const colWidths = $derived.by(() => {
+    let name = 12, branch = 6;
+    for (const r of library.repos) {
+      const s = library.summaries[r.path];
+      name = Math.max(name, r.name.length + (openPaths.has(r.path) ? 6 : 0), shortPath(r.path).length * 0.92);
+      if (s?.ok) branch = Math.max(branch, (s.detached ? 8 : (s.branch?.length ?? 1)) + (stateLabel(s) ? 9 : 0));
+    }
+    return `--name-w: calc(${Math.min(name, 44).toFixed(1)}ch + 8px); --branch-w: calc(${Math.min(branch, 32)}ch + 26px)`;
+  });
+
   function key(e: KeyboardEvent) {
     if (e.key === "Escape") selected = new Set();
     if ((e.key === "Delete" || e.key === "Backspace") && selected.size && !(e.target as HTMLElement).closest("input")) {
@@ -256,7 +269,7 @@
       </div>
     {/if}
 
-    <div class="list">
+    <div class="list" style={colWidths}>
       {#each sections as sec (sec.group?.id ?? "__ungrouped")}
         {@const gid = sec.group?.id ?? null}
         {#if sec.group || sec.repos.length || library.groups.length === 0}
@@ -412,7 +425,11 @@
 
   .rows { padding: 2px 0 8px; }
   .row {
-    display: grid; grid-template-columns: 18px minmax(180px, 1.4fr) minmax(120px, 0.8fr) 64px 110px minmax(160px, 1.4fr);
+    /* Name and branch columns are sized to the longest entry (see colWidths),
+       the rest have sensible maximums, and spare width collects in an empty
+       last column: on wide windows the columns stay together instead of
+       drifting apart (name → branch, and commit message → its time). */
+    display: grid; grid-template-columns: 18px minmax(150px, var(--name-w, 300px)) minmax(80px, var(--branch-w, 230px)) 48px 132px minmax(160px, 780px) minmax(0, 1fr);
     gap: 12px; align-items: center; padding: 7px 10px; border-radius: 7px; cursor: default;
   }
   .row:hover { background: var(--surface-2); }
@@ -438,7 +455,7 @@
   .changes .faint { display: inline-flex; gap: 3px; align-items: center; font-weight: 500; }
   .last { display: flex; gap: 8px; min-width: 0; font-size: calc(var(--fs) * 12); align-items: baseline; }
   .lsum { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
-  .ltime { flex: none; }
+  .ltime { flex: none; min-width: 72px; text-align: right; }
   .row.missing .rname { color: var(--ink-3); }
   .missing-msg { grid-column: 3 / 5; color: var(--ink-3); font-size: calc(var(--fs) * 12); }
   .fix { grid-column: 5 / 7; display: flex; gap: 6px; justify-content: flex-end; }
@@ -466,7 +483,7 @@
   .first .working { margin-top: 16px; }
 
   @media (max-width: 1100px) {
-    .row { grid-template-columns: 18px minmax(160px, 1.5fr) minmax(110px, 1fr) 56px 100px; }
+    .row { grid-template-columns: 18px minmax(160px, 1.5fr) minmax(110px, 1fr) 56px 120px; }
     .last { display: none; }
   }
 </style>

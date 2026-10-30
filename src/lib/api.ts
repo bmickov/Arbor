@@ -162,6 +162,10 @@ export const api = {
   createBranch: (repo: string, name: string, from: string | null, checkout: boolean) =>
     call<void>("create_branch", { repo, name, from, checkout }),
   deleteBranch: (repo: string, name: string, force: boolean) => call<void>("delete_branch", { repo, name, force }),
+  /** Delete several branches as one undo step; `force` also deletes unmerged ones. */
+  deleteBranches: (repo: string, names: string[], force: boolean) => call<number>("delete_branches", { repo, names, force }),
+  /** Which of these branches have commits that aren't merged or pushed. */
+  unmergedBranches: (repo: string, names: string[]) => call<string[]>("unmerged_branches", { repo, names }),
   renameBranch: (repo: string, from: string, to: string) => call<void>("rename_branch", { repo, from, to }),
   setUpstream: (repo: string, branch: string, upstream: string | null) => call<void>("set_upstream", { repo, branch, upstream }),
   createTag: (repo: string, name: string, target: string, message: string | null) =>
@@ -195,6 +199,8 @@ export const api = {
   stashApply: (repo: string, index: number) => call<void>("stash_apply", { repo, index }),
   stashPop: (repo: string, index: number, quiet = false) => call<void>("stash_pop", { repo, index, quiet }),
   stashDrop: (repo: string, index: number) => call<void>("stash_drop", { repo, index }),
+  /** Delete several stashes (by commit id) as one undo step. */
+  stashDropMany: (repo: string, oids: string[]) => call<number>("stash_drop_many", { repo, oids }),
   stashBranch: (repo: string, index: number, name: string) => call<void>("stash_branch", { repo, index, name }),
 
   undo: (repo: string) => call<string>("undo", { repo }),

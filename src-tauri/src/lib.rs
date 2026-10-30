@@ -304,6 +304,21 @@ async fn stash_pop(repo: String, index: usize, quiet: Option<bool>) -> R<()> {
     blocking(move || git::stash::pop(&repo, index, quiet.unwrap_or(false))).await
 }
 #[tauri::command]
+async fn delete_branches(repo: String, names: Vec<String>, force: bool) -> R<usize> {
+    blocking(move || git::branches::delete_branches(&repo, &names, force)).await
+}
+
+#[tauri::command]
+async fn unmerged_branches(repo: String, names: Vec<String>) -> R<Vec<String>> {
+    blocking(move || git::branches::unmerged(&repo, &names)).await
+}
+
+#[tauri::command]
+async fn stash_drop_many(repo: String, oids: Vec<String>) -> R<usize> {
+    blocking(move || git::stash::drop_many(&repo, &oids)).await
+}
+
+#[tauri::command]
 async fn stash_drop(repo: String, index: usize) -> R<()> {
     blocking(move || git::stash::drop(&repo, index)).await
 }
@@ -402,11 +417,11 @@ pub fn run() {
             commit, head_message, cherry_pick, revert_commit, reset_to,
             get_log, commit_info, commit_file_diff, file_history, blame,
             get_refs, checkout_branch, checkout_commit, checkout_remote, create_branch,
-            delete_branch, rename_branch, set_upstream, create_tag, delete_tag,
+            delete_branch, delete_branches, unmerged_branches, rename_branch, set_upstream, create_tag, delete_tag,
             add_remote, remove_remote,
             merge, merge_into, abort_merge, rebase, rebase_branch, interactive_rebase,
             fetch, pull, push, push_tag, delete_remote_branch,
-            stash_list, stash_save, stash_apply, stash_pop, stash_drop, stash_branch,
+            stash_list, stash_save, stash_apply, stash_pop, stash_drop, stash_drop_many, stash_branch,
             undo, undo_list,
             open_external, open_terminal, startup_path, log_ui,
         ])

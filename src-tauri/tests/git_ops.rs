@@ -660,3 +660,88 @@ fn large_diffs_are_held_back_until_asked_for() {
     git::patch::stage_lines(&r.path, "a.txt", &[Selection { hunk: 0, lines: vec![1] }], capped).unwrap();
     assert_eq!(r.staged_content("a.txt"), "x\nline 1\n");
 }
+
+#[test]
+fn delete_several_branches_at_once_and_undo() {
+    let r = Repo::new();
+    r.write("f.txt", "base\n");
+    r.commit_all("base");
+    r.git(&["branch", "merged-a"]);
+    r.git(&["branch", "merged-b"]);
+    r.git(&["checkout", "-q", "-b", "wip"]);
+    r.write("f.txt", "wip\n");
+    r.commit_all("unmerged work");
+    r.git(&["checkout", "-q", "main"]);
+    let branches = || r.git(&["branch", "--format=%(refname:short)"]).lines().map(String::from).collect::<Vec<_>>();
+    let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+    // An unmerged branch in the set: nothing is deleted, and it's named.
+    let e = git::branches::delete_branches(&r.path, &names(&["merged-a", "wip", "merged-b"]), false).unwrap_err().to_string();
+    assert_eq!(e, "NOT_MERGED:wip");
+    assert_eq!(branches().len(), 4);
+
+    // The checked-out branch is refused outright, even with force.
+    assert!(git::branches::delete_branches(&r.path, &names(&["merged-a", "main"]), true).is_err());
+    assert_eq!(branches().len(), 4);
+
+    // Forced, all three go in one step.
+    assert_eq!(git::branches::delete_branches(&r.path, &names(&["merged-a", "wip", "merged-b"]), true).unwrap(), 3);
+    assert_eq!(branches(), vec!["main"]);
+
+    // One undo brings all three back, at the same commits.
+    let label = git::undo::undo(&r.path).unwrap();
+    assert_eq!(label, "Delete 3 branches");
+    assert_eq!(branches(), vec!["main", "merged-a", "merged-b", "wip"]);
+    assert_eq!(r.git(&["log", "-1", "--format=%s", "wip"]).trim(), "unmerged work");
+}
+
+#[test]
+fn delete_several_stashes_at_once_and_undo() {
+    let r = Repo::new();
+    r.write("f.txt", "base\n");
+    r.commit_all("base");
+    for m in ["one", "two", "three", "four"] {
+        r.write("f.txt", &format!("{m}\n"));
+        git::stash::save(&r.path, Some(m), false, false, true).unwrap();
+    }
+    let messages = || git::stash::list(&r.path).unwrap().into_iter().map(|s| s.message).collect::<Vec<_>>();
+    assert_eq!(messages(), vec!["four", "three", "two", "one"]);
+    let list = git::stash::list(&r.path).unwrap();
+    // Delete "three" and "one" (indexes 1 and 3) by id.
+    let ids = vec![list[1].oid.clone(), list[3].oid.clone()];
+    assert_eq!(git::stash::drop_many(&r.path, &ids).unwrap(), 2);
+    assert_eq!(messages(), vec!["four", "two"]);
+
+    // Deleting a stash that's already gone deletes nothing.
+    assert!(git::stash::drop_many(&r.path, &[list[0].oid.clone(), list[1].oid.clone()]).is_err());
+    assert_eq!(messages(), vec!["four", "two"]);
+
+    // One undo restores both, keeping their order relative to each other.
+    assert_eq!(git::undo::undo(&r.path).unwrap(), "Delete 2 stashes");
+    assert_eq!(messages(), vec!["three", "one", "four", "two"]);
+    assert_eq!(r.git(&["stash", "list"]).lines().count(), 4, "git sees them too");
+}
+
+#[test]
+fn unmerged_check_and_single_delete_labels() {
+    let r = Repo::new();
+    r.write("f.txt", "base\n");
+    r.commit_all("base");
+    r.git(&["branch", "done"]);
+    r.git(&["checkout", "-q", "-b", "wip"]);
+    r.write("f.txt", "wip\n");
+    r.commit_all("unmerged");
+    r.git(&["checkout", "-q", "main"]);
+    let names = vec!["done".to_string(), "wip".to_string(), "missing".to_string()];
+    assert_eq!(git::branches::unmerged(&r.path, &names).unwrap(), vec!["wip"]);
+
+    git::branches::delete_branches(&r.path, &["done".to_string()], false).unwrap();
+    assert_eq!(git::undo::undo(&r.path).unwrap(), "Delete branch done");
+
+    r.write("f.txt", "x\n");
+    git::stash::save(&r.path, Some("solo"), false, false, true).unwrap();
+    let id = git::stash::list(&r.path).unwrap()[0].oid.clone();
+    git::stash::drop_many(&r.path, &[id]).unwrap();
+    assert_eq!(git::undo::undo(&r.path).unwrap(), "Delete stash \"solo\"");
+    assert_eq!(git::stash::list(&r.path).unwrap().len(), 1);
+}

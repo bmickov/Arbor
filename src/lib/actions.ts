@@ -3,6 +3,7 @@
 
 import { api, type CommitRow, type MergeOutcome, type RebaseAction, type Step } from "./api";
 import type { Payload } from "./drag.svelte";
+import { relTime } from "./format";
 import { app } from "./state.svelte";
 import { dialog, menu, toasts, type MenuItem } from "./ui.svelte";
 
@@ -101,17 +102,50 @@ export async function renameBranch(name: string) {
   await app.act("Renaming", () => api.renameBranch(P(), name, to), { success: `Renamed to ${to}.` });
 }
 
-export async function deleteBranch(name: string) {
-  try {
-    await app.run("Deleting branch", () => api.deleteBranch(P(), name, false), { quiet: true, success: `Deleted ${name}. Undo brings it back.` });
-  } catch (e) {
-    const err = String(e);
-    if (err.startsWith("NOT_MERGED:")) {
-      const ok = await dialog.confirm("Delete unmerged branch?", `${err.slice(11)}\n\nYou can still undo the deletion afterwards.`, "Delete anyway", true);
-      if (ok) await app.act("Deleting branch", () => api.deleteBranch(P(), name, true), { success: `Deleted ${name}.` });
-    } else toasts.push("error", err);
+/** Delete one or more local branches after one confirmation. Resolves to the
+ *  names that were deleted (empty when cancelled). */
+export async function deleteBranches(names: string[]): Promise<string[]> {
+  const head = app.headBranch;
+  const list = names.filter((n) => n !== head);
+  if (!list.length) {
+    toasts.push("error", `${head} is checked out, so it can't be deleted. Check out another branch first.`);
+    return [];
   }
+  let unmerged: string[];
+  try {
+    unmerged = await api.unmergedBranches(P(), list);
+  } catch (e) {
+    toasts.push("error", String(e));
+    return [];
+  }
+  const merged = list.filter((n) => !unmerged.includes(n));
+  const one = list.length === 1;
+  const into = head ? `merged into ${head}` : "merged into the current commit";
+  let body = !unmerged.length
+    ? `${one ? "It's" : "They're all"} ${into} or pushed, so no commits are lost.`
+    : one
+      ? `It has commits that aren't ${into} or pushed anywhere.`
+      : `${unmerged.length === list.length ? "All of them have" : `${unmerged.length} of them ${unmerged.length === 1 ? "has" : "have"}`} commits that aren't ${into} or pushed anywhere.`;
+  body += ` Undo (Ctrl+Z) brings ${one ? "it" : "them"} back.`;
+  if (names.length > list.length) body += `\n\n${head} is checked out, so it's kept.`;
+
+  const r = await dialog.show({
+    title: one ? `Delete branch ${list[0]}?` : `Delete ${list.length} branches?`,
+    body,
+    items: one ? undefined : list.map((n) => ({ text: n, note: unmerged.includes(n) ? "unmerged" : "merged", warn: unmerged.includes(n) })),
+    confirm: unmerged.length ? (one ? "Delete anyway" : `Delete all ${list.length}`) : one ? "Delete" : `Delete ${list.length} branches`,
+    danger: true,
+    extra: unmerged.length && merged.length ? [{ id: "merged", label: `Delete only merged (${merged.length})` }] : undefined,
+  });
+  const target = r.button === "confirm" ? list : r.button === "merged" ? merged : [];
+  if (!target.length) return [];
+  const n = await app.act("Deleting branches", () => api.deleteBranches(P(), target, true), {
+    success: target.length === 1 ? `Deleted ${target[0]}. Undo brings it back.` : `Deleted ${target.length} branches. Undo brings them back.`,
+  });
+  return n === undefined ? [] : target;
 }
+
+export const deleteBranch = (name: string) => deleteBranches([name]);
 
 export async function deleteRemoteBranch(fullName: string) {
   const ok = await dialog.confirm("Delete remote branch?", `${fullName} will be deleted on the server. This can't be undone from here.`, "Delete on remote", true);
@@ -430,9 +464,29 @@ export async function applyStash(index: number, pop: boolean) {
   });
 }
 
-export async function dropStash(index: number) {
-  await app.act("Deleting stash", () => api.stashDrop(P(), index), { success: "Stash deleted. Undo brings it back." });
+/** Delete one or more stashes (by list index) after a confirmation. Resolves
+ *  to true when they were deleted. */
+export async function dropStashes(indexes: number[]): Promise<boolean> {
+  const items = app.stashes.filter((s) => indexes.includes(s.index));
+  if (!items.length) return false;
+  const one = items.length === 1;
+  const ok = await dialog.show({
+    title: one ? "Delete stash?" : `Delete ${items.length} stashes?`,
+    body: one
+      ? `"${items[0].message}" and its changes will be removed from the stash list. Undo (Ctrl+Z) brings it back.`
+      : `These stashes and their changes will be removed from the stash list. Undo (Ctrl+Z) brings them all back.`,
+    items: one ? undefined : items.map((s) => ({ text: s.message, note: `${s.branch ? `on ${s.branch} · ` : ""}${relTime(s.time)}` })),
+    confirm: one ? "Delete stash" : `Delete ${items.length} stashes`,
+    danger: true,
+  });
+  if (ok.button !== "confirm") return false;
+  const n = await app.act("Deleting stashes", () => api.stashDropMany(P(), items.map((s) => s.oid)), {
+    success: one ? "Stash deleted. Undo brings it back." : `Deleted ${items.length} stashes. Undo brings them back.`,
+  });
+  return n !== undefined;
 }
+
+export const dropStash = (index: number) => dropStashes([index]);
 
 export async function stashToBranch(index: number) {
   const name = await dialog.prompt("New branch from stash", "Branch name", { confirm: "Create branch", validate: validBranch });

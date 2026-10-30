@@ -4,8 +4,62 @@
   import { app, type View } from "../lib/state.svelte";
   import { menu } from "../lib/ui.svelte";
   import Icon from "./Icon.svelte";
+  import { SvelteSet } from "svelte/reactivity";
 
   let filter = $state("");
+
+  // Several local branches can be picked with Ctrl+click / Shift+click and
+  // deleted together. A plain click still just shows the branch's history.
+  const picked = new SvelteSet<string>();
+  let anchor: string | null = null;
+  // The branch whose history is on screen.
+  const shown = $derived(app.view === "history" && app.scope !== "all" ? app.scope : null);
+
+  function clickBranch(e: MouseEvent, name: string) {
+    if (e.ctrlKey || e.metaKey) {
+      // Like a file manager: the branch already shown joins the selection.
+      if (!picked.size && shown && shown !== name && locals.some((b) => b.name === shown)) picked.add(shown);
+      picked.has(name) ? picked.delete(name) : picked.add(name);
+      anchor = name;
+    } else if (e.shiftKey) {
+      const names = locals.map((b) => b.name);
+      const from = anchor ?? shown ?? name;
+      const a = names.includes(from) ? names.indexOf(from) : names.indexOf(name), b = names.indexOf(name);
+      picked.clear();
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) picked.add(names[i]);
+    } else {
+      picked.clear();
+      anchor = name;
+      act.showHistory(name);
+    }
+  }
+
+  function branchContext(e: MouseEvent, name: string) {
+    if (picked.size > 1 && picked.has(name)) {
+      menu.fromEvent(e, [
+        { label: `Delete ${picked.size} branches…`, danger: true, action: deletePicked },
+        { label: "Clear selection", action: () => picked.clear() },
+      ], `${picked.size} branches`);
+    } else act.branchMenu(e, name);
+  }
+
+  async function deletePicked() {
+    if ((await act.deleteBranches([...picked])).length) picked.clear();
+  }
+
+  function branchKey(e: KeyboardEvent) {
+    if (!picked.size) return;
+    if (e.key === "Delete") {
+      e.preventDefault();
+      deletePicked();
+    } else if (e.key === "Escape") picked.clear();
+  }
+
+  // Forget picks for branches that no longer exist (deleted, renamed).
+  $effect(() => {
+    const all = new Set(app.refs?.local.map((b) => b.name) ?? []);
+    for (const n of [...picked]) if (!all.has(n)) picked.delete(n);
+  });
   // Expanded sections are part of the saved layout.
   const open = $derived(app.layout.sections);
   const openRemote = $derived(app.layout.remotes);
@@ -75,10 +129,11 @@
         <ul>
           {#each locals as b (b.name)}
             <li>
-              <button class="item" class:head={b.isHead}
-                onclick={() => act.showHistory(b.name)}
-                ondblclick={() => !b.isHead && act.checkout(b.name)}
-                oncontextmenu={(e) => act.branchMenu(e, b.name)}
+              <button class="item" class:head={b.isHead} class:picked={picked.has(b.name)} class:shown={!picked.size && shown === b.name}
+                onclick={(e) => clickBranch(e, b.name)}
+                onkeydown={branchKey}
+                ondblclick={(e) => !b.isHead && !e.ctrlKey && !e.shiftKey && act.checkout(b.name)}
+                oncontextmenu={(e) => branchContext(e, b.name)}
                 use:draggable={() => ({ payload: { kind: "branch", name: b.name }, label: b.name })}
                 use:dropTarget={{ accepts: act.acceptsOnBranch(b.name, b.isHead), drop: (p, e) => act.dropOnBranch(p, b.name, e) }}>
                 <span class="dot" class:current={b.isHead}></span>
@@ -92,6 +147,13 @@
             <li class="none faint">{filter ? "No matching branches" : "No branches yet — make a first commit"}</li>
           {/each}
         </ul>
+        {#if picked.size}
+          <div class="pickbar">
+            <span>{picked.size} selected</span>
+            <button class="btn small danger" onclick={deletePicked}><Icon name="discard" size={12} /> Delete…</button>
+            <button class="clear" title="Clear selection (Esc)" aria-label="Clear selection" onclick={() => picked.clear()}><Icon name="x" size={12} /></button>
+          </div>
+        {/if}
       {/if}
     </section>
 
@@ -208,6 +270,16 @@
   }
   .item:hover { background: var(--surface-3); }
   .item.head .name { font-weight: 700; }
+  .item.picked, .item.picked:hover { background: var(--sel-strong); }
+  .item.shown { background: var(--sel); }
+  .pickbar {
+    position: sticky; bottom: 0; display: flex; align-items: center; gap: 6px; margin: 4px 0 0; padding: 5px 6px 5px 10px;
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-pop);
+    font-size: calc(var(--fs) * 12); font-weight: 600;
+  }
+  .pickbar span { flex: 1; }
+  .pickbar .clear { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 4px; color: var(--ink-3); }
+  .pickbar .clear:hover { background: var(--surface-3); color: var(--ink); }
   .item.remote { color: var(--ink-2); padding-left: 4px; gap: 6px; }
   .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dot { width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--ink-3); flex: none; }

@@ -255,6 +255,21 @@ pub fn create_branch(repo_path: &str, name: &str, from: Option<&str>, checkout: 
     Ok(())
 }
 
+/// True when deleting the branch loses nothing: its tip is in HEAD or in its upstream.
+fn merged_or_pushed(repo: &Repository, b: &git2::Branch, tip: Oid) -> bool {
+    let merged = match head_oid(repo) {
+        Some(h) => h == tip || repo.graph_descendant_of(h, tip).unwrap_or(false),
+        None => false,
+    };
+    let pushed = b
+        .upstream()
+        .ok()
+        .and_then(|u| u.get().target())
+        .map(|u| u == tip || repo.graph_descendant_of(u, tip).unwrap_or(false))
+        .unwrap_or(false);
+    merged || pushed
+}
+
 pub fn delete_branch(repo_path: &str, name: &str, force: bool) -> Result<()> {
     let repo = open(repo_path)?;
     let mut b = repo.find_branch(name, BranchType::Local)?;
@@ -262,25 +277,67 @@ pub fn delete_branch(repo_path: &str, name: &str, force: bool) -> Result<()> {
         return err(format!("You can't delete '{name}' while it's checked out."));
     }
     let tip = b.get().target().unwrap();
-    if !force {
-        let merged = match head_oid(&repo) {
-            Some(h) => h == tip || repo.graph_descendant_of(h, tip).unwrap_or(false),
-            None => false,
-        };
-        let pushed = b
-            .upstream()
-            .ok()
-            .and_then(|u| u.get().target())
-            .map(|u| u == tip || repo.graph_descendant_of(u, tip).unwrap_or(false))
-            .unwrap_or(false);
-        if !merged && !pushed {
-            return err(format!("NOT_MERGED:'{name}' has commits that aren't merged into the current branch."));
-        }
+    if !force && !merged_or_pushed(&repo, &b, tip) {
+        return err(format!("NOT_MERGED:'{name}' has commits that aren't merged into the current branch."));
     }
     let upstream = b.upstream().ok().and_then(|u| u.name().ok().flatten().map(|s| s.to_string()));
     b.delete()?;
     undo::record(&repo, format!("Delete branch {name}"), Action::RecreateBranch { name: name.into(), oid: tip.to_string(), upstream });
     Ok(())
+}
+
+/// Which of `names` have commits that aren't in HEAD or in their upstream,
+/// i.e. would lose work if deleted. Unknown names are skipped.
+pub fn unmerged(repo_path: &str, names: &[String]) -> Result<Vec<String>> {
+    let repo = open(repo_path)?;
+    let mut out = vec![];
+    for name in names {
+        if let Ok(b) = repo.find_branch(name, BranchType::Local) {
+            if let Some(tip) = b.get().target() {
+                if !merged_or_pushed(&repo, &b, tip) {
+                    out.push(name.clone());
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Delete several local branches as one undoable step. Everything is checked
+/// before anything is deleted: the checked-out branch is refused, and unless
+/// `force` is set, so are unmerged branches (the error names them all, after
+/// "NOT_MERGED:" and a newline-separated list).
+pub fn delete_branches(repo_path: &str, names: &[String], force: bool) -> Result<usize> {
+    let repo = open(repo_path)?;
+    let mut found = Vec::with_capacity(names.len());
+    let mut unmerged = vec![];
+    for name in names {
+        let b = repo.find_branch(name, BranchType::Local)?;
+        if b.is_head() {
+            return err(format!("You can't delete '{name}' while it's checked out."));
+        }
+        let tip = b.get().target().unwrap();
+        if !force && !merged_or_pushed(&repo, &b, tip) {
+            unmerged.push(name.clone());
+        }
+        found.push((name.clone(), b, tip));
+    }
+    if !unmerged.is_empty() {
+        return err(format!("NOT_MERGED:{}", unmerged.join("\n")));
+    }
+    let mut actions = vec![];
+    for (name, mut b, tip) in found {
+        let upstream = b.upstream().ok().and_then(|u| u.name().ok().flatten().map(|s| s.to_string()));
+        b.delete()?;
+        actions.push(Action::RecreateBranch { name, oid: tip.to_string(), upstream });
+    }
+    let n = actions.len();
+    if n == 1 {
+        undo::record(&repo, format!("Delete branch {}", names[0]), actions.pop().unwrap());
+    } else if n > 1 {
+        undo::record(&repo, format!("Delete {n} branches"), Action::Batch { actions });
+    }
+    Ok(n)
 }
 
 pub fn rename_branch(repo_path: &str, from: &str, to: &str) -> Result<()> {
