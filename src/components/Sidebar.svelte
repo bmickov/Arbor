@@ -1,8 +1,9 @@
 <script lang="ts">
   import * as act from "../lib/actions";
+  import { api, type SubmoduleInfo, type WorktreeInfo } from "../lib/api";
   import { draggable, dropTarget, type Payload } from "../lib/drag.svelte";
   import { app, type View } from "../lib/state.svelte";
-  import { menu } from "../lib/ui.svelte";
+  import { menu, toasts } from "../lib/ui.svelte";
   import Icon from "./Icon.svelte";
   import { SvelteSet } from "svelte/reactivity";
 
@@ -86,6 +87,56 @@
       { label: `Push ${p.name} to ${remote}`, action: () => act.push(p.name, remote) },
     ]);
   }
+
+  // Worktrees and submodules, reloaded whenever the repository changes.
+  let worktrees = $state.raw<WorktreeInfo[]>([]);
+  let submodules = $state.raw<SubmoduleInfo[]>([]);
+  $effect(() => {
+    void app.version;
+    const p = app.path;
+    if (!p) return;
+    api.worktrees(p).then((w) => app.path === p && (worktrees = w)).catch(() => (worktrees = []));
+    api.submodules(p).then((s) => app.path === p && (submodules = s)).catch(() => (submodules = []));
+  });
+  const linked = $derived(worktrees.filter((w) => !w.isMain));
+
+  function openWorktree(w: WorktreeInfo) {
+    if (w.isCurrent) return;
+    if (w.missing) return toasts.push("error", `${w.path} doesn't exist any more. Right-click it to prune it.`);
+    app.open(w.path);
+  }
+  function worktreeMenu(e: MouseEvent, w: WorktreeInfo) {
+    menu.fromEvent(e, [
+      { label: w.isCurrent ? "Open in this tab (already open)" : "Open in a tab", disabled: w.isCurrent || w.missing, action: () => app.open(w.path) },
+      { label: "Show in file manager", disabled: w.missing, action: () => api.openExternal(w.path) },
+      { label: "Open in terminal", disabled: w.missing, action: () => api.openTerminal(w.path) },
+      { label: "Copy path", action: () => navigator.clipboard.writeText(w.path).then(() => toasts.push("info", "Copied path.")) },
+      { separator: true },
+      ...(w.missing
+        ? [{ label: "Prune missing worktrees", action: () => app.act("Pruning", () => api.pruneWorktrees(app.path), { success: (n: number) => `Pruned ${n} worktree${n === 1 ? "" : "s"}.` }) }]
+        : [{ label: "Remove worktree…", danger: true, disabled: w.isMain || w.isCurrent, action: () => act.removeWorktree(w) }]),
+    ], w.branch ?? w.path);
+  }
+
+  function openSubmodule(s: SubmoduleInfo) {
+    if (s.state === "uninitialized") act.updateSubmodules([s.path], s.path);
+    else app.open(s.fullPath);
+  }
+  function submoduleMenu(e: MouseEvent, s: SubmoduleInfo) {
+    const ready = s.state !== "uninitialized";
+    menu.fromEvent(e, [
+      { label: "Open in a tab", disabled: !ready, action: () => app.open(s.fullPath) },
+      { label: ready ? `Update to ${s.recorded ?? "the recorded commit"}` : "Clone and check out", disabled: s.dirty, action: () => act.updateSubmodules([s.path], s.path) },
+      { separator: true },
+      { label: "Show in file manager", disabled: !ready, action: () => api.openExternal(s.fullPath) },
+      { label: "Open in terminal", disabled: !ready, action: () => api.openTerminal(s.fullPath) },
+      { label: "Copy URL", disabled: !s.url, action: () => navigator.clipboard.writeText(s.url!).then(() => toasts.push("info", "Copied URL.")) },
+    ], s.path);
+  }
+  const smNote = (s: SubmoduleInfo) =>
+    s.state === "uninitialized" ? "not cloned" : s.state === "moved" ? "moved" : s.state === "dirty" ? "changed" : "";
+  const smTitle = (s: SubmoduleInfo) =>
+    [s.url, s.state === "uninitialized" ? "Not cloned yet. Click to clone it." : s.state === "moved" ? `Checked out ${s.checkedOut}, but this repository records ${s.recorded}. Update to switch back.` : s.state === "dirty" ? "Has uncommitted changes inside." : `At ${s.recorded}`].filter(Boolean).join("\n");
 
   function dropOnChanges(p: Payload) {
     if (p.kind === "stash") act.applyStash(p.index, false);
@@ -236,6 +287,59 @@
         </ul>
       {/if}
     </section>
+
+    {#if linked.length}
+      <section>
+        <header>
+          <button class="head" onclick={() => (open.worktrees = !open.worktrees)} aria-expanded={open.worktrees}>
+            <span class="chev" class:open={open.worktrees}><Icon name="chevron" size={12} /></span> Worktrees
+            <span class="faint count">{worktrees.length}</span>
+          </button>
+          <button class="add" title="New worktree" aria-label="New worktree" onclick={() => act.addWorktree()}><Icon name="plus" size={14} /></button>
+        </header>
+        {#if open.worktrees}
+          <ul>
+            {#each worktrees as w (w.path)}
+              <li>
+                <button class="item wt" class:head={w.isCurrent} class:missing={w.missing} title="{w.path}{w.head ? `\n${w.head} ${w.summary}` : ''}{w.changes ? `\n${w.changes} uncommitted change${w.changes === 1 ? '' : 's'}` : ''}"
+                  onclick={() => openWorktree(w)} oncontextmenu={(e) => worktreeMenu(e, w)}>
+                  <Icon name="folder" size={13} />
+                  <span class="name">{w.branch ?? (w.head ? `${w.head} (detached)` : w.path.split(/[\\/]/).pop())}</span>
+                  {#if w.isMain}<span class="tagn">main</span>{/if}
+                  {#if w.missing}<span class="gone">missing</span>{:else if w.changes}<span class="ab" title="Uncommitted changes">●{w.changes}</span>{/if}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
+
+    {#if submodules.length}
+      <section>
+        <header>
+          <button class="head" onclick={() => (open.submodules = !open.submodules)} aria-expanded={open.submodules}>
+            <span class="chev" class:open={open.submodules}><Icon name="chevron" size={12} /></span> Submodules
+            <span class="faint count">{submodules.length}</span>
+          </button>
+          <button class="add" title="Update all submodules (clone missing ones, check out the recorded commits)" aria-label="Update all submodules"
+            onclick={() => act.updateSubmodules([], "submodules")}><Icon name="sync" size={13} /></button>
+        </header>
+        {#if open.submodules}
+          <ul>
+            {#each submodules as s (s.path)}
+              <li>
+                <button class="item sm" class:off={s.state === "uninitialized"} title={smTitle(s)} onclick={() => openSubmodule(s)} oncontextmenu={(e) => submoduleMenu(e, s)}>
+                  <Icon name="remote" size={13} />
+                  <span class="name">{s.path}</span>
+                  {#if smNote(s)}<span class="gone" class:soft={s.state === "uninitialized"}>{smNote(s)}</span>{/if}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
   </div>
 </nav>
 
@@ -301,4 +405,9 @@
   .ab { font-size: calc(var(--fs) * 11); color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .gone { font-size: calc(var(--fs) * 10); color: var(--warn); border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; }
   .none { padding: 4px 10px; font-size: calc(var(--fs) * 12); }
+  .item.wt, .item.sm { gap: 7px; color: var(--ink-2); }
+  .item.wt .name, .item.sm .name { color: var(--ink); }
+  .item.missing .name, .item.off .name { color: var(--ink-3); }
+  .tagn { font-size: calc(var(--fs) * 10); color: var(--ink-3); border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; }
+  .gone.soft { color: var(--ink-3); }
 </style>

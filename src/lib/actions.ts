@@ -255,6 +255,7 @@ export function branchMenu(e: MouseEvent, name: string) {
     { label: "Track remote branch…", action: () => setUpstream(name) },
     { separator: true },
     { label: "New branch from here…", action: () => newBranch(name, name) },
+    { label: "Check out in a new worktree…", disabled: name === head, action: () => addWorktree(name) },
     { label: "Rename…", action: () => renameBranch(name) },
     { label: "Show history", action: () => showHistory(name) },
     { label: `Compare with ${head ?? "HEAD"}`, disabled: name === head, action: () => compareWith(name) },
@@ -702,3 +703,65 @@ export function dropOnBranch(p: Payload, target: string, e: PointerEvent) {
 
 export const acceptsOnBranch = (target: string, isHead: boolean) => (p: Payload) =>
   (p.kind === "branch" && p.name !== target) || (p.kind === "remote-branch" && p.fullName !== target) || (p.kind === "commit" && isHead);
+
+// ---- Worktrees and submodules ----
+
+/** The folder a new worktree goes in by default: next to the repository, "<repo>-<branch>". */
+function worktreeFolder(branch: string): string {
+  const main = app.path.replace(/[\\/]+$/, "");
+  const sep = main.includes("\\") && !main.includes("/") ? "\\" : "/";
+  const cut = Math.max(main.lastIndexOf("/"), main.lastIndexOf("\\"));
+  const parent = main.slice(0, cut), name = main.slice(cut + 1);
+  return `${parent}${sep}${name}-${branch.replace(/[^\w.-]+/g, "-")}`;
+}
+
+/** Check out a branch (an existing one, or a new one from HEAD) in its own folder. */
+export async function addWorktree(branch?: string) {
+  const r = await dialog.show({
+    title: "New worktree",
+    body: "Check out a branch in a separate folder, so you can work on it without switching branches here.",
+    fields: [
+      { key: "branch", label: "Branch", value: branch ?? "", placeholder: "An existing branch, or a new name" },
+      { key: "folder", label: "Folder", placeholder: branch ? worktreeFolder(branch) : "Next to this repository, named after the branch", hint: "Leave empty for the suggested folder." },
+      { key: "open", label: "Open it in a new tab", type: "checkbox", checked: true },
+    ],
+    confirm: "Create worktree",
+    validate: (v) => {
+      const b = String(v.branch ?? "").trim();
+      if (!b) return "Name a branch.";
+      return app.refs?.local.some((x) => x.name === b) ? null : validBranch(b);
+    },
+  });
+  if (r.button !== "confirm") return;
+  const name = String(r.values.branch).trim();
+  const exists = !!app.refs?.local.some((x) => x.name === name);
+  const folder = String(r.values.folder ?? "").trim() || worktreeFolder(name);
+  const made = await app.act("Creating worktree", () => api.addWorktree(P(), folder, name, !exists, null), {
+    success: `${exists ? "Checked out" : "Created"} ${name} in ${folder}.`,
+  });
+  if (made && r.values.open) await app.open(made);
+}
+
+export async function removeWorktree(w: { name: string | null; path: string; branch: string | null; changes: number; locked: string | null }) {
+  if (!w.name) return;
+  const ok = await dialog.show({
+    title: "Remove worktree?",
+    body: `Deletes the folder ${w.path}.${w.branch ? ` The branch ${w.branch} and its commits stay.` : ""}`,
+    items: w.changes || w.locked != null ? [
+      ...(w.changes ? [{ text: `${w.changes} uncommitted change${w.changes === 1 ? "" : "s"} will be lost`, warn: true }] : []),
+      ...(w.locked != null ? [{ text: `It's locked${w.locked ? `: ${w.locked}` : ""}`, warn: true }] : []),
+    ] : undefined,
+    confirm: "Remove worktree",
+    danger: true,
+  });
+  if (ok.button !== "confirm") return;
+  const tab = app.tabs.findIndex((t) => t.path.replace(/[\\/]+$/, "") === w.path);
+  if (tab >= 0) app.closeTab(tab);
+  await app.act("Removing worktree", () => api.removeWorktree(P(), w.name!, true), { success: `Removed ${w.path}.` });
+}
+
+export async function updateSubmodules(paths: string[], label: string) {
+  await app.act(`Updating ${label}`, (creds) => api.updateSubmodules(P(), paths, creds), {
+    success: (n) => `Updated ${n} submodule${n === 1 ? "" : "s"}.`,
+  });
+}

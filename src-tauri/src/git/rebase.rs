@@ -57,6 +57,7 @@ fn pick_tree(repo: &Repository, c: &Commit, onto: &Commit) -> Result<Oid> {
 
 fn replay(repo: &Repository, onto: Option<Commit>, steps: &[Step]) -> Result<Oid> {
     let sig = signature(repo)?;
+    let signing = super::sign::wanted(repo, None);
     let mut current: Option<Commit> = onto;
     let mut replayed_any = false;
     for step in steps {
@@ -80,7 +81,7 @@ fn replay(repo: &Repository, onto: Option<Commit>, steps: &[Step]) -> Result<Oid
                             return err("The first commit in this history can't be moved.");
                         }
                         if reword {
-                            let id = repo.commit(None, &c.author(), &sig, &msg, &c.tree()?, &[])?;
+                            let id = super::sign::create(repo, None, &c.author(), &sig, &msg, &c.tree()?, &[], signing)?;
                             repo.find_commit(id)?
                         } else {
                             c.clone()
@@ -96,7 +97,7 @@ fn replay(repo: &Repository, onto: Option<Commit>, steps: &[Step]) -> Result<Oid
                                 continue;
                             }
                             let tree = repo.find_tree(tree)?;
-                            let id = repo.commit(None, &c.author(), &sig, &msg, &tree, &[cur])?;
+                            let id = super::sign::create(repo, None, &c.author(), &sig, &msg, &tree, &[cur], signing)?;
                             repo.find_commit(id)?
                         }
                     }
@@ -120,7 +121,7 @@ fn replay(repo: &Repository, onto: Option<Commit>, steps: &[Step]) -> Result<Oid
                 };
                 let parents: Vec<Commit> = cur.parents().collect();
                 let prefs: Vec<&Commit> = parents.iter().collect();
-                let id = repo.commit(None, &cur.author(), &sig, &msg, &tree, &prefs)?;
+                let id = super::sign::create(repo, None, &cur.author(), &sig, &msg, &tree, &prefs, signing)?;
                 current = Some(repo.find_commit(id)?);
             }
             other => return err(format!("Unknown rebase action '{other}'.")),

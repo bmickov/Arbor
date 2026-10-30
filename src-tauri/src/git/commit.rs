@@ -1,5 +1,6 @@
 //! Committing, amending, cherry-picking, reverting and resetting.
 
+use super::sign;
 use super::undo::{self, Action};
 use super::{advance_head, err, head_oid, hooks, oid, open, require_tracked_clean, short, signature, Result};
 use git2::{Oid, Repository, ResetType};
@@ -21,6 +22,11 @@ fn tidy(msg: &str) -> Result<String> {
 }
 
 pub fn commit(repo_path: &str, message: &str, amend: bool, skip_hooks: bool) -> Result<CommitResult> {
+    commit_signed(repo_path, message, amend, skip_hooks, None)
+}
+
+/// Commit, signing per `sign` (None follows commit.gpgsign).
+pub fn commit_signed(repo_path: &str, message: &str, amend: bool, skip_hooks: bool, sign: Option<bool>) -> Result<CommitResult> {
     let mut repo = open(repo_path)?;
     let merging = repo.state() == git2::RepositoryState::Merge;
     let mut merge_heads: Vec<Oid> = vec![];
@@ -46,10 +52,18 @@ pub fn commit(repo_path: &str, message: &str, amend: bool, skip_hooks: bool) -> 
     let tree = repo.find_tree(index.write_tree()?)?;
     let sig = signature(&repo)?;
     let before = head_oid(&repo);
+    let sign = sign::wanted(&repo, sign);
 
     let new = if amend {
         let head = repo.head()?.peel_to_commit()?;
-        head.amend(Some("HEAD"), None, Some(&sig), None, Some(&msg), Some(&tree))?
+        if sign {
+            let parents: Vec<git2::Commit> = head.parents().collect();
+            let refs: Vec<&git2::Commit> = parents.iter().collect();
+            let reflog = format!("commit (amend): {}", super::first_line(&msg));
+            sign::create(&repo, Some(&reflog), &head.author(), &sig, &msg, &tree, &refs, true)?
+        } else {
+            head.amend(Some("HEAD"), None, Some(&sig), None, Some(&msg), Some(&tree))?
+        }
     } else {
         let mut parents = vec![];
         if let Some(h) = before {
@@ -65,7 +79,9 @@ pub fn commit(repo_path: &str, message: &str, amend: bool, skip_hooks: bool) -> 
             }
         }
         let refs: Vec<&git2::Commit> = parents.iter().collect();
-        let id = repo.commit(Some("HEAD"), &sig, &sig, &msg, &tree, &refs)?;
+        let kind = if refs.is_empty() { " (initial)" } else if merging { " (merge)" } else { "" };
+        let reflog = format!("commit{kind}: {}", super::first_line(&msg));
+        let id = sign::create(&repo, Some(&reflog), &sig, &sig, &msg, &tree, &refs, sign)?;
         if merging {
             repo.cleanup_state()?;
         }
@@ -122,7 +138,7 @@ pub fn cherry_pick(repo_path: &str, id: &str) -> Result<CommitResult> {
     }
     let sig = signature(&repo)?;
     let msg = c.message().unwrap_or("");
-    let new = repo.commit(None, &c.author(), &sig, msg, &tree, &[&head])?;
+    let new = sign::create(&repo, None, &c.author(), &sig, msg, &tree, &[&head], sign::wanted(&repo, None))?;
     advance_head(&repo, new, &format!("cherry-pick: {}", super::first_line(msg)))?;
     record_commit_undo(&repo, format!("Cherry-pick {}", super::first_line(msg)), Some(head.id()), new);
     Ok(CommitResult { oid: new.to_string(), short: short(new) })
@@ -142,7 +158,7 @@ pub fn revert(repo_path: &str, id: &str) -> Result<CommitResult> {
     let sig = signature(&repo)?;
     let summary = super::summary(&c);
     let msg = format!("Revert \"{summary}\"\n\nThis reverts commit {}.\n", c.id());
-    let new = repo.commit(None, &sig, &sig, &msg, &tree, &[&head])?;
+    let new = sign::create(&repo, None, &sig, &sig, &msg, &tree, &[&head], sign::wanted(&repo, None))?;
     advance_head(&repo, new, &format!("revert: {summary}"))?;
     record_commit_undo(&repo, format!("Revert {summary}"), Some(head.id()), new);
     Ok(CommitResult { oid: new.to_string(), short: short(new) })

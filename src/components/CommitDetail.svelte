@@ -1,11 +1,17 @@
+<script lang="ts" module>
+  import type { Verification as V } from "../lib/api";
+  const verifications = new Map<string, V | null>();
+</script>
+
 <script lang="ts">
   import type { Snippet } from "svelte";
   import * as act from "../lib/actions";
-  import { api, type CommitInfo, type FileDiff } from "../lib/api";
+  import { api, type CommitInfo, type FileDiff, type Verification } from "../lib/api";
   import { authorHue, basename, dirname, fullDate, initials, STATUS_GLYPH } from "../lib/format";
   import { app } from "../lib/state.svelte";
   import { menu, toasts } from "../lib/ui.svelte";
   import DiffView from "./DiffView.svelte";
+  import Icon from "./Icon.svelte";
 
   let { oid, header }: { oid: string; header?: Snippet } = $props();
 
@@ -15,6 +21,23 @@
   // Which file the shown diff belongs to, so a slow (huge) diff shows as loading.
   let diffKey = $state("");
   let error = $state<string | null>(null);
+  // The commit's signature, checked once per commit (it can't change).
+  let verified = $state<{ oid: string; v: Verification | null } | null>(null);
+  $effect(() => {
+    const id = oid;
+    const repo = app.path;
+    const hit = verifications.get(`${repo}|${id}`);
+    if (hit !== undefined) return void (verified = { oid: id, v: hit });
+    verified = null;
+    api.verifyCommit(repo, id).then((v) => {
+      verifications.set(`${repo}|${id}`, v);
+      if (oid === id) verified = { oid: id, v };
+    }).catch(() => {});
+  });
+  const sigLabel = (v: Verification) =>
+    v.status === "good" ? "Verified" : v.status === "bad" ? "Bad signature" : v.status === "error" ? "Signed" : "Signed";
+  const sigTitle = (v: Verification) =>
+    [`${v.format === "ssh" ? "SSH" : v.format === "x509" ? "X.509" : "GPG"} signature`, v.signer && `by ${v.signer}`, v.key && `key ${v.key}`].filter(Boolean).join(" ") + `\n${v.detail}`;
 
   $effect(() => {
     const id = oid;
@@ -80,6 +103,10 @@
           <span><b>{info.author.name}</b> <span class="faint selectable">{info.author.email}</span></span>
           <span class="faint" title="Authored">{fullDate(info.author.time)}{#if !sameCommitter} · committed by {info.committer.name}{/if}</span>
         </div>
+        {#if verified?.oid === info.oid && verified.v}
+          {@const v = verified.v}
+          <span class="sig {v.status}" title={sigTitle(v)}><Icon name={v.status === "bad" ? "x" : v.status === "good" ? "check" : "commit"} size={12} /> {sigLabel(v)}</span>
+        {/if}
         <button class="sha mono" title="Copy commit ID" onclick={() => navigator.clipboard.writeText(info!.oid).then(() => toasts.push("info", "Copied commit ID."))}>{info.short}</button>
       </div>
       {#if info.parents.length}
@@ -126,6 +153,9 @@
   }
   .sha { padding: 3px 7px; border-radius: 5px; border: 1px solid var(--line); color: var(--ink-2); }
   .sha:hover { background: var(--surface-2); }
+  .sig { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 5px; font-size: calc(var(--fs) * 11.5); font-weight: 600; border: 1px solid currentColor; color: var(--ink-3); white-space: nowrap; cursor: default; }
+  .sig.good { color: var(--add-ink); background: var(--add-bg); border-color: transparent; }
+  .sig.bad { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
   .parents { font-size: calc(var(--fs) * 12); display: flex; gap: 6px; align-items: center; }
   .plink { color: var(--accent); }
   .plink:hover { text-decoration: underline; }

@@ -32,6 +32,8 @@ const light: Theme = {
     "btn-bg": "#fbfcfc", "btn-hover": "#f2f5f6", "input-bg": "#fbfcfc",
     "shadow-pop": "0 12px 32px rgba(18, 32, 40, 0.18), 0 2px 6px rgba(18, 32, 40, 0.1)",
     "backdrop": "rgba(10, 18, 22, 0.32)",
+    "syn-keyword": "#8a3fa0", "syn-string": "#2c7a35", "syn-number": "#b0571f", "syn-comment": "#7f8b93", "syn-title": "#1d5fa8", "syn-type": "#0f7477",
+    "syn-attr": "#9a5d12", "syn-meta": "#66727a", "syn-variable": "#a23f2f", "syn-regexp": "#2c7a35", "syn-builtin": "#0f7477",
   },
 };
 
@@ -56,6 +58,8 @@ const dark: Theme = {
     "btn-bg": "#1b2024", "btn-hover": "#20262a", "input-bg": "#1b2024",
     "shadow-pop": "0 14px 36px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3)",
     "backdrop": "rgba(0, 0, 0, 0.45)",
+    "syn-keyword": "#c792ea", "syn-string": "#a3d083", "syn-number": "#f2a46b", "syn-comment": "#6e7a82", "syn-title": "#82aaff", "syn-type": "#5cbfb3",
+    "syn-attr": "#e6b450", "syn-meta": "#8a96a0", "syn-variable": "#f07178", "syn-regexp": "#a3d083", "syn-builtin": "#5cbfb3",
   },
 };
 
@@ -83,6 +87,8 @@ const ubuntuDark: Theme = {
     "btn-bg": "rgba(255, 255, 255, 0.08)", "btn-hover": "rgba(255, 255, 255, 0.13)", "input-bg": "rgba(255, 255, 255, 0.06)",
     "shadow-pop": "0 14px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06)",
     "backdrop": "rgba(0, 0, 0, 0.5)",
+    "syn-keyword": "#f2894c", "syn-string": "#9fcf63", "syn-number": "#c79bea", "syn-comment": "#808080", "syn-title": "#79a9e3", "syn-type": "#4fc4b8",
+    "syn-attr": "#e8c06b", "syn-meta": "#909090", "syn-variable": "#f07a6e", "syn-regexp": "#9fcf63", "syn-builtin": "#4fc4b8",
   },
 };
 

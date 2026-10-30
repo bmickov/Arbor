@@ -9,6 +9,15 @@
   let body = $state("");
   let amend = $state(false);
   let skipHooks = $state(false);
+  // Sign this commit; starts from the repository's commit.gpgsign.
+  let sign = $state(false);
+  $effect(() => {
+    void app.path;
+    app.loadSigning();
+  });
+  $effect(() => {
+    sign = app.signing?.enabled ?? false;
+  });
   let saved: { subject: string; body: string } | null = null;
   let loadedFor = "";
 
@@ -88,7 +97,7 @@
   async function commit() {
     if (!canCommit) return;
     const message = body.trim() ? `${subject.trim()}\n\n${body.trim()}` : subject.trim();
-    const r = await app.act(amend ? "Amending" : "Committing", () => api.commit(app.path, message, amend, skipHooks));
+    const r = await app.act(amend ? "Amending" : "Committing", () => api.commit(app.path, message, amend, skipHooks, sign));
     if (r) {
       toasts.push("success", `${amend ? "Amended" : "Committed"} ${r.short}.`, { label: "Undo", run: () => app.undo() });
       subject = "";
@@ -232,6 +241,10 @@
   <div class="row">
     <label title="Replace the last commit with these staged changes and message"><input type="checkbox" checked={amend} onchange={toggleAmend} disabled={!st?.head || merging} /> Amend</label>
     <label title="Don't run the pre-commit and commit-msg hooks"><input type="checkbox" bind:checked={skipHooks} /> Skip hooks</label>
+    {#if app.signing?.enabled || app.signing?.key}
+      <label title={sign ? `Sign with ${app.signing.format === "ssh" ? "SSH" : app.signing.format === "x509" ? "X.509" : "GPG"}${app.signing.key ? ` key ${app.signing.key}` : ""}. Set up in Preferences → Commits.` : "Commit without a signature"}>
+        <input type="checkbox" bind:checked={sign} /> Sign</label>
+    {/if}
     <span class="sp"></span>
     <button class="btn primary" disabled={!canCommit} onclick={commit} title={keyLabel("Ctrl+Enter")}>{label}</button>
   </div>
@@ -243,8 +256,9 @@
   .subject input { font-weight: 600; padding-right: 36px; }
   .len { position: absolute; right: 9px; top: 50%; translate: 0 -50%; font-size: calc(var(--fs) * 11); color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .len.over { color: var(--danger); font-weight: 700; }
-  .row { display: flex; align-items: center; gap: 12px; font-size: calc(var(--fs) * 12); color: var(--ink-2); }
-  label { display: flex; align-items: center; gap: 5px; }
+  .row { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; font-size: calc(var(--fs) * 12); color: var(--ink-2); }
+  label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .row .btn { margin-left: auto; }
   .sp { flex: 1; }
   .meta { display: flex; align-items: center; gap: 8px; font-size: calc(var(--fs) * 11.5); color: var(--ink-3); margin: -2px 0 0; }
   .who, .tplbtn { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 2px 6px; margin-left: -6px; border-radius: 5px; color: var(--ink-3); }

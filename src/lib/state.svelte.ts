@@ -7,7 +7,7 @@ import { saveWindowState, StateFlags } from "@tauri-apps/plugin-window-state";
 import { SvelteSet } from "svelte/reactivity";
 import {
   api, type CommitRow, type Creds, type DiffSettings, type Refs, type RepoInfo,
-  type StashEntry, type UndoEntry, type WorkingStatus,
+  type SigningSettings, type StashEntry, type UndoEntry, type WorkingStatus,
 } from "./api";
 import { library } from "./library.svelte";
 import { applyTheme, type ThemeId } from "./themes";
@@ -58,12 +58,12 @@ export interface Layout {
   sideW: number;
   listW: number;
   sidebarHidden: boolean;
-  sections: { branches: boolean; remotes: boolean; tags: boolean };
+  sections: { branches: boolean; remotes: boolean; tags: boolean; worktrees: boolean; submodules: boolean };
   remotes: Record<string, boolean>;
 }
 const DEFAULT_LAYOUT: Layout = {
   sideW: 240, listW: 55, sidebarHidden: false,
-  sections: { branches: true, remotes: true, tags: false }, remotes: {},
+  sections: { branches: true, remotes: true, tags: false, worktrees: true, submodules: true }, remotes: {},
 };
 
 interface Session {
@@ -91,6 +91,8 @@ export interface Settings {
   codeSize: number;
   /** Changing the interface size changes the code size by the same amount. */
   codeFollowsUi: boolean;
+  /** Colour code by language in diffs and the file viewer. */
+  syntax: boolean;
   /** Ask before showing diffs with more changed lines than this; 0 never asks. */
   largeDiffLines: number;
   /** Fetch open repositories in the background every N minutes; 0 is off. */
@@ -107,7 +109,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false,
   theme: "system", uiFont: "atkinson", uiSize: 13, codeFont: "commit", codeSize: 12, shortcuts: {},
-  restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10,
+  restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10, syntax: true,
   commitTemplates: [], profiles: [],
 };
 export const UI_SIZES = { min: 10, max: 20, default: 13 };
@@ -182,6 +184,18 @@ class App {
   focusRepoFilter = $state(0);
   /** When each repository was last fetched (ms), by path. */
   lastFetched = $state<Record<string, number>>({});
+  /** Commit signing as configured for the active repository. */
+  signing = $state<SigningSettings | null>(null);
+  async loadSigning() {
+    const p = this.path;
+    if (!p) return void (this.signing = null);
+    try {
+      const s = await api.signingSettings(p);
+      if (this.path === p) this.signing = s;
+    } catch {
+      this.signing = null;
+    }
+  }
   /** Repositories whose background fetch failed (e.g. needs a password); skipped until restart. */
   private autoFetchOff = new Set<string>();
   private autoFetching = false;

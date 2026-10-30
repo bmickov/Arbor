@@ -6,6 +6,7 @@
   } from "../lib/shortcuts.svelte";
   import { THEMES, resolveTheme, type Theme, type ThemeId } from "../lib/themes";
   import Icon from "./Icon.svelte";
+  import SigningPrefs from "./SigningPrefs.svelte";
 
   type Section = "general" | "appearance" | "diffs" | "commits" | "keyboard";
   const SECTIONS: { id: Section; label: string; icon: string }[] = [
@@ -269,6 +270,10 @@
             </div>
             <p class="hint">Big diffs (often generated files or lock files) show a "Show diff" button instead of loading right away.</p>
             <label class="toggle">
+              <input type="checkbox" checked={s.syntax} onchange={() => { s.syntax = !s.syntax; save(); }} />
+              <span><b>Syntax highlighting</b><small>Colour keywords, strings and comments in diffs and the file browser, for about 50 languages.</small></span>
+            </label>
+            <label class="toggle">
               <input type="checkbox" checked={s.ignoreWhitespace} onchange={() => { s.ignoreWhitespace = !s.ignoreWhitespace; save(); }} />
               <span><b>Ignore whitespace changes</b><small>Hide lines that only differ in indentation or spacing.</small></span>
             </label>
@@ -320,6 +325,7 @@
             {/each}
             <button class="btn small" onclick={() => { s.profiles.push({ name: "", email: "" }); save(); }}><Icon name="plus" size={13} /> Add profile</button>
           </section>
+          <SigningPrefs />
         {:else}
           <section class="kb">
             <div class="kbtools">

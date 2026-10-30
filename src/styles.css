@@ -42,6 +42,9 @@
   --backdrop: rgba(10, 18, 22, 0.32);
   --av-bg-s: 45%; --av-bg-l: 88%; --av-ink-s: 45%; --av-ink-l: 28%;
   --btn-bg: #fbfcfc; --btn-hover: #f2f5f6; --input-bg: #fbfcfc;
+  --syn-keyword: #8a3fa0; --syn-string: #2c7a35; --syn-number: #b0571f; --syn-comment: #7f8b93;
+  --syn-title: #1d5fa8; --syn-type: #0f7477; --syn-attr: #9a5d12; --syn-meta: #66727a;
+  --syn-variable: #a23f2f; --syn-regexp: #2c7a35; --syn-builtin: #0f7477;
   --radius: 6px;
 
   /* Font scaling: sizes are written as calc(var(--fs) * N) so N is the size
@@ -128,6 +131,20 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--ink-3); background-clip: content-box; border: 3px solid transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }
+
+/* Syntax highlighting (highlight.js classes), coloured by the theme. */
+.hljs-keyword, .hljs-selector-tag, .hljs-doctag, .hljs-section { color: var(--syn-keyword); }
+.hljs-string, .hljs-template-tag, .hljs-template-variable, .hljs-addition { color: var(--syn-string); }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet { color: var(--syn-number); }
+.hljs-comment, .hljs-quote { color: var(--syn-comment); font-style: italic; }
+.hljs-title, .hljs-title.function_, .hljs-function .hljs-title { color: var(--syn-title); }
+.hljs-type, .hljs-title.class_, .hljs-class .hljs-title, .hljs-built_in { color: var(--syn-type); }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id { color: var(--syn-attr); }
+.hljs-meta, .hljs-meta .hljs-keyword, .hljs-tag { color: var(--syn-meta); }
+.hljs-variable, .hljs-params, .hljs-name, .hljs-subst { color: var(--syn-variable); }
+.hljs-regexp, .hljs-link { color: var(--syn-regexp); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
 
 /* Ref pills share the lane colours of the graph. */
 .pill {

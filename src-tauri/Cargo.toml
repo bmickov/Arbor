@@ -1,6 +1,6 @@
 [package]
 name = "arbor"
-version = "0.8.0"
+version = "0.9.0"
 description = "A friendly Git client for Linux, the BSDs, macOS and Windows"
 license = "0BSD"
 authors = ["The Arbor authors"]
@@ -23,6 +23,7 @@ serde_json = "1"
 git2 = { version = "0.21", features = ["https", "ssh", "vendored-libgit2"] }
 thiserror = "2"
 dirs = "6"
+tempfile = "3"
 open = "5"
 chrono = "0.4"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
@@ -34,7 +35,6 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2-zli
 openssl-sys = { version = "0.9", features = ["vendored"] }
 
 [dev-dependencies]
-tempfile = "3"
 
 [profile.release]
 codegen-units = 1
