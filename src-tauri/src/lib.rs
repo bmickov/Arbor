@@ -179,6 +179,56 @@ async fn blame(repo: String, path: String) -> R<git::blame::Blame> {
     blocking(move || git::blame::blame(&repo, &path)).await
 }
 
+#[tauri::command]
+async fn get_identity(repo: String) -> R<git::identity::Identity> {
+    blocking(move || git::identity::identity(&repo)).await
+}
+#[tauri::command]
+async fn set_identity(repo: String, name: Option<String>, email: Option<String>) -> R<()> {
+    blocking(move || {
+        let who = match (&name, &email) {
+            (Some(n), Some(e)) => Some((n.as_str(), e.as_str())),
+            _ => None,
+        };
+        git::identity::set_identity(&repo, who)
+    })
+    .await
+}
+#[tauri::command]
+async fn commit_template(repo: String) -> R<Option<String>> {
+    blocking(move || git::identity::commit_template(&repo)).await
+}
+
+#[tauri::command]
+async fn ignore_pattern(repo: String, pattern: String) -> R<bool> {
+    blocking(move || git::files::ignore(&repo, &pattern)).await
+}
+#[tauri::command]
+async fn untrack_files(repo: String, paths: Vec<String>) -> R<()> {
+    blocking(move || git::files::untrack(&repo, &paths)).await
+}
+#[tauri::command]
+async fn restore_file(repo: String, rev: String, path: String) -> R<()> {
+    blocking(move || git::files::restore_file(&repo, &rev, &path)).await
+}
+#[tauri::command]
+async fn save_commit_patch(repo: String, oid: String, dest: String) -> R<()> {
+    blocking(move || git::files::save_commit_patch(&repo, &oid, &dest)).await
+}
+#[tauri::command]
+async fn save_changes_patch(repo: String, staged: bool, dest: String) -> R<usize> {
+    blocking(move || git::files::save_changes_patch(&repo, staged, &dest)).await
+}
+#[tauri::command]
+async fn apply_patch(repo: String, file: String) -> R<git::files::Applied> {
+    blocking(move || git::files::apply_patch(&repo, &file)).await
+}
+
+#[tauri::command]
+async fn tracked_files(repo: String) -> R<Vec<String>> {
+    blocking(move || git::tree::tracked_files(&repo)).await
+}
+
 // ---------------------------------------------------------- branches & tags
 
 #[tauri::command]
@@ -271,9 +321,10 @@ async fn pull(app: AppHandle, repo: String, rebase: bool, creds: Option<Creds>) 
 }
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-async fn push(app: AppHandle, repo: String, branch: Option<String>, remote: Option<String>, force: bool, set_upstream: bool, creds: Option<Creds>) -> R<String> {
+async fn push(app: AppHandle, repo: String, branch: Option<String>, remote: Option<String>, force: bool, lease: Option<bool>, set_upstream: bool, creds: Option<Creds>) -> R<String> {
     let p = progress(&app);
-    blocking(move || git::remote::push(&repo, branch.as_deref(), remote.as_deref(), force, set_upstream, creds, p)).await
+    let lease = lease.unwrap_or(true);
+    blocking(move || git::remote::push(&repo, branch.as_deref(), remote.as_deref(), force, lease, set_upstream, creds, p)).await
 }
 #[tauri::command]
 async fn push_tag(app: AppHandle, repo: String, tag: String, remote: String, creds: Option<Creds>) -> R<()> {
@@ -402,7 +453,8 @@ pub fn run() {
             stage_files, unstage_files, stage_all, unstage_all, discard_files,
             stage_lines, unstage_lines, discard_lines, resolve_conflict,
             commit, head_message, cherry_pick, revert_commit, reset_to,
-            get_log, commit_info, commit_file_diff, file_history, blame,
+            get_log, commit_info, tracked_files, ignore_pattern, untrack_files, restore_file,
+            save_commit_patch, save_changes_patch, apply_patch, get_identity, set_identity, commit_template, commit_file_diff, file_history, blame,
             get_refs, checkout_branch, checkout_commit, checkout_remote, create_branch,
             delete_branch, delete_branches, unmerged_branches, rename_branch, set_upstream, create_tag, delete_tag,
             add_remote, remove_remote,

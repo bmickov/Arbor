@@ -493,7 +493,7 @@ fn push_and_pull_over_local_remote() {
     a.write("f.txt", "1\n");
     a.commit_all("one");
     git::branches::add_remote(&a.path, "origin", &bare_path).unwrap();
-    let pushed = git::remote::push(&a.path, None, None, false, true, None, None).unwrap();
+    let pushed = git::remote::push(&a.path, None, None, false, false, true, None, None).unwrap();
     assert_eq!(pushed, "origin/main");
     let st = git::status::status(&a.path).unwrap();
     assert_eq!(st.upstream.as_deref(), Some("origin/main"));
@@ -506,7 +506,7 @@ fn push_and_pull_over_local_remote() {
 
     a.write("f.txt", "2\n");
     a.commit_all("two");
-    git::remote::push(&a.path, None, None, false, false, None, None).unwrap();
+    git::remote::push(&a.path, None, None, false, false, false, None, None).unwrap();
 
     let p = git::remote::pull(&b_path, false, None, None).unwrap();
     assert_eq!(p.result, "fast-forward");
@@ -518,12 +518,12 @@ fn push_and_pull_over_local_remote() {
     git::commit::commit(&b_path, "from b", false, false).unwrap();
     a.write("f.txt", "3\n");
     a.commit_all("three");
-    git::remote::push(&a.path, None, None, false, false, None, None).unwrap();
-    let e = git::remote::push(&b_path, None, None, false, false, None, None).unwrap_err().to_string();
+    git::remote::push(&a.path, None, None, false, false, false, None, None).unwrap();
+    let e = git::remote::push(&b_path, None, None, false, false, false, None, None).unwrap_err().to_string();
     assert!(e.starts_with("REJECTED:"), "{e}");
     let p = git::remote::pull(&b_path, true, None, None).unwrap();
     assert_eq!(p.result, "rebased");
-    git::remote::push(&b_path, None, None, false, false, None, None).unwrap();
+    git::remote::push(&b_path, None, None, false, false, false, None, None).unwrap();
 }
 
 #[test]
@@ -752,4 +752,158 @@ fn unmerged_check_and_single_delete_labels() {
     git::stash::drop_many(&r.path, &[id]).unwrap();
     assert_eq!(git::undo::undo(&r.path).unwrap(), "Delete stash \"solo\"");
     assert_eq!(git::stash::list(&r.path).unwrap().len(), 1);
+}
+
+#[test]
+fn force_push_with_lease_protects_unfetched_commits() {
+    let bare = tempfile::tempdir().unwrap();
+    let bare_path = bare.path().to_string_lossy().to_string();
+    Command::new("git").args(["init", "-q", "--bare", "-b", "main", &bare_path]).output().unwrap();
+    let a = Repo::new();
+    a.write("f.txt", "1\n");
+    a.commit_all("one");
+    git::branches::add_remote(&a.path, "origin", &bare_path).unwrap();
+    git::remote::push(&a.path, None, None, false, false, true, None, None).unwrap();
+
+    // B clones, then A pushes more work that B hasn't fetched.
+    let dest = tempfile::tempdir().unwrap();
+    let b_path = dest.path().join("b").to_string_lossy().to_string();
+    git::repo::clone_repo(&bare_path, &b_path, None, None).unwrap();
+    for (k, v) in [("user.name", "B"), ("user.email", "b@example.com"), ("core.autocrlf", "false")] {
+        Command::new("git").args(["config", k, v]).current_dir(&b_path).output().unwrap();
+    }
+    a.write("f.txt", "2\n");
+    a.commit_all("two from a");
+    git::remote::push(&a.path, None, None, false, false, false, None, None).unwrap();
+
+    // B rewrites history and force pushes with lease: refused, A's commit is safe.
+    std::fs::write(Path::new(&b_path).join("f.txt"), "b\n").unwrap();
+    git::patch::stage_all(&b_path).unwrap();
+    git::commit::commit(&b_path, "b's version", true, false).unwrap();
+    let e = git::remote::push(&b_path, None, None, true, true, false, None, None).unwrap_err().to_string();
+    assert!(e.starts_with("LEASE:"), "{e}");
+    let tip = |p: &str| Command::new("git").args(["log", "-1", "--format=%s", "main"]).current_dir(p).output().unwrap().stdout;
+    assert_eq!(String::from_utf8_lossy(&tip(&bare_path)).trim(), "two from a");
+
+    // After fetching (B has now seen A's commit), the lease holds and the force push goes through.
+    git::remote::fetch(&b_path, None, false, None, None).unwrap();
+    git::remote::push(&b_path, None, None, true, true, false, None, None).unwrap();
+    assert_eq!(String::from_utf8_lossy(&tip(&bare_path)).trim(), "b's version");
+
+    // A plain force push (no lease) overwrites regardless.
+    a.write("f.txt", "3\n");
+    a.commit_all("three from a");
+    git::remote::push(&a.path, None, None, true, false, false, None, None).unwrap();
+    assert_eq!(String::from_utf8_lossy(&tip(&bare_path)).trim(), "three from a");
+}
+
+#[test]
+fn identity_per_repository_and_commit_template() {
+    let r = Repo::new();
+    // Repo::new sets a local identity.
+    let id = git::identity::identity(&r.path).unwrap();
+    assert_eq!((id.name.as_deref(), id.email.as_deref(), id.local), (Some("Test"), Some("test@example.com"), true));
+
+    git::identity::set_identity(&r.path, Some(("Work Me", "me@work.example"))).unwrap();
+    r.write("a.txt", "a\n");
+    git::patch::stage_all(&r.path).unwrap();
+    git::commit::commit(&r.path, "as work", false, false).unwrap();
+    assert_eq!(r.git(&["log", "-1", "--format=%an <%ae>"]).trim(), "Work Me <me@work.example>");
+
+    // Going back to the global identity removes the repository's own setting.
+    git::identity::set_identity(&r.path, None).unwrap();
+    assert!(!git::identity::identity(&r.path).unwrap().local);
+    git::identity::set_identity(&r.path, None).unwrap(); // removing twice is fine
+
+    assert!(git::identity::commit_template(&r.path).unwrap().is_none());
+    r.write(".gitmessage", "feat: \n\nWhy:\n");
+    r.git(&["config", "commit.template", ".gitmessage"]);
+    assert_eq!(git::identity::commit_template(&r.path).unwrap().as_deref(), Some("feat: \n\nWhy:\n"));
+}
+
+#[test]
+fn ignore_untrack_and_restore_files() {
+    let r = Repo::new();
+    r.write("keep.txt", "v1\n");
+    r.write("secret.env", "TOKEN=1\n");
+    r.commit_all("first");
+    r.write("keep.txt", "v2\n");
+    r.commit_all("second");
+
+    // Ignore: appended once, undoable.
+    assert!(git::files::ignore(&r.path, "*.log").unwrap());
+    assert!(!git::files::ignore(&r.path, "*.log").unwrap());
+    assert_eq!(r.read(".gitignore"), "*.log\n");
+    git::undo::undo(&r.path).unwrap();
+    assert!(!Path::new(&r.path).join(".gitignore").exists());
+
+    // Stop tracking: gone from the index, still on disk; undo puts it back.
+    git::files::untrack(&r.path, &["secret.env".to_string()]).unwrap();
+    assert!(r.read("secret.env").contains("TOKEN"));
+    assert!(r.git(&["ls-files"]).lines().all(|l| l != "secret.env"));
+    git::undo::undo(&r.path).unwrap();
+    assert!(r.git(&["ls-files"]).lines().any(|l| l == "secret.env"));
+
+    // Restore the version from before the last commit, then undo it.
+    git::files::restore_file(&r.path, "HEAD^", "keep.txt").unwrap();
+    assert_eq!(r.read("keep.txt"), "v1\n");
+    git::undo::undo(&r.path).unwrap();
+    assert_eq!(r.read("keep.txt"), "v2\n");
+    // A file that didn't exist at that commit is removed.
+    r.write("new.txt", "n\n");
+    r.commit_all("third");
+    git::files::restore_file(&r.path, "HEAD^", "new.txt").unwrap();
+    assert!(!Path::new(&r.path).join("new.txt").exists());
+}
+
+#[test]
+fn patches_round_trip() {
+    let r = Repo::new();
+    r.write("a.txt", "one\ntwo\n");
+    r.commit_all("base");
+    r.write("a.txt", "one\nTWO\n");
+    r.write("b.txt", "new file\n");
+    r.git(&["add", "-A"]);
+    r.git(&["commit", "-q", "-m", "Change two and add b", "-m", "Because reasons."]);
+    let head = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+
+    // A commit as an email patch, applied to a copy that's one commit behind.
+    let dir = tempfile::tempdir().unwrap();
+    let patch = dir.path().join("change.patch").to_string_lossy().to_string();
+    git::files::save_commit_patch(&r.path, &head, &patch).unwrap();
+    let text = std::fs::read_to_string(&patch).unwrap();
+    assert!(text.starts_with("From ") && text.contains("Subject: [PATCH] Change two and add b"), "{text}");
+    r.git(&["reset", "-q", "--hard", "HEAD^"]);
+    let applied = git::files::apply_patch(&r.path, &patch).unwrap();
+    assert_eq!(applied.files, 2);
+    assert_eq!(applied.subject.as_deref(), Some("Change two and add b"));
+    assert_eq!(applied.body.as_deref(), Some("Because reasons."));
+    assert_eq!(r.read("a.txt"), "one\nTWO\n");
+    assert_eq!(r.read("b.txt"), "new file\n");
+
+    // Undo puts the files back as they were.
+    git::undo::undo(&r.path).unwrap();
+    assert_eq!(r.read("a.txt"), "one\ntwo\n");
+    assert!(!Path::new(&r.path).join("b.txt").exists());
+
+    // Uncommitted changes (including a new file) as a plain patch.
+    r.write("a.txt", "one\n2\n");
+    r.write("c.txt", "c\n");
+    let p2 = dir.path().join("wip.patch").to_string_lossy().to_string();
+    assert_eq!(git::files::save_changes_patch(&r.path, false, &p2).unwrap(), 2);
+    assert!(git::files::save_changes_patch(&r.path, true, &p2).is_err(), "nothing staged");
+    git::files::save_changes_patch(&r.path, false, &p2).unwrap();
+    r.git(&["checkout", "-q", "--", "a.txt"]);
+    std::fs::remove_file(Path::new(&r.path).join("c.txt")).unwrap();
+    let applied = git::files::apply_patch(&r.path, &p2).unwrap();
+    assert!(applied.subject.is_none());
+    assert_eq!(r.read("a.txt"), "one\n2\n");
+    assert_eq!(r.read("c.txt"), "c\n");
+
+    // A patch that doesn't fit changes nothing.
+    r.write("a.txt", "completely different\n");
+    std::fs::remove_file(Path::new(&r.path).join("c.txt")).unwrap();
+    assert!(git::files::apply_patch(&r.path, &p2).is_err());
+    assert_eq!(r.read("a.txt"), "completely different\n");
+    assert!(!Path::new(&r.path).join("c.txt").exists());
 }

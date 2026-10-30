@@ -76,6 +76,7 @@
   </div>
   <button class="plus" title="Open another repository" aria-label="Open another repository" onclick={() => app.switchTo(-1)}><Icon name="plus" size={14} /></button>
   <span class="grow"></span>
+  <button class="gear" title={keyText("Quick actions (Ctrl+Shift+P)")} aria-label="Quick actions" onclick={() => (app.quick = true)}><Icon name="search" size={15} /></button>
   {#if !app.repo}
     <button class="gear" title={keyText("Preferences (Ctrl+,)")} aria-label="Preferences" onclick={() => (app.prefs = "general")}><Icon name="settings" size={15} /></button>
   {/if}

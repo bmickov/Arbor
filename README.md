@@ -13,6 +13,11 @@ contains none of their code or artwork.
 
 ## Features
 
+**Quick Actions**
+- Ctrl+Shift+P (or Ctrl+K) opens one search box for everything: run any
+  command, check out a branch, jump to a tag or commit (by message, author or
+  ID), open a file's history, or switch repository
+
 **Many repositories**
 - A repository manager (Ctrl+T) lists every repository you've added, with its
   branch, commits to push and pull, uncommitted changes, stashes and latest commit
@@ -39,6 +44,15 @@ contains none of their code or artwork.
   (click a line, shift-click or drag to extend, ctrl-click to toggle)
 - Drag files between the Unstaged and Staged lists
 - Commit composer with amend, skip-hooks, and a per-repo saved draft
+- **Commit templates**: saved message templates (Preferences → Commits), plus
+  the repository's own `commit.template`, from the Template menu
+- **Author profiles**: see who you're committing as, and switch per repository
+  (for example work and personal) from the name above the message
+- Ignore a file, all files of its type, or its folder; stop tracking a file
+  while keeping it on disk
+- **Patches**: save uncommitted changes or any commit as a `.patch` file
+  (commits in `git format-patch` format), and apply patch files. Applying an
+  emailed patch puts its message in the commit box
 - Runs your `pre-commit`, `commit-msg` and `post-commit` hooks (respects `core.hooksPath`)
 - Merge conflicts: keep mine, keep theirs, or mark resolved after editing; abort
 
@@ -53,6 +67,7 @@ contains none of their code or artwork.
   show a summary and a **Show diff** button instead of loading right away.
   The limit is in Preferences → Diffs & Git, including "Always show"
 - File history (follows renames) and blame
+- Restore any file to how it was in a commit, or just before it
 - Right-click a commit to check out, branch, tag, cherry-pick, revert, reset,
   edit its message, squash or fixup into its parent, or remove it
 - **Drag a commit up or down to reorder it**
@@ -66,7 +81,12 @@ contains none of their code or artwork.
 - **Drag a branch onto another branch** to merge or rebase
 - **Drag a branch onto a remote** to push it there
 - Drag a commit onto the current branch to cherry-pick it
-- Fetch (with prune), pull (merge or rebase), push with rejection handling and force push
+- Fetch (with prune), pull (merge or rebase), push with rejection handling
+- **Sync**: pull, then push, in one click
+- **Fetch automatically** in the background (every 10 minutes by default), so
+  the counts of commits to pull stay current
+- **Safe force push**: force pushes check the remote first, like
+  `--force-with-lease`, and refuse if someone pushed since your last fetch
 - SSH via ssh-agent or `~/.ssh/id_*` keys; HTTPS via your git credential helper,
   or a username and token prompt
 - Clone, init, add and remove remotes, track upstream branches, push and delete tags
@@ -145,7 +165,9 @@ Open with **Ctrl+,** or the sliders button.
   difference you set; turn off "Scale with interface text" to keep it fixed.
   History rows and the graph scale with the interface size
 - **Diffs & Git:** context lines, when to ask before showing large diffs,
-  ignore whitespace, side-by-side history diffs, pull with rebase
+  ignore whitespace, side-by-side history diffs, how often to fetch
+  automatically, pull with rebase
+- **Commits:** commit templates and author profiles
 - **Keyboard:** every shortcut below can be changed. Click it and press new keys;
   if another action used them, it's unassigned and you're told which
 
@@ -155,6 +177,7 @@ On macOS, Ctrl in the table below is ⌘ (Command), Alt is ⌥ and Shift is ⇧.
 
 | Keys | Action |
 | --- | --- |
+| Ctrl+Shift+P, Ctrl+K | Quick Actions: search commands, branches, commits, files… |
 | Ctrl+Q | Quit (saves your tabs and window first) |
 | F11 | Full screen |
 | Ctrl+, | Preferences |
@@ -180,6 +203,7 @@ On macOS, Ctrl in the table below is ⌘ (Command), Alt is ⌥ and Shift is ⇧.
 | Ctrl+Shift+S / Ctrl+Alt+S | Stash / apply and remove the latest stash |
 | Ctrl+Shift+F | Fetch (on the repository list: fetch all) |
 | Ctrl+Shift+↓ / Ctrl+Shift+↑ | Pull / push |
+| Ctrl+Shift+Y | Sync (pull, then push) |
 | Ctrl+Z | Undo the last operation |
 | Ctrl+R, F5 | Refresh |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / reset text (code and diffs follow, unless turned off) |
@@ -230,7 +254,7 @@ cd src-tauri && cargo test
   GitHub release with all installers and checksums:
 
   ```sh
-  git tag v0.6.1 && git push origin main v0.6.1
+  git tag v0.7.0 && git push origin main v0.7.0
   ```
 
   Tags with a suffix (`v0.7.0-beta.1`) are published as pre-releases.

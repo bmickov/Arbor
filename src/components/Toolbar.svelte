@@ -28,6 +28,9 @@
       { label: "Open terminal here", action: () => api.openTerminal(app.path) },
       { label: "Add remote…", action: act.addRemote },
       { separator: true },
+      { label: "Apply patch…", action: act.applyPatch },
+      { label: "Save changes as patch…", action: act.saveChangesPatch },
+      { separator: true },
       { label: "Close tab", hint: "Ctrl+W", action: () => app.closeTab(app.active) },
     ];
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -44,6 +47,19 @@
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     menu.open(r.left, r.bottom + 4, items, "Switch branch");
   }
+
+  // "Fetched 3 min ago" for the Fetch button's tooltip; ticks every half minute.
+  let now = $state(Date.now());
+  $effect(() => {
+    const t = setInterval(() => (now = Date.now()), 30000);
+    return () => clearInterval(t);
+  });
+  const fetchedAgo = $derived.by(() => {
+    const t = app.lastFetched[app.path];
+    if (!t) return "";
+    const m = Math.round((now - t) / 60000);
+    return m < 1 ? " · fetched just now" : ` · fetched ${m} min ago`;
+  });
 
   const undoTitle = $derived(app.undoTop ? keyText(`Undo “${app.undoTop.label}” (Ctrl+Z)`) : "Nothing to undo");
 </script>
@@ -67,7 +83,7 @@
   </div>
 
   <div class="center">
-    <button class="tool" onclick={act.fetchAll} disabled={!!app.busy} title="Fetch from all remotes">
+    <button class="tool" onclick={act.fetchAll} disabled={!!app.busy} title={`Fetch from all remotes${fetchedAgo}`}>
       <Icon name="fetch" /><span>Fetch</span>
     </button>
     <button class="tool" onclick={act.pull} disabled={!!app.busy || !st?.upstream} title={st?.upstream ? `Pull from ${st.upstream}` : "This branch doesn't track a remote branch"}>
@@ -77,6 +93,9 @@
     <button class="tool" onclick={() => act.push()} disabled={!!app.busy || !st?.branch} title={st?.upstream ? `Push to ${st.upstream}` : "Push and track a new remote branch"}>
       <Icon name="push" /><span>Push</span>
       {#if st?.ahead}<b class="count">{st.ahead}</b>{/if}
+    </button>
+    <button class="tool" onclick={act.sync} disabled={!!app.busy || !st?.branch} title={keyText(st?.upstream ? `Pull from ${st.upstream}, then push (Ctrl+Shift+Y)` : "Push and track a new remote branch (Ctrl+Shift+Y)")}>
+      <Icon name="sync" /><span>Sync</span>
     </button>
     <span class="gap"></span>
     <button class="tool" onclick={act.stashChanges} disabled={!!app.busy} title="Stash your changes">

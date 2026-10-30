@@ -1,4 +1,5 @@
 <script lang="ts">
+  import * as act from "../lib/actions";
   import { api, type FileDiff, type Selection } from "../lib/api";
   import { basename } from "../lib/format";
   import { app } from "../lib/state.svelte";
@@ -134,6 +135,11 @@
       { label: "Open file", disabled: !one, action: () => api.openExternal(full) },
       { label: "Show in folder", disabled: !one, action: () => api.openExternal(full.replace(/\/[^/]+$/, "")) },
       { label: "File history & blame", disabled: !one || untracked, action: () => (app.fileHistoryPath = path) },
+      { separator: true },
+      ...(one ? act.ignoreItems(path) : []),
+      ...(!untracked && area !== "conflicted" && st?.unstaged.find((f) => f.path === path)?.status !== "deleted"
+        ? [{ label: one ? "Stop tracking" : `Stop tracking ${label}`, hint: "keeps the file", action: () => act.untrack(paths) }]
+        : []),
       { separator: true },
       { label: "Copy path", action: () => navigator.clipboard.writeText(paths.join("\n")) },
     ], label);

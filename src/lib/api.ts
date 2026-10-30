@@ -69,6 +69,8 @@ function decodeHunk(w: WireHunk): Hunk {
 
 const decodeDiff = (d: WireDiff | null): FileDiff | null => (d ? { ...d, hunks: d.hunks.map(decodeHunk) } : null);
 
+export interface Applied { files: number; subject: string | null; body: string | null }
+export interface Identity { name: string | null; email: string | null; local: boolean }
 export interface DiffSettings { context?: number; ignoreWhitespace?: boolean; maxLines?: number }
 export interface Selection { hunk: number; lines: number[] }
 
@@ -183,12 +185,24 @@ export const api = {
   interactiveRebase: (repo: string, base: string | null, steps: Step[], label: string) =>
     call<RebaseOutcome>("interactive_rebase", { repo, base, steps, label }),
 
+  getIdentity: (repo: string) => call<Identity>("get_identity", { repo }),
+  /** Commit as name/email in this repository; null for both goes back to the global identity. */
+  setIdentity: (repo: string, name: string | null, email: string | null) => call<void>("set_identity", { repo, name, email }),
+  commitTemplate: (repo: string) => call<string | null>("commit_template", { repo }),
+  ignorePattern: (repo: string, pattern: string) => call<boolean>("ignore_pattern", { repo, pattern }),
+  untrackFiles: (repo: string, paths: string[]) => call<void>("untrack_files", { repo, paths }),
+  restoreFile: (repo: string, rev: string, path: string) => call<void>("restore_file", { repo, rev, path }),
+  saveCommitPatch: (repo: string, oid: string, dest: string) => call<void>("save_commit_patch", { repo, oid, dest }),
+  saveChangesPatch: (repo: string, staged: boolean, dest: string) => call<number>("save_changes_patch", { repo, staged, dest }),
+  applyPatch: (repo: string, file: string) => call<Applied>("apply_patch", { repo, file }),
+  trackedFiles: (repo: string) => call<string[]>("tracked_files", { repo }),
   fetch: (repo: string, remote: string | null, prune: boolean, creds?: Creds) => call<void>("fetch", { repo, remote, prune, creds }),
   pull: (repo: string, rebase: boolean, creds?: Creds) => call<PullOutcome>("pull", { repo, rebase, creds }),
-  push: (repo: string, opts: { branch?: string; remote?: string; force?: boolean; setUpstream?: boolean }, creds?: Creds) =>
+  /** `force` pushes with lease (refuses if someone pushed since the last fetch) unless `lease` is false. */
+  push: (repo: string, opts: { branch?: string; remote?: string; force?: boolean; lease?: boolean; setUpstream?: boolean }, creds?: Creds) =>
     call<string>("push", {
       repo, branch: opts.branch ?? null, remote: opts.remote ?? null,
-      force: opts.force ?? false, setUpstream: opts.setUpstream ?? false, creds,
+      force: opts.force ?? false, lease: opts.lease ?? true, setUpstream: opts.setUpstream ?? false, creds,
     }),
   pushTag: (repo: string, tag: string, remote: string, creds?: Creds) => call<void>("push_tag", { repo, tag, remote, creds }),
   deleteRemoteBranch: (repo: string, fullName: string, creds?: Creds) => call<void>("delete_remote_branch", { repo, fullName, creds }),
