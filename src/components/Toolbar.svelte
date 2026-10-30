@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { keyText, shortPath } from "../lib/platform";
   import { open as pickFolder } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
   import * as act from "../lib/actions";
@@ -21,7 +22,7 @@
         if (typeof d === "string") app.open(d);
       } },
       ...(recent.length ? [{ separator: true } as MenuItem] : []),
-      ...recent.map((r) => ({ label: r.name, hint: r.path.replace(/^\/home\/[^/]+/, "~"), action: () => app.open(r.path) })),
+      ...recent.map((r) => ({ label: r.name, hint: shortPath(r.path), action: () => app.open(r.path) })),
       { separator: true },
       { label: "Show in file manager", action: () => api.openExternal(app.path) },
       { label: "Open terminal here", action: () => api.openTerminal(app.path) },
@@ -44,7 +45,7 @@
     menu.open(r.left, r.bottom + 4, items, "Switch branch");
   }
 
-  const undoTitle = $derived(app.undoTop ? `Undo “${app.undoTop.label}” (Ctrl+Z)` : "Nothing to undo");
+  const undoTitle = $derived(app.undoTop ? keyText(`Undo “${app.undoTop.label}” (Ctrl+Z)`) : "Nothing to undo");
 </script>
 
 <header class="bar">
@@ -90,8 +91,8 @@
     {#if app.busy}
       <span class="busy" role="status"><span class="spinner"></span>{app.busy}{app.progress ? ` · ${app.progress}` : "…"}</span>
     {/if}
-    <button class="icon" onclick={() => app.refresh(true)} title="Refresh (Ctrl+R)" aria-label="Refresh"><Icon name="refresh" /></button>
-    <button class="icon" onclick={() => (app.prefs = "general")} title="Preferences (Ctrl+,)" aria-label="Preferences"><Icon name="settings" /></button>
+    <button class="icon" onclick={() => app.refresh(true)} title={keyText("Refresh (Ctrl+R)")} aria-label="Refresh"><Icon name="refresh" /></button>
+    <button class="icon" onclick={() => (app.prefs = "general")} title={keyText("Preferences (Ctrl+,)")} aria-label="Preferences"><Icon name="settings" /></button>
   </div>
 </header>
 

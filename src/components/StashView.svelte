@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { keyText } from "../lib/platform";
   import * as act from "../lib/actions";
   import { draggable } from "../lib/drag.svelte";
   import { relTime, fullDate } from "../lib/format";
@@ -87,7 +88,7 @@
         onclick={(e) => click(e, s.index, s.oid)}
         oncontextmenu={(e) => stashMenu(e, s.index, s.oid)}
         use:draggable={() => ({ payload: { kind: "stash", index: s.index, message: s.message }, label: `Stash: ${s.message}` })}
-        title="Drag onto Changes to apply · Ctrl+click or Shift+click to select several">
+        title={keyText("Drag onto Changes to apply · Ctrl+click or Shift+click to select several")}>
         <span class="msg">{s.message}</span>
         <span class="meta faint">{s.branch ? `on ${s.branch} · ` : ""}<span title={fullDate(s.time)}>{relTime(s.time)}</span>{s.hasUntracked ? " · new files" : ""}</span>
       </button>
@@ -109,7 +110,7 @@
             <button class="btn danger" onclick={deleteSelected}><Icon name="discard" size={13} /> Delete {pickedList.length} stashes…</button>
             <button class="btn" onclick={() => picked.clear()}>Clear selection</button>
           </div>
-          <small>Ctrl+click to add or remove one, Shift+click for a range, Ctrl+A for all, Delete to delete.</small>
+          <small>{keyText("Ctrl+click to add or remove one, Shift+click for a range, Ctrl+A for all, Delete to delete.")}</small>
         </div>
       </div>
     {:else if sel}

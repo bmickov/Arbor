@@ -1,6 +1,10 @@
 # Arbor
 
-A Git client for Linux, built around the workflows that make Tower pleasant:
+[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![License: 0BSD](https://img.shields.io/badge/license-0BSD-blue.svg)](LICENSE)
+
+A free, open-source Git client for **Linux, FreeBSD, macOS and Windows**, built
+around the workflows that make Tower pleasant:
 drag-and-drop merging and rebasing, commit reordering, line-by-line staging,
 and an undo button that covers almost everything.
 
@@ -88,26 +92,45 @@ contains none of their code or artwork.
 - Rebases are replayed in memory: if any commit conflicts, nothing changes
 - Rewriting commits that are already pushed asks for confirmation first
 
-## Install
+## Download
 
-Pick the package for your distribution from the release files:
+Get the latest version from the [**Releases page**](../../releases/latest):
+
+| System | File |
+| --- | --- |
+| **Windows** 10 and 11 | `Arbor_<version>_x64-setup.exe` (or the `.msi`) |
+| **macOS** 10.15+, Apple silicon and Intel | `Arbor_<version>_universal.dmg` |
+| **Debian, Ubuntu, Mint, Pop!_OS** | `Arbor_<version>_amd64.deb` / `_arm64.deb` |
+| **Fedora, openSUSE, RHEL** | `Arbor-<version>-1.x86_64.rpm` / `.aarch64.rpm` |
+| **Any Linux** | `Arbor_<version>_amd64.AppImage` / `_aarch64.AppImage` |
+| **FreeBSD** 14+ | `Arbor_<version>_freebsd_amd64.tar.gz` |
 
 ```sh
-# Debian, Ubuntu, Mint, Pop!_OS
-sudo apt install ./Arbor_0.5.0_amd64.deb
+# Debian/Ubuntu                 # Fedora/openSUSE
+sudo apt install ./Arbor_*.deb  sudo dnf install ./Arbor-*.rpm
 
-# Fedora, openSUSE
-sudo dnf install ./Arbor-0.5.0-1.x86_64.rpm
+# AppImage
+chmod +x Arbor_*.AppImage && ./Arbor_*.AppImage
 
-# Anything else
-chmod +x Arbor_0.5.0_amd64.AppImage && ./Arbor_0.5.0_amd64.AppImage
+# FreeBSD
+pkg install webkit2-gtk_41 git
+tar xzf Arbor_*_freebsd_amd64.tar.gz && cd arbor-* && doas ./install.sh
 ```
+
+The builds aren't signed with a paid certificate, so the first launch asks
+you to confirm: on **macOS**, open System Settings → Privacy & Security and
+choose *Open Anyway*; on **Windows**, choose *More info → Run anyway*. Each
+release lists SHA-256 checksums in `SHA256SUMS.txt`.
+
+Every commit to `main` is also built by CI; the installers are attached to
+each [workflow run](../../actions/workflows/ci.yml) under *Artifacts*.
 
 Run `arbor /path/to/repo` to open a repository directly in a new tab.
 Without an argument, Arbor picks up where you left off (unless that's turned off).
 
-The repository list lives in `~/.config/arbor/library.json`; the window's
-size and position in `~/.config/app.arbor.git/.window-state.json`.
+Settings live in your system's config folder: `~/.config/arbor` on Linux and
+the BSDs, `~/Library/Application Support/arbor` on macOS, and
+`%APPDATA%\arbor` on Windows.
 
 ## Preferences
 
@@ -127,6 +150,8 @@ Open with **Ctrl+,** or the sliders button.
   if another action used them, it's unassigned and you're told which
 
 ## Keyboard
+
+On macOS, Ctrl in the table below is ⌘ (Command), Alt is ⌥ and Shift is ⇧.
 
 | Keys | Action |
 | --- | --- |
@@ -156,23 +181,54 @@ Open with **Ctrl+,** or the sliders button.
 
 ## Build from source
 
-Requirements: Rust 1.80+, Node 20+, and the Tauri system libraries.
+You need [Rust](https://rustup.rs) (1.80 or newer), [Node.js](https://nodejs.org)
+20 or newer, Git, and the system libraries Tauri uses:
+
+| System | Install first |
+| --- | --- |
+| Debian/Ubuntu | `sudo apt install build-essential libssl-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf` |
+| Fedora | `sudo dnf install gcc openssl-devel webkit2gtk4.1-devel librsvg2-devel` |
+| Arch | `sudo pacman -S base-devel openssl webkit2gtk-4.1 librsvg` |
+| macOS | Xcode command line tools: `xcode-select --install` |
+| Windows | [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with "Desktop development with C++"; WebView2 is part of Windows 10/11 |
+| FreeBSD | `pkg install rust node npm pkgconf webkit2-gtk_41 librsvg2-rust` |
 
 ```sh
-# Debian/Ubuntu
-sudo apt install libwebkit2gtk-4.1-dev build-essential libssl-dev \
-  libayatana-appindicator3-dev librsvg2-dev
-
 npm install
 npm run tauri dev      # run with hot reload
-npm run tauri build    # .deb, .rpm and AppImage in src-tauri/target/release/bundle
+npm run tauri build    # installers in src-tauri/target/release/bundle
 ```
 
-Backend tests run against throwaway repositories:
+On FreeBSD (and other BSDs), Tauri's CLI isn't available, so build the web UI
+with `npm run build` and then run `sh scripts/package-freebsd.sh`, which
+compiles the app and makes a tarball in `dist-bundles/`.
+
+Backend tests run against throwaway repositories (they need the `git` command):
 
 ```sh
 cd src-tauri && cargo test
 ```
+
+### Continuous integration and releases
+
+- **CI** (`.github/workflows/ci.yml`) runs on every push and pull request:
+  type checks, the backend tests on Linux, macOS and Windows, then builds the
+  installers for every platform (`build.yml`) and keeps them as downloadable
+  artifacts.
+- **Releases** (`.github/workflows/release.yml`): bump the version in
+  `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, run
+  `cargo check` in `src-tauri` so `Cargo.lock` picks up the new version, commit,
+  and push a matching tag. The workflow builds everything and publishes a
+  GitHub release with all installers and checksums:
+
+  ```sh
+  git tag v0.6.0 && git push origin main v0.6.0
+  ```
+
+  Tags with a suffix (`v0.7.0-beta.1`) are published as pre-releases.
+- **Code signing** is optional. macOS builds are ad-hoc signed; to sign and
+  notarize with an Apple Developer ID, add the repository secrets listed in
+  `build.yml`.
 
 ## How it's built
 
@@ -184,6 +240,9 @@ cd src-tauri && cargo test
   wrapper (busy state, errors, auth prompts, auto-stash, refresh);
   `lib/actions.ts` holds user-facing operations; `lib/drag.svelte.ts` is a
   pointer-based drag-and-drop layer (HTML5 drag-and-drop is unreliable in WebKitGTK).
+- `src-tauri/src/platform.rs` and `src/lib/platform.ts` — the few things that
+  differ between operating systems (opening files and terminals, running hooks
+  on Windows, shortcut labels and paths).
 
 ## Known limits
 
@@ -193,3 +252,17 @@ cd src-tauri && cargo test
 - Rebasing across merge commits isn't supported.
 - Submodules, worktrees, LFS and bisect aren't handled in the UI.
 - Pull requests and hosting-service integrations aren't included.
+- On Windows, Git hooks run through Git for Windows' `sh`, so hooks need
+  [Git for Windows](https://git-scm.com) to be installed.
+- Other BSDs (OpenBSD, NetBSD) should build the same way as FreeBSD with
+  `scripts/package-freebsd.sh`, but only FreeBSD is built and tested by CI.
+
+## License
+
+Arbor is free and open-source software under the [BSD Zero Clause License
+(0BSD)](LICENSE): you may use, copy, modify and distribute it for any purpose,
+with or without fee, with no conditions. The fonts and libraries it bundles
+have their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Contributions are welcome. By sending a pull request you agree to license
+your contribution under the same terms.

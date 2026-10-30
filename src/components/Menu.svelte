@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { keyText } from "../lib/platform";
   import { menu } from "../lib/ui.svelte";
 
   let el = $state<HTMLDivElement>();
@@ -52,7 +53,7 @@
       {:else}
         <button role="menuitem" class:danger={it.danger} class:active={i === active} disabled={it.disabled} onclick={() => choose(i)} onpointerenter={() => (active = i)}>
           <span>{it.label}</span>
-          {#if it.hint}<span class="hint">{it.hint}</span>{/if}
+          {#if it.hint}<span class="hint">{keyText(it.hint)}</span>{/if}
         </button>
       {/if}
     {/each}

@@ -1,7 +1,9 @@
 [package]
 name = "arbor"
-version = "0.5.0"
-description = "A Git client for Linux"
+version = "0.6.0"
+description = "A friendly Git client for Linux, the BSDs, macOS and Windows"
+license = "0BSD"
+authors = ["The Arbor authors"]
 edition = "2021"
 rust-version = "1.80"
 
@@ -21,7 +23,14 @@ serde_json = "1"
 git2 = { version = "0.21", features = ["https", "ssh", "vendored-libgit2"] }
 thiserror = "2"
 dirs = "6"
+open = "5"
 chrono = "0.4"
+
+# macOS: build OpenSSL (used by libgit2 and libssh2) into the app. Otherwise it
+# would link against Homebrew's copy, which users don't have, and the Intel
+# half of a universal build couldn't find one at all.
+[target.'cfg(target_os = "macos")'.dependencies]
+openssl-sys = { version = "0.9", features = ["vendored"] }
 
 [dev-dependencies]
 tempfile = "3"

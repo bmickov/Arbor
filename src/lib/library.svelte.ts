@@ -2,6 +2,7 @@
 // status summaries for the repository manager and tab bar.
 
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
+import { EXAMPLE_PATH } from "./platform";
 import { api, type Bookmark, type Creds, type Group, type Library, type RepoSummary } from "./api";
 import { dialog, toasts } from "./ui.svelte";
 
@@ -133,7 +134,7 @@ class LibraryState {
       title: "Clone a repository",
       fields: [
         { key: "url", label: "Repository URL", placeholder: "https://github.com/owner/project.git" },
-        { key: "dest", label: "Save to folder", placeholder: "/home/you/code/project", hint: "Leave empty to choose a parent folder next." },
+        { key: "dest", label: "Save to folder", placeholder: EXAMPLE_PATH, hint: "Leave empty to choose a parent folder next." },
       ],
       confirm: "Clone",
       validate: (v) => (String(v.url ?? "").trim() ? null : "Enter the repository URL."),

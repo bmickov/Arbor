@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { keyLabel } from "../lib/platform";
   import { api } from "../lib/api";
   import { app } from "../lib/state.svelte";
   import { toasts } from "../lib/ui.svelte";
@@ -126,7 +127,7 @@
     <label title="Replace the last commit with these staged changes and message"><input type="checkbox" checked={amend} onchange={toggleAmend} disabled={!st?.head || merging} /> Amend</label>
     <label title="Don't run the pre-commit and commit-msg hooks"><input type="checkbox" bind:checked={skipHooks} /> Skip hooks</label>
     <span class="sp"></span>
-    <button class="btn primary" disabled={!canCommit} onclick={commit} title="Ctrl+Enter">{label}</button>
+    <button class="btn primary" disabled={!canCommit} onclick={commit} title={keyLabel("Ctrl+Enter")}>{label}</button>
   </div>
 </div>
 

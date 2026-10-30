@@ -4,6 +4,7 @@
 import { api, type CommitRow, type MergeOutcome, type RebaseAction, type Step } from "./api";
 import type { Payload } from "./drag.svelte";
 import { relTime } from "./format";
+import { keyText } from "./platform";
 import { app } from "./state.svelte";
 import { dialog, menu, toasts, type MenuItem } from "./ui.svelte";
 
@@ -126,7 +127,7 @@ export async function deleteBranches(names: string[]): Promise<string[]> {
     : one
       ? `It has commits that aren't ${into} or pushed anywhere.`
       : `${unmerged.length === list.length ? "All of them have" : `${unmerged.length} of them ${unmerged.length === 1 ? "has" : "have"}`} commits that aren't ${into} or pushed anywhere.`;
-  body += ` Undo (Ctrl+Z) brings ${one ? "it" : "them"} back.`;
+  body += keyText(` Undo (Ctrl+Z) brings ${one ? "it" : "them"} back.`);
   if (names.length > list.length) body += `\n\n${head} is checked out, so it's kept.`;
 
   const r = await dialog.show({
@@ -473,8 +474,8 @@ export async function dropStashes(indexes: number[]): Promise<boolean> {
   const ok = await dialog.show({
     title: one ? "Delete stash?" : `Delete ${items.length} stashes?`,
     body: one
-      ? `"${items[0].message}" and its changes will be removed from the stash list. Undo (Ctrl+Z) brings it back.`
-      : `These stashes and their changes will be removed from the stash list. Undo (Ctrl+Z) brings them all back.`,
+      ? keyText(`"${items[0].message}" and its changes will be removed from the stash list. Undo (Ctrl+Z) brings it back.`)
+      : keyText(`These stashes and their changes will be removed from the stash list. Undo (Ctrl+Z) brings them all back.`),
     items: one ? undefined : items.map((s) => ({ text: s.message, note: `${s.branch ? `on ${s.branch} · ` : ""}${relTime(s.time)}` })),
     confirm: one ? "Delete stash" : `Delete ${items.length} stashes`,
     danger: true,
