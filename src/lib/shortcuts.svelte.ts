@@ -31,6 +31,7 @@ function view(v: View) {
 
 export const COMMANDS: Command[] = [
   // General
+  { id: "quick", label: "Quick actions: search commands, branches, commits, files…", group: "General", keys: ["Ctrl+Shift+P", "Ctrl+K"], inInputs: true, run: () => (app.quick = !app.quick) },
   { id: "prefs", label: "Open preferences", group: "General", keys: ["Ctrl+,"], inInputs: true, run: () => (app.prefs = "general") },
   { id: "shortcuts", label: "Show keyboard shortcuts", group: "General", keys: ["Ctrl+/", "F1"], inInputs: true, run: () => (app.prefs = "keyboard") },
   { id: "repos", label: "Show all repositories", group: "General", keys: ["Ctrl+T"], inInputs: true, run: () => app.switchTo(-1) },
@@ -81,6 +82,8 @@ export const COMMANDS: Command[] = [
     if (p) app.open(p);
   } },
   { id: "repo.files", label: "Show in file manager", group: "Repository", keys: ["Ctrl+Shift+E"], repo: true, run: () => api.openExternal(app.path).catch((e) => toasts.push("error", String(e))) },
+  { id: "patch.apply", label: "Apply a patch file…", group: "Repository", keys: [], repo: true, run: () => act.applyPatch() },
+  { id: "patch.save", label: "Save uncommitted changes as a patch…", group: "Repository", keys: [], repo: true, run: () => act.saveChangesPatch() },
   { id: "repo.terminal", label: "Open terminal here", group: "Repository", keys: ["Ctrl+Shift+`"], repo: true, run: () => api.openTerminal(app.path).catch((e) => toasts.push("error", String(e))) },
 
   // Working copy
@@ -103,6 +106,7 @@ export const COMMANDS: Command[] = [
   { id: "fetch", label: "Fetch (all repositories when on the list)", group: "Remote", keys: ["Ctrl+Shift+F"], run: () => (app.repo ? act.fetchAll() : library.fetchAll()) },
   { id: "pull", label: "Pull", group: "Remote", keys: ["Ctrl+Shift+Down"], repo: true, run: () => act.pull() },
   { id: "push", label: "Push", group: "Remote", keys: ["Ctrl+Shift+Up"], repo: true, run: () => act.push() },
+  { id: "sync", label: "Sync (pull, then push)", group: "Remote", keys: ["Ctrl+Shift+Y"], repo: true, run: () => act.sync() },
 
   // Branches & history
   { id: "branch.switch", label: "Switch branch…", group: "Branches & history", keys: ["Ctrl+P"], repo: true, inInputs: true, run: () => (app.switcher = true) },
@@ -218,7 +222,7 @@ export function handleKey(e: KeyboardEvent) {
   if (typing && !cmd.inInputs) return;
   if (cmd.repo && !app.repo) return;
   // While a modal (preferences, switcher) is open, only its own keys apply.
-  if ((app.prefs || app.switcher) && !["prefs", "shortcuts", "fullscreen"].includes(cmd.id)) return;
+  if ((app.prefs || app.switcher || app.quick) && !["prefs", "shortcuts", "fullscreen", "quick"].includes(cmd.id)) return;
   e.preventDefault();
   cmd.run();
 }

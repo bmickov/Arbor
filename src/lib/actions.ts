@@ -1,6 +1,7 @@
 // User-facing operations that need confirmation, naming or follow-up
 // choices. Menus, buttons and drag-and-drop all call into these.
 
+import { open as pickFile, save as pickSaveFile } from "@tauri-apps/plugin-dialog";
 import { api, type CommitRow, type MergeOutcome, type RebaseAction, type Step } from "./api";
 import type { Payload } from "./drag.svelte";
 import { relTime } from "./format";
@@ -33,42 +34,103 @@ const validBranch = (v: string) =>
 // ------------------------------------------------------------------ remote
 
 export async function fetchAll() {
-  await app.act("Fetching", () => api.fetch(P(), null, true), { success: "Fetched from all remotes." });
+  try {
+    await app.run("Fetching", (c) => api.fetch(P(), null, true, c), { success: "Fetched from all remotes." });
+    app.noteFetched(P());
+  } catch {
+    // run() already showed the error.
+  }
 }
 
-export async function pull() {
+export async function pull(): Promise<boolean> {
   const r = await app.act("Pulling", (c) => api.pull(P(), app.settings.pullRebase, c), {
     success: (r) => (r.result === "up-to-date" ? "Already up to date." : r.result === "conflicts" ? null : `Pulled (${r.result.replace("-", " ")}).`),
   });
+  if (r) app.noteFetched(P());
   if (r?.result === "conflicts") afterMerge({ result: "conflicts", conflicts: r.conflicts });
+  return !!r && r.result !== "conflicts";
 }
 
-export async function push(branch?: string, remote?: string) {
+/** Push; resolves to true when the branch ended up on the remote. */
+export async function push(branch?: string, remote?: string): Promise<boolean> {
   const target = branch ?? app.headBranch ?? undefined;
   try {
     await app.run("Pushing", (c) => api.push(P(), { branch: target, remote }, c), {
       quiet: true,
       success: (dest) => `Pushed to ${dest}.`,
     });
+    return true;
   } catch (e) {
     const err = String(e);
     if (err.startsWith("REJECTED:")) {
       const r = await dialog.show({
         title: "The push was rejected",
-        body: err.slice(9) + "\n\nPull to bring in the remote's commits, or force push to overwrite them.",
+        body: err.slice(9) + "\n\nPull to bring in the remote's commits, or force push to replace the remote branch with yours.",
         confirm: "Pull",
-        extra: [{ id: "force", label: "Force push", danger: true }],
+        extra: [{ id: "force", label: "Force push…", danger: true }],
       });
-      if (r.button === "confirm") await pull();
-      if (r.button === "force") {
-        await app.act("Force pushing", (c) => api.push(P(), { branch: target, remote, force: true }, c), {
+      if (r.button === "confirm") return (await pull()) && false;
+      if (r.button === "force") return forcePush(target, remote);
+    } else if (!err.startsWith("AUTH")) {
+      toasts.push("error", err.replace(/^\w+_?\w*:/, ""));
+    }
+    return false;
+  }
+}
+
+/**
+ * Force push "with lease", like `git push --force-with-lease`: it only
+ * overwrites the remote branch if nobody pushed to it since the last fetch.
+ */
+export async function forcePush(branch?: string, remote?: string): Promise<boolean> {
+  const target = branch ?? app.headBranch ?? undefined;
+  try {
+    await app.run("Force pushing", (c) => api.push(P(), { branch: target, remote, force: true }, c), {
+      quiet: true,
+      success: (d) => `Force pushed to ${d}.`,
+    });
+    return true;
+  } catch (e) {
+    const err = String(e);
+    if (err.startsWith("LEASE:")) {
+      const r = await dialog.show({
+        title: "Someone else pushed to this branch",
+        body: err.slice(6) + "\n\nFetch to see their commits first. Overwrite only if you're sure their work isn't needed.",
+        confirm: "Fetch",
+        extra: [{ id: "overwrite", label: "Overwrite their commits", danger: true }],
+      });
+      if (r.button === "confirm") await fetchAll();
+      if (r.button === "overwrite") {
+        const ok = await app.act("Force pushing", (c) => api.push(P(), { branch: target, remote, force: true, lease: false }, c), {
           success: (d) => `Force pushed to ${d}.`,
         });
+        return ok !== undefined;
       }
     } else if (!err.startsWith("AUTH")) {
       toasts.push("error", err.replace(/^\w+_?\w*:/, ""));
     }
+    return false;
   }
+}
+
+/**
+ * Sync, like Tower: pull the remote's commits, then push yours. A branch
+ * that doesn't track a remote branch yet is just pushed (and starts tracking).
+ */
+export async function sync() {
+  const st = app.status;
+  if (!app.headBranch) return toasts.push("info", "Check out a branch to sync it.");
+  if (st?.upstream) {
+    const r = await app.act("Syncing: pulling", (c) => api.pull(P(), app.settings.pullRebase, c));
+    app.noteFetched(P());
+    if (r === undefined) return;
+    if (r.result === "conflicts") return afterMerge({ result: "conflicts", conflicts: r.conflicts });
+    await app.refresh();
+    if (!app.status?.ahead) {
+      return toasts.push("success", r.result === "up-to-date" ? "Already in sync." : `Pulled (${r.result.replace("-", " ")}); nothing to push.`);
+    }
+  }
+  await push();
 }
 
 // ---------------------------------------------------------------- branches
@@ -431,8 +493,95 @@ export function commitMenu(e: MouseEvent, c: CommitRow, openRebase: (from: Commi
     { label: "Remove commit…", danger: true, disabled: !canRewrite, action: () => dropCommit(c) },
     { label: "Rewrite from here…", disabled: !canRewrite, action: () => openRebase(c) },
     { separator: true },
+    { label: "Save as patch…", disabled: c.parents.length > 1, action: () => saveCommitPatch(c) },
     { label: "Copy commit ID", action: () => navigator.clipboard.writeText(c.oid).then(() => toasts.push("info", "Copied commit ID.")) },
   ], `${c.short} ${c.summary}`);
+}
+
+// --------------------------------------------------------- files & patches
+
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "changes";
+
+/** Escape gitignore's special characters so a file name matches only itself. */
+const literal = (s: string) => s.replace(/[\\*?[\]]/g, (c) => `\\${c}`).replace(/^([#!])/, "\\$1").replace(/ $/, "\\ ");
+
+/** "Ignore…" menu entries for a working-copy file. */
+export function ignoreItems(path: string): MenuItem[] {
+  const cut = path.lastIndexOf("/");
+  const base = path.slice(cut + 1);
+  const dir = cut > 0 ? path.slice(0, cut) : "";
+  const ext = /[^.]\.([A-Za-z0-9_-]{1,12})$/.exec(base)?.[1];
+  return [
+    { label: `Ignore ${base}`, action: () => ignore(`/${literal(path)}`) },
+    ...(ext ? [{ label: `Ignore all .${ext} files`, action: () => ignore(`*.${ext}`) }] : []),
+    ...(dir ? [{ label: `Ignore the folder ${dir}/`, action: () => ignore(`/${literal(dir)}/`) }] : []),
+  ];
+}
+
+export async function ignore(pattern: string) {
+  const added = await app.act("Updating .gitignore", () => api.ignorePattern(P(), pattern));
+  if (added !== undefined) toasts.push(added ? "success" : "info", added ? `Added ${pattern} to .gitignore.` : `${pattern} is already in .gitignore.`);
+}
+
+export async function untrack(paths: string[]) {
+  const what = paths.length === 1 ? paths[0] : `${paths.length} files`;
+  await app.act("Stopping tracking", () => api.untrackFiles(P(), paths), {
+    success: `Git no longer tracks ${what}; the files stay on disk. Commit to record it, and add them to .gitignore to keep them out.`,
+  });
+}
+
+/** Put a file back to how it was at `rev` (e.g. a commit, or "<commit>^" for the version before it). */
+export async function restoreFile(rev: string, path: string, when: string) {
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  await app.act("Restoring", () => api.restoreFile(P(), rev, path), {
+    success: `Restored ${base} ${when}. It's an ordinary change in your working copy now.`,
+  });
+}
+
+const fileName = (p: string) => p.split(/[\\/]/).pop();
+
+export async function saveCommitPatch(c: { oid: string; short: string; summary: string }) {
+  const dest = await pickSaveFile({ title: "Save commit as patch", defaultPath: `${c.short}-${slug(c.summary)}.patch`, filters: [{ name: "Patch", extensions: ["patch", "diff"] }] });
+  if (!dest) return;
+  await app.act("Saving patch", () => api.saveCommitPatch(P(), c.oid, dest), { success: `Saved ${c.short} as ${fileName(dest)}.` });
+}
+
+export async function saveChangesPatch() {
+  const st = app.status;
+  const staged = st?.staged.length ?? 0, unstaged = st?.unstaged.length ?? 0;
+  if (!staged && !unstaged) return toasts.push("info", "There are no uncommitted changes to save.");
+  let useStaged = staged > 0 && !unstaged;
+  if (staged && unstaged) {
+    const r = await dialog.show({
+      title: "Save changes as a patch",
+      body: "Which changes should go into the patch?",
+      confirm: `Staged (${staged} file${staged === 1 ? "" : "s"})`,
+      extra: [{ id: "unstaged", label: `Not staged (${unstaged})` }],
+    });
+    if (r.button === "cancel") return;
+    useStaged = r.button === "confirm";
+  }
+  const name = app.headBranch ? `${slug(app.headBranch)}-changes.patch` : "changes.patch";
+  const dest = await pickSaveFile({ title: "Save changes as patch", defaultPath: name, filters: [{ name: "Patch", extensions: ["patch", "diff"] }] });
+  if (!dest) return;
+  await app.act("Saving patch", () => api.saveChangesPatch(P(), useStaged, dest), {
+    success: (n) => `Saved ${n} file${n === 1 ? "" : "s"} to ${fileName(dest)}.`,
+  });
+}
+
+/** Apply a .patch file to the working copy; an email patch's message is put in the commit composer. */
+export async function applyPatch() {
+  const file = await pickFile({ title: "Apply a patch", multiple: false, directory: false, filters: [{ name: "Patch", extensions: ["patch", "diff", "eml", "txt"] }] });
+  if (typeof file !== "string") return;
+  const r = await app.act("Applying patch", () => api.applyPatch(P(), file));
+  if (!r) return;
+  app.view = "changes";
+  const files = `${r.files} file${r.files === 1 ? "" : "s"}`;
+  if (r.subject) app.prefillMessage = { subject: r.subject, body: r.body ?? "", at: Date.now() };
+  toasts.push("success", r.subject ? `Applied the patch to ${files}. Its message is ready in the commit box.` : `Applied the patch to ${files}.`, {
+    label: "Undo",
+    run: () => app.undo(),
+  });
 }
 
 // ------------------------------------------------------------------- stash

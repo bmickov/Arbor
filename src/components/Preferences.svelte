@@ -7,11 +7,12 @@
   import { THEMES, resolveTheme, type Theme, type ThemeId } from "../lib/themes";
   import Icon from "./Icon.svelte";
 
-  type Section = "general" | "appearance" | "diffs" | "keyboard";
+  type Section = "general" | "appearance" | "diffs" | "commits" | "keyboard";
   const SECTIONS: { id: Section; label: string; icon: string }[] = [
     { id: "general", label: "General", icon: "history" },
     { id: "appearance", label: "Appearance", icon: "settings" },
     { id: "diffs", label: "Diffs & Git", icon: "split" },
+    { id: "commits", label: "Commits", icon: "commit" },
     { id: "keyboard", label: "Keyboard", icon: "grid" },
   ];
 
@@ -278,10 +279,46 @@
           </section>
           <section>
             <h4>Git</h4>
+            <div class="row">
+              <span class="label">Fetch automatically</span>
+              <select aria-label="Fetch automatically" value={String(s.autoFetchMinutes)}
+                onchange={(e) => { s.autoFetchMinutes = Number((e.currentTarget as HTMLSelectElement).value); save(); }}>
+                <option value="0">Never</option>
+                {#each [5, 10, 15, 30, 60] as n}<option value={String(n)}>Every {n} minutes</option>{/each}
+              </select>
+            </div>
+            <p class="hint">Open repositories are fetched quietly in the background, so the counts of commits to pull stay current. Repositories that need a password are skipped.</p>
             <label class="toggle">
               <input type="checkbox" checked={s.pullRebase} onchange={() => { s.pullRebase = !s.pullRebase; save(); }} />
               <span><b>Pull with rebase</b><small>Replay your local commits on top of the remote ones instead of creating a merge commit.</small></span>
             </label>
+          </section>
+        {:else if app.prefs === "commits"}
+          <section>
+            <h4>Commit templates</h4>
+            <p class="hint first">Pick one from the <b>Template</b> menu above the commit message. The first line becomes the summary, the rest the description. A repository's own Git template (<code>commit.template</code>) is offered there too.</p>
+            {#each s.commitTemplates as t, i}
+              <div class="tpl">
+                <div class="tplhead">
+                  <input aria-label="Template name" placeholder="Name, e.g. Bug fix" bind:value={t.name} oninput={save} />
+                  <button class="btn small ghost danger" onclick={() => { s.commitTemplates.splice(i, 1); save(); }} aria-label="Delete template {t.name}"><Icon name="discard" size={13} /></button>
+                </div>
+                <textarea class="mono" rows="4" aria-label="Template text" placeholder={"fix: \n\nWhat was wrong:\nHow it's fixed:"} bind:value={t.text} oninput={save}></textarea>
+              </div>
+            {/each}
+            <button class="btn small" onclick={() => { s.commitTemplates.push({ name: "", text: "" }); save(); }}><Icon name="plus" size={13} /> Add template</button>
+          </section>
+          <section>
+            <h4>Author profiles</h4>
+            <p class="hint first">Switch who you commit as, per repository, from the name shown above the commit message (for example work and personal). Arbor writes it to that repository's own Git config.</p>
+            {#each s.profiles as p, i}
+              <div class="prof">
+                <input aria-label="Profile name" placeholder="Full name" bind:value={p.name} oninput={save} />
+                <input aria-label="Profile email" placeholder="email@example.com" bind:value={p.email} oninput={save} />
+                <button class="btn small ghost danger" onclick={() => { s.profiles.splice(i, 1); save(); }} aria-label="Delete profile {p.email}"><Icon name="discard" size={13} /></button>
+              </div>
+            {/each}
+            <button class="btn small" onclick={() => { s.profiles.push({ name: "", email: "" }); save(); }}><Icon name="plus" size={13} /> Add profile</button>
           </section>
         {:else}
           <section class="kb">
@@ -420,6 +457,12 @@
   .sl.del { background: var(--del-bg); }
 
   .toggle { display: flex; gap: 12px; align-items: flex-start; padding: 8px 0; }
+  .hint.first { margin: 0 0 10px; }
+  .tpl { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; background: var(--surface-2); }
+  .tplhead { display: flex; gap: 6px; align-items: center; }
+  .tpl textarea { font-size: calc(var(--cs) * 12); resize: vertical; }
+  .prof { display: grid; grid-template-columns: 1fr 1.3fr auto; gap: 6px; margin-bottom: 6px; align-items: center; }
+  code { font-family: var(--font-mono); font-size: calc(var(--cs) * 11.5); }
   .toggle input { margin-top: 3px; }
   .toggle span { display: flex; flex-direction: column; gap: 2px; }
   .toggle small { color: var(--ink-3); font-size: calc(var(--fs) * 12); }

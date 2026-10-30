@@ -227,11 +227,21 @@ fn push_refspecs(repo: &Repository, remote: &str, specs: &[String], creds: Optio
 
 static PUSHING: AtomicBool = AtomicBool::new(false);
 
+/// Where `refname` points on the remote right now (None: it doesn't exist there).
+fn remote_tip(repo: &Repository, remote: &str, refname: &str, creds: Option<Creds>, progress: Progress) -> Result<Option<git2::Oid>> {
+    let mut r = repo.find_remote(remote)?;
+    let cb = callbacks(repo.config()?, creds, progress);
+    let conn = r.connect_auth(git2::Direction::Push, Some(cb), None).map_err(map_auth)?;
+    let tip = conn.list()?.iter().find(|h| h.name() == refname).map(|h| h.oid());
+    Ok(tip)
+}
+
 pub fn push(
     repo_path: &str,
     branch: Option<&str>,
     remote: Option<&str>,
     force: bool,
+    lease: bool,
     set_upstream: bool,
     creds: Option<Creds>,
     progress: Progress,
@@ -263,6 +273,20 @@ pub fn push(
         let dest_ref = dest
             .and_then(|d| d.strip_prefix(&format!("refs/remotes/{remote}/")).map(|s| format!("refs/heads/{s}")))
             .unwrap_or_else(|| refname.clone());
+        // Force with lease: only overwrite the remote branch if it's still where
+        // we last saw it (our remote-tracking branch). If someone pushed since
+        // our last fetch, their commits would be lost, so refuse instead.
+        if force && lease {
+            let short = dest_ref.trim_start_matches("refs/heads/");
+            let expected = repo.find_reference(&format!("refs/remotes/{remote}/{short}")).ok().and_then(|r| r.target());
+            let actual = remote_tip(&repo, &remote, &dest_ref, creds.clone(), progress.clone())?;
+            if actual.is_some() && actual != expected {
+                return err(format!(
+                    "LEASE:{remote}/{short} has commits you haven't fetched: someone else pushed since you last fetched. \
+                     Force pushing now would delete their work."
+                ));
+            }
+        }
         let spec = format!("{}{refname}:{dest_ref}", if force { "+" } else { "" });
         push_refspecs(&repo, &remote, &[spec], creds, progress)?;
         if set_upstream || upstream_remote.is_none() {

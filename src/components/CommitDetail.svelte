@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import * as act from "../lib/actions";
   import { api, type CommitInfo, type FileDiff } from "../lib/api";
   import { authorHue, basename, dirname, fullDate, initials, STATUS_GLYPH } from "../lib/format";
   import { app } from "../lib/state.svelte";
@@ -46,9 +47,17 @@
   });
 
   function fileMenu(e: MouseEvent, path: string) {
+    const f = info?.files.find((x) => x.path === path);
+    const short = info?.short ?? oid.slice(0, 7);
+    // Stashes are commits too, but "restore" there means applying the stash.
+    const isStash = !!info && info.parents.length === 3;
     menu.fromEvent(e, [
       { label: "File history & blame", action: () => (app.fileHistoryPath = path) },
       { label: "Open current version", action: () => api.openExternal(`${app.path}/${path}`) },
+      { separator: true },
+      { label: `Restore the version from ${short}`, hint: "into your working copy", disabled: isStash || f?.status === "deleted", action: () => act.restoreFile(oid, path, `as of ${short}`) },
+      { label: "Restore the version before this commit", disabled: isStash || !info?.parents.length || f?.status === "added", action: () => act.restoreFile(`${oid}^`, f?.oldPath ?? path, `as it was before ${short}`) },
+      { separator: true },
       { label: "Copy path", action: () => navigator.clipboard.writeText(path) },
     ], basename(path));
   }

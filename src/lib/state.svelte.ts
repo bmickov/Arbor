@@ -89,6 +89,12 @@ export interface Settings {
   codeFollowsUi: boolean;
   /** Ask before showing diffs with more changed lines than this; 0 never asks. */
   largeDiffLines: number;
+  /** Fetch open repositories in the background every N minutes; 0 is off. */
+  autoFetchMinutes: number;
+  /** Saved commit message templates (first line is the summary). */
+  commitTemplates: { name: string; text: string }[];
+  /** Author identities to switch between per repository. */
+  profiles: { name: string; email: string }[];
   /** Custom key bindings by command id; missing ids use the defaults. */
   shortcuts: Record<string, string[]>;
   /** Reopen tabs, views, selections, layout and window size on startup. */
@@ -97,7 +103,8 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false,
   theme: "system", uiFont: "atkinson", uiSize: 13, codeFont: "commit", codeSize: 12, shortcuts: {},
-  restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000,
+  restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10,
+  commitTemplates: [], profiles: [],
 };
 export const UI_SIZES = { min: 10, max: 20, default: 13 };
 export const CODE_SIZES = { min: 9, max: 22, default: 12 };
@@ -153,9 +160,13 @@ class App {
   layout = $state<Layout>(structuredClone(DEFAULT_LAYOUT));
 
   /** Preferences window: closed, or open at a section. */
-  prefs = $state<null | "general" | "appearance" | "diffs" | "keyboard">(null);
+  prefs = $state<null | "general" | "appearance" | "diffs" | "commits" | "keyboard">(null);
   /** Branch switcher (Ctrl+P) visibility. */
   switcher = $state(false);
+  /** A commit message for the composer to pick up (from an applied email patch). */
+  prefillMessage = $state<{ subject: string; body: string; at: number } | null>(null);
+  /** Quick Actions palette (Ctrl+Shift+P) visibility. */
+  quick = $state(false);
   /** Times (ms) of requests from shortcuts, picked up by the views even if
    *  they mount just after: commit, focus the commit summary, focus search. */
   commitRequest = $state(0);
@@ -163,6 +174,11 @@ class App {
   focusSearch = $state(0);
   /** Set to focus the repository list's filter box. */
   focusRepoFilter = $state(0);
+  /** When each repository was last fetched (ms), by path. */
+  lastFetched = $state<Record<string, number>>({});
+  /** Repositories whose background fetch failed (e.g. needs a password); skipped until restart. */
+  private autoFetchOff = new Set<string>();
+  private autoFetching = false;
   /** Recently closed tabs, newest last, for "Reopen closed tab". */
   closedTabs: { path: string; name: string; ui: TabUI | null }[] = [];
 
@@ -343,6 +359,41 @@ class App {
     }
     const next = this.tabs.length ? Math.min(i, this.tabs.length - 1) : -1;
     this.switchTo(next);
+  }
+
+  noteFetched(path: string) {
+    this.lastFetched[path] = Date.now();
+  }
+
+  /**
+   * Background fetch, run every half minute: fetches each open repository
+   * whose last fetch is older than the "fetch automatically" interval. It's
+   * silent: no busy state, no sign-in prompts. A repository that fails (it
+   * needs credentials, or is offline) is left alone until Arbor restarts.
+   */
+  async autoFetch() {
+    const every = this.settings.autoFetchMinutes * 60_000;
+    if (!every || this.autoFetching || !navigator.onLine) return;
+    const now = Date.now();
+    const paths = [this.path, ...this.tabs.map((t) => t.path)].filter((p, i, a) => p && a.indexOf(p) === i);
+    const due = paths.filter((p) => !this.autoFetchOff.has(p) && now - (this.lastFetched[p] ?? 0) >= every);
+    if (!due.length) return;
+    this.autoFetching = true;
+    try {
+      for (const p of due) {
+        if (p === this.path && this.busy) continue;
+        try {
+          await api.fetch(p, null, false);
+          this.noteFetched(p);
+          if (p === this.path) await this.refresh();
+          else await library.refreshSummaries([p]);
+        } catch {
+          this.autoFetchOff.add(p);
+        }
+      }
+    } finally {
+      this.autoFetching = false;
+    }
   }
 
   /** Reopen the most recently closed tab, as it was. */

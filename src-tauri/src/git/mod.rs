@@ -9,7 +9,9 @@ pub mod blame;
 pub mod branches;
 pub mod commit;
 pub mod diff;
+pub mod files;
 pub mod hooks;
+pub mod identity;
 pub mod library;
 pub mod log;
 pub mod merge;
@@ -19,6 +21,7 @@ pub mod remote;
 pub mod repo;
 pub mod stash;
 pub mod status;
+pub mod tree;
 pub mod undo;
 
 use git2::{Oid, Repository, Signature};

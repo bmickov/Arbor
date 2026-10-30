@@ -5,6 +5,7 @@
   import { handleKey } from "./lib/shortcuts.svelte";
   import { dialog, menu } from "./lib/ui.svelte";
   import BranchSwitcher from "./components/BranchSwitcher.svelte";
+  import QuickActions from "./components/QuickActions.svelte";
   import Preferences from "./components/Preferences.svelte";
   import Dialog from "./components/Dialog.svelte";
   import DragGhost from "./components/DragGhost.svelte";
@@ -28,6 +29,17 @@
       const p = await api.startupPath().catch(() => null);
       await app.restoreTabs(p);
     })();
+  });
+
+  // Fetch open repositories in the background ("fetch automatically" preference).
+  $effect(() => {
+    if (!app.settings.autoFetchMinutes) return;
+    const first = setTimeout(() => app.autoFetch(), 5000);
+    const t = setInterval(() => app.autoFetch(), 30000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(t);
+    };
   });
 
   // Keep the status dots on background tabs reasonably fresh.
@@ -115,6 +127,7 @@
 
 {#if app.prefs}<Preferences />{/if}
 {#if app.switcher && app.repo}<BranchSwitcher />{/if}
+{#if app.quick}<QuickActions />{/if}
 <Menu />
 <Dialog />
 <Toasts />
