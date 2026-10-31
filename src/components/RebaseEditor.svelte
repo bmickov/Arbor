@@ -3,7 +3,7 @@
   import * as act from "../lib/actions";
   import { draggable, dropTarget } from "../lib/drag.svelte";
   import { app } from "../lib/state.svelte";
-  import { dialog } from "../lib/ui.svelte";
+  import { dialog, toasts } from "../lib/ui.svelte";
   import Icon from "./Icon.svelte";
 
   let { from, onclose }: { from: CommitRow; onclose: () => void } = $props();
@@ -66,10 +66,14 @@
     if (touched.some((o) => pushed.has(o)) && !(await dialog.confirm("Rewrite pushed commits?", "Some of these commits are already on the remote. Afterwards you'll need to force push.", "Rewrite anyway", true))) return;
     busy = true;
     const r = await app.act("Rewriting history", () => api.interactiveRebase(app.path, base, steps, `Rewrite ${items.length} commits`), {
-      success: (r) => (r.result === "unchanged" ? "Nothing changed." : "History rewritten. Undo reverts it."),
+      success: (r) => (r.result === "conflicts" ? null : r.result === "unchanged" ? "Nothing changed." : "History rewritten. Undo reverts it."),
     });
     busy = false;
     if (r) onclose();
+    if (r?.result === "conflicts") {
+      app.view = "changes";
+      toasts.push("error", `Rewriting stopped on ${r.conflicts.length} conflicted file${r.conflicts.length === 1 ? "" : "s"}. Resolve them, then choose Continue.`);
+    }
   }
 
   function key(e: KeyboardEvent) {

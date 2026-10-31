@@ -7,6 +7,7 @@
   import { app } from "../lib/state.svelte";
   import { toasts } from "../lib/ui.svelte";
   import Icon from "./Icon.svelte";
+  import Splitter from "./Splitter.svelte";
   import TextView from "./TextView.svelte";
   import { SvelteSet } from "svelte/reactivity";
 
@@ -112,7 +113,7 @@
       <button class="btn small" onclick={() => act.exportZip(rev, label)}><Icon name="fetch" size={13} /> Export as ZIP…</button>
     </div>
   </header>
-  <div class="body">
+  <div class="body" style:--side-w="{app.size('browse.tree', 300)}px">
     <div class="side">
       <div class="filter">
         <Icon name="search" size={13} />
@@ -138,6 +139,7 @@
         {/each}
       </div>
     </div>
+    <Splitter id="browse.tree" min={180} keep={320} />
     <div class="view">
       {#if !selected}
         <div class="empty"><div><strong>Pick a file</strong>See it exactly as it was at {label}.</div></div>
@@ -162,8 +164,8 @@
   h2 { margin: 0; font-size: calc(var(--fs) * 15); color: var(--ink); }
   .rev { font-family: var(--font-mono); font-size: calc(var(--cs) * 13); }
   .tools { display: flex; gap: 6px; }
-  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(240px, 340px) 1fr; }
-  .side { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--side-w) auto minmax(0, 1fr); }
+  .side { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .filter { display: flex; align-items: center; gap: 6px; margin: 8px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink-3); background: var(--input-bg); }
   .filter input { border: 0; background: transparent; box-shadow: none; padding: 5px 0; }
   .tree { flex: 1; overflow: auto; padding: 0 4px 10px; }

@@ -51,6 +51,14 @@ fn is_binary(bytes: &[u8]) -> bool {
 /// The branch (or commit) being merged, cherry-picked or reverted in.
 fn incoming(repo: &Repository) -> (String, String) {
     let git = repo.path();
+    if let Some(p) = super::rebase::paused(repo) {
+        let label = git2::Oid::from_str(&p.step.oid)
+            .ok()
+            .and_then(|id| repo.find_commit(id).ok())
+            .map(|c| format!("{} {}", short(c.id()), super::summary(&c)))
+            .unwrap_or_else(|| "the commit being replayed".into());
+        return ("rebase".into(), label);
+    }
     let (op, file) = match repo.state() {
         RepositoryState::Merge => ("merge", "MERGE_HEAD"),
         RepositoryState::CherryPick | RepositoryState::CherryPickSequence => ("cherry-pick", "CHERRY_PICK_HEAD"),
@@ -77,7 +85,10 @@ pub fn conflict_file(repo_path: &str, path: &str) -> Result<ConflictFile> {
     let repo = open(repo_path)?;
     let c = find(&repo, path)?;
     let (operation, theirs_label) = incoming(&repo);
-    let ours_label = head_branch(&repo).unwrap_or_else(|| "HEAD".into());
+    let ours_label = match super::rebase::paused(&repo) {
+        Some(p) => format!("{} (rebased so far)", p.onto_label),
+        None => head_branch(&repo).unwrap_or_else(|| "HEAD".into()),
+    };
 
     let full = repo.workdir().ok_or_else(|| Error::Msg("This repository has no working tree.".into()))?.join(path);
     let bytes = std::fs::read(&full).ok();

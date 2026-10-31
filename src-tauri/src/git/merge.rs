@@ -20,6 +20,7 @@ pub fn merge(repo_path: &str, source: &str, no_ff: bool) -> Result<MergeOutcome>
     if repo.state() != git2::RepositoryState::Clean {
         return err("Finish or abort the operation in progress first.");
     }
+    super::rebase::require_not_paused(&repo)?;
     require_tracked_clean(&repo, "merge")?;
     let theirs = resolve(&repo, source)?;
     let head = repo.head()?.peel_to_commit()?;
@@ -99,6 +100,9 @@ pub fn merge_into(repo_path: &str, source: &str, target: &str, no_ff: bool) -> R
 /// Abandon a merge (or cherry-pick/revert) that stopped on conflicts.
 pub fn abort(repo_path: &str) -> Result<()> {
     let repo = open(repo_path)?;
+    if super::rebase::paused(&repo).is_some() {
+        return super::rebase::abort_rebase(repo_path);
+    }
     if let Some(h) = super::head_oid(&repo) {
         super::hard_reset_to(&repo, h)?;
     }

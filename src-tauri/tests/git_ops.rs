@@ -262,23 +262,136 @@ fn interactive_rebase_reorder_squash_reword_drop() {
 }
 
 #[test]
-fn interactive_rebase_conflict_changes_nothing() {
-    let r = Repo::new();
-    r.write("f.txt", "1\n");
-    r.commit_all("one");
-    r.write("f.txt", "2\n");
-    r.commit_all("two");
-    r.write("f.txt", "3\n");
-    r.commit_all("three");
-    let ids: Vec<String> = r.git(&["log", "--format=%H", "--reverse"]).lines().map(|s| s.to_string()).collect();
-    let before = r.git(&["rev-parse", "HEAD"]);
-    let steps = vec![
+fn rebase_pauses_on_conflicts_then_continues_skips_or_aborts() {
+    let setup = || {
+        let r = Repo::new();
+        r.write("f.txt", "1\n");
+        r.commit_all("one");
+        r.write("f.txt", "2\n");
+        r.commit_all("two");
+        r.write("f.txt", "3\n");
+        r.write("other.txt", "x\n");
+        r.commit_all("three");
+        let ids: Vec<String> = r.git(&["log", "--format=%H", "--reverse"]).lines().map(|s| s.to_string()).collect();
+        r
+            .git(&["rev-parse", "HEAD"]);
+        (r, ids)
+    };
+    let swap = |ids: &[String]| vec![
         Step { oid: ids[2].clone(), action: "pick".into(), message: None },
         Step { oid: ids[1].clone(), action: "pick".into(), message: None },
     ];
-    let e = git::rebase::interactive(&r.path, Some(&ids[0]), &steps, "Reorder").unwrap_err().to_string();
-    assert!(e.contains("conflicts"), "{e}");
+
+    // Abort puts everything back.
+    let (r, ids) = setup();
+    let before = r.git(&["rev-parse", "HEAD"]);
+    let out = git::rebase::interactive(&r.path, Some(&ids[0]), &swap(&ids), "Reorder").unwrap();
+    assert_eq!(out.result, "conflicts");
+    assert_eq!(out.conflicts, vec!["f.txt".to_string()]);
+    let st = git::status::status(&r.path).unwrap();
+    assert_eq!(st.state, "rebase");
+    let info = st.paused_rebase.unwrap();
+    assert_eq!((info.step, info.total, info.branch.as_deref()), (1, 2, Some("main")));
+    // Nothing else can start meanwhile, and the branch hasn't moved.
+    assert!(git::merge::merge(&r.path, "main", false).is_err());
+    assert_eq!(r.git(&["rev-parse", "main"]), before);
+    let f = git::conflict::conflict_file(&r.path, "f.txt").unwrap();
+    assert_eq!(f.operation, "rebase");
+    assert!(f.theirs_label.contains("three"), "{}", f.theirs_label);
+    git::merge::abort(&r.path).unwrap();
     assert_eq!(r.git(&["rev-parse", "HEAD"]), before);
+    assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]).trim(), "main");
+    assert!(r.git(&["status", "--porcelain"]).trim().is_empty());
+    assert_eq!(git::status::status(&r.path).unwrap().state, "clean");
+
+    // Resolve each conflict and continue to the end.
+    let (r, ids) = setup();
+    git::rebase::interactive(&r.path, Some(&ids[0]), &swap(&ids), "Reorder").unwrap();
+    git::conflict::resolve_with_content(&r.path, "f.txt", "3\n").unwrap();
+    let out = git::rebase::continue_rebase(&r.path).unwrap();
+    assert_eq!(out.result, "conflicts", "the second commit conflicts too");
+    assert_eq!(git::status::status(&r.path).unwrap().paused_rebase.unwrap().step, 2);
+    git::conflict::resolve_with_content(&r.path, "f.txt", "2 and 3\n").unwrap();
+    let out = git::rebase::continue_rebase(&r.path).unwrap();
+    assert_eq!(out.result, "rebased");
+    assert_eq!(r.subjects(), vec!["two", "three", "one"]);
+    assert_eq!(r.read("f.txt"), "2 and 3\n");
+    assert_eq!(r.read("other.txt"), "x\n");
+    assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]).trim(), "main");
+    assert!(r.git(&["status", "--porcelain"]).trim().is_empty());
+    assert!(!Path::new(&r.path).join(".git/arbor-rebase.json").exists());
+    // One undo returns to before the rebase.
+    git::undo::undo(&r.path).unwrap();
+    assert_eq!(r.subjects(), vec!["three", "two", "one"]);
+
+    // Skip leaves the conflicting commit out.
+    let (r, ids) = setup();
+    git::rebase::interactive(&r.path, Some(&ids[0]), &swap(&ids), "Reorder").unwrap();
+    let out = git::rebase::skip_rebase(&r.path).unwrap();
+    assert_eq!(out.result, "rebased");
+    assert_eq!(r.subjects(), vec!["two", "one"]);
+
+    // A plain rebase onto another branch pauses the same way.
+    let r = Repo::new();
+    r.write("f.txt", "base\n");
+    r.commit_all("base");
+    r.git(&["checkout", "-q", "-b", "topic"]);
+    r.write("f.txt", "topic\n");
+    r.commit_all("topic change");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("f.txt", "main\n");
+    r.commit_all("main change");
+    r.git(&["checkout", "-q", "topic"]);
+    let out = git::rebase::rebase(&r.path, "main").unwrap();
+    assert_eq!(out.result, "conflicts");
+    assert!(git::conflict::conflict_file(&r.path, "f.txt").unwrap().ours_label.starts_with("main"));
+    git::conflict::resolve_with_content(&r.path, "f.txt", "main + topic\n").unwrap();
+    assert_eq!(git::rebase::continue_rebase(&r.path).unwrap().result, "rebased");
+    assert_eq!(r.subjects(), vec!["topic change", "main change", "base"]);
+    assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]).trim(), "topic");
+}
+
+#[test]
+fn cherry_pick_and_revert_pause_on_conflicts() {
+    let r = Repo::new();
+    r.write("f.txt", "base\n");
+    r.commit_all("base");
+    r.git(&["checkout", "-q", "-b", "side"]);
+    r.write("f.txt", "side\n");
+    r.git(&["add", "-A"]);
+    r.git(&["-c", "user.name=Someone Else", "-c", "user.email=else@example.com", "commit", "-q", "-m", "side change"]);
+    let side = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.git(&["checkout", "-q", "main"]);
+    r.write("f.txt", "main\n");
+    r.commit_all("main change");
+    let before = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+
+    let out = git::commit::cherry_pick(&r.path, &side).unwrap();
+    assert_eq!(out.conflicts, vec!["f.txt".to_string()]);
+    assert_eq!(out.oid, before);
+    assert_eq!(git::status::status(&r.path).unwrap().state, "cherrypick");
+    // Abort (and undo) put it back.
+    git::merge::abort(&r.path).unwrap();
+    assert_eq!(git::status::status(&r.path).unwrap().state, "clean");
+    assert!(r.git(&["status", "--porcelain"]).trim().is_empty());
+
+    // Resolve and commit: one parent, the original author, git's message.
+    git::commit::cherry_pick(&r.path, &side).unwrap();
+    let st = git::status::status(&r.path).unwrap();
+    assert!(st.merge_message.as_deref().unwrap_or("").starts_with("side change"));
+    git::conflict::resolve_with_content(&r.path, "f.txt", "main and side\n").unwrap();
+    git::commit::commit(&r.path, "side change", false, true).unwrap();
+    assert_eq!(r.git(&["log", "-1", "--format=%an|%P"]).trim(), format!("Someone Else|{before}"));
+    assert_eq!(git::status::status(&r.path).unwrap().state, "clean");
+
+    // Revert of a commit later changes conflict with pauses too.
+    r.write("f.txt", "later\n");
+    r.commit_all("later");
+    let out = git::commit::revert(&r.path, &before).unwrap();
+    assert!(!out.conflicts.is_empty());
+    assert_eq!(git::status::status(&r.path).unwrap().state, "revert");
+    git::merge::abort(&r.path).unwrap();
+    assert_eq!(r.subjects()[0], "later");
 }
 
 #[test]
@@ -1282,4 +1395,57 @@ fn submodules_list_and_update() {
     std::fs::write(sub.join("lib.txt"), "edited\n").unwrap();
     assert_eq!(git::worktree::submodules(&c).unwrap()[0].state, "dirty");
     assert!(git::worktree::update_submodules(&c, &["vendor/lib".to_string()], None, None).is_err());
+}
+
+#[test]
+fn partial_stash_and_history_filters() {
+    let r = Repo::new();
+    r.write("a.txt", "a\n");
+    r.write("src/b.txt", "b\n");
+    r.commit_all("first");
+    // Only the chosen file is stashed, under the given name.
+    r.write("a.txt", "a2\n");
+    r.write("src/b.txt", "b2\n");
+    r.write("new.txt", "untracked\n");
+    r.write("staged.txt", "staged\n");
+    r.git(&["add", "staged.txt"]);
+    git::stash::save_paths(&r.path, Some("just a"), false, false, false, &["a.txt".to_string()]).unwrap();
+    assert_eq!(r.read("a.txt"), "a\n");
+    assert_eq!(r.read("src/b.txt"), "b2\n");
+    // Other changes stay exactly as they were: untracked, and staged.
+    assert_eq!(r.read("new.txt"), "untracked\n");
+    assert_eq!(r.staged_content("staged.txt"), "staged\n");
+    let list = git::stash::list(&r.path).unwrap();
+    assert_eq!(list.len(), 1);
+    assert!(list[0].message.contains("just a"), "{}", list[0].message);
+    assert!(r.git(&["log", "-1", "--format=%s", "stash@{0}"]).contains("On main: just a"));
+    assert_eq!(r.git(&["stash", "list"]).lines().count(), 1);
+    git::stash::pop(&r.path, 0, false).unwrap();
+    assert_eq!(r.read("a.txt"), "a2\n");
+    // Applying while something else is staged works, and that stays staged.
+    assert_eq!(r.staged_content("staged.txt"), "staged\n");
+    assert_eq!(r.read("src/b.txt"), "b2\n");
+    r.git(&["reset", "-q", "--hard"]);
+    r.git(&["clean", "-fdq"]);
+
+    // History to search.
+    r.write("src/b.txt", "needle here\n");
+    r.commit_all("add the needle");
+    r.write("a.txt", "unrelated\n");
+    r.git(&["add", "-A"]);
+    r.git(&["-c", "user.name=Ana", "-c", "user.email=ana@example.org", "commit", "-q", "-m", "ana's change", "--date=2020-01-02T00:00:00"]);
+    r.write("src/b.txt", "gone\n");
+    r.commit_all("remove the needle");
+    let subjects = |f: git::log::LogFilter| -> Vec<String> {
+        git::log::search(&r.path, "head", &f, 100).unwrap().rows.into_iter().map(|c| c.summary).collect()
+    };
+    use git::log::LogFilter;
+    assert_eq!(subjects(LogFilter { author: Some("ANA@".into()), ..Default::default() }), vec!["ana's change"]);
+    assert_eq!(subjects(LogFilter { path: Some("src".into()), ..Default::default() }), vec!["remove the needle", "add the needle", "first"]);
+    assert_eq!(subjects(LogFilter { contains: Some("needle".into()), ..Default::default() }), vec!["remove the needle", "add the needle"]);
+    assert_eq!(subjects(LogFilter { contains: Some("needle".into()), text: Some("remove".into()), ..Default::default() }), vec!["remove the needle"]);
+    // Author dates: ana's commit is from 2020.
+    let y2021 = 1609459200;
+    assert_eq!(subjects(LogFilter { until: Some(y2021), ..Default::default() }), vec!["ana's change"]);
+    assert!(!subjects(LogFilter { since: Some(y2021), ..Default::default() }).contains(&"ana's change".to_string()));
 }

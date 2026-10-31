@@ -219,6 +219,10 @@ async fn get_log(repo: String, scope: String, limit: usize) -> R<git::log::Log> 
     blocking(move || git::log::log(&repo, &scope, limit)).await
 }
 #[tauri::command]
+async fn search_log(repo: String, scope: String, filter: git::log::LogFilter, limit: usize) -> R<git::log::SearchResult> {
+    blocking(move || git::log::search(&repo, &scope, &filter, limit)).await
+}
+#[tauri::command]
 async fn commit_info(repo: String, oid: String) -> R<git::log::CommitInfo> {
     blocking(move || git::log::commit_info(&repo, &oid)).await
 }
@@ -384,6 +388,18 @@ async fn rebase(repo: String, onto: String) -> R<git::rebase::RebaseOutcome> {
     blocking(move || git::rebase::rebase(&repo, &onto)).await
 }
 #[tauri::command]
+async fn rebase_continue(repo: String) -> R<git::rebase::RebaseOutcome> {
+    blocking(move || git::rebase::continue_rebase(&repo)).await
+}
+#[tauri::command]
+async fn rebase_skip(repo: String) -> R<git::rebase::RebaseOutcome> {
+    blocking(move || git::rebase::skip_rebase(&repo)).await
+}
+#[tauri::command]
+async fn rebase_abort(repo: String) -> R<()> {
+    blocking(move || git::rebase::abort_rebase(&repo)).await
+}
+#[tauri::command]
 async fn rebase_branch(repo: String, branch: String, onto: String) -> R<git::rebase::RebaseOutcome> {
     blocking(move || git::rebase::rebase_branch(&repo, &branch, &onto)).await
 }
@@ -429,8 +445,8 @@ async fn stash_list(repo: String) -> R<Vec<git::stash::StashEntry>> {
     blocking(move || git::stash::list(&repo)).await
 }
 #[tauri::command]
-async fn stash_save(repo: String, message: Option<String>, include_untracked: bool, keep_index: bool, quiet: Option<bool>) -> R<()> {
-    blocking(move || git::stash::save(&repo, message.as_deref(), include_untracked, keep_index, quiet.unwrap_or(false))).await
+async fn stash_save(repo: String, message: Option<String>, include_untracked: bool, keep_index: bool, quiet: Option<bool>, paths: Option<Vec<String>>) -> R<()> {
+    blocking(move || git::stash::save_paths(&repo, message.as_deref(), include_untracked, keep_index, quiet.unwrap_or(false), &paths.unwrap_or_default())).await
 }
 #[tauri::command]
 async fn stash_apply(repo: String, index: usize) -> R<()> {
@@ -536,7 +552,7 @@ pub fn run() {
             library_get, library_save, library_add_many, scan_folder, repo_summaries,
             get_status, diff_unstaged, diff_staged, file_at,
             stage_files, unstage_files, stage_all, unstage_all, discard_files,
-            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
+            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, rebase_continue, rebase_skip, rebase_abort, search_log, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
             commit, head_message, cherry_pick, revert_commit, reset_to,
             get_log, commit_info, tracked_files, reflog, branches_review, compare_branches, compare_file_diff,
             tree_at, file_content, export_zip, ignore_pattern, untrack_files, restore_file,

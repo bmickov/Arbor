@@ -8,6 +8,7 @@
   import CommitDetail from "./CommitDetail.svelte";
   import DiffView from "./DiffView.svelte";
   import Icon from "./Icon.svelte";
+  import Splitter from "./Splitter.svelte";
 
   let cmp = $state<Comparison | null>(null);
   let error = $state<string | null>(null);
@@ -95,7 +96,7 @@
     {/if}
   </header>
 
-  <div class="body">
+  <div class="body" style:--side-w="{app.size('compare.list', 340)}px">
     <div class="side">
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected={tab === "commits"} class:on={tab === "commits"} onclick={() => (tab = "commits")}>Commits <span class="n">{cmp?.aheadTotal ?? ""}</span></button>
@@ -134,6 +135,7 @@
         {/if}
       </div>
     </div>
+    <Splitter id="compare.list" min={200} keep={320} />
     <div class="detail">
       {#if pick?.kind === "commit"}
         {#key pick.oid}<CommitDetail oid={pick.oid} />{/key}
@@ -153,8 +155,8 @@
   .lbl { color: var(--ink-3); }
   .summary { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--ink-2); }
   .summary.err { color: var(--danger); }
-  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 380px) 1fr; }
-  .side { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--side-w) auto minmax(0, 1fr); }
+  .side { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .tabs { display: flex; gap: 2px; padding: 8px 8px 4px; }
   .tabs button { padding: 4px 10px; border-radius: 6px; font-weight: 600; color: var(--ink-2); }
   .tabs button.on { background: var(--sel); color: var(--ink); }

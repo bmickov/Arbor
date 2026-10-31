@@ -30,6 +30,8 @@ export interface WorkingStatus {
   ahead: number;
   behind: number;
   mergeMessage: string | null;
+  /** A rebase Arbor paused on a conflict. */
+  pausedRebase: PausedRebase | null;
 }
 
 export interface DiffLine { origin: " " | "+" | "-"; content: string; nl: boolean; oldNo: number | null; newNo: number | null }
@@ -138,6 +140,8 @@ export interface SubmoduleInfo {
   state: "uninitialized" | "moved" | "dirty" | "ok";
   dirty: boolean;
 }
+export interface LogFilter { text?: string | null; author?: string | null; since?: number | null; until?: number | null; path?: string | null; contains?: string | null }
+export interface SearchResult { rows: CommitRow[]; scanned: number; more: boolean }
 export interface SigningSettings {
   enabled: boolean;
   format: "openpgp" | "ssh" | "x509";
@@ -166,9 +170,10 @@ export interface ConflictFile {
   operation: "merge" | "cherry-pick" | "revert" | "rebase" | "stash";
 }
 export interface MergeOutcome { result: "up-to-date" | "fast-forward" | "merged" | "conflicts"; conflicts: string[] }
-export interface RebaseOutcome { result: "up-to-date" | "fast-forward" | "rebased" | "unchanged"; head: string }
+export interface RebaseOutcome { result: "up-to-date" | "fast-forward" | "rebased" | "unchanged" | "conflicts"; head: string; conflicts: string[] }
 export interface PullOutcome { result: string; conflicts: string[] }
-export interface CommitResult { oid: string; short: string }
+export interface CommitResult { oid: string; short: string; conflicts: string[] }
+export interface PausedRebase { label: string; branch: string | null; step: number; total: number; action: string; commit: string; summary: string }
 export interface Creds { username: string; password: string }
 export type RebaseAction = "pick" | "reword" | "squash" | "fixup" | "drop";
 export interface Step { oid: string; action: RebaseAction; message?: string | null }
@@ -258,6 +263,9 @@ export const api = {
     call<MergeOutcome>("merge_into", { repo, source, target, noFf }),
   abortMerge: (repo: string) => call<void>("abort_merge", { repo }),
   rebase: (repo: string, onto: string) => call<RebaseOutcome>("rebase", { repo, onto }),
+  rebaseContinue: (repo: string) => call<RebaseOutcome>("rebase_continue", { repo }),
+  rebaseSkip: (repo: string) => call<RebaseOutcome>("rebase_skip", { repo }),
+  rebaseAbort: (repo: string) => call<void>("rebase_abort", { repo }),
   rebaseBranch: (repo: string, branch: string, onto: string) => call<RebaseOutcome>("rebase_branch", { repo, branch, onto }),
   interactiveRebase: (repo: string, base: string | null, steps: Step[], label: string) =>
     call<RebaseOutcome>("interactive_rebase", { repo, base, steps, label }),
@@ -293,8 +301,9 @@ export const api = {
   deleteRemoteBranch: (repo: string, fullName: string, creds?: Creds) => call<void>("delete_remote_branch", { repo, fullName, creds }),
 
   stashes: (repo: string) => call<StashEntry[]>("stash_list", { repo }),
-  stashSave: (repo: string, message: string | null, includeUntracked: boolean, keepIndex: boolean, quiet = false) =>
-    call<void>("stash_save", { repo, message, includeUntracked, keepIndex, quiet }),
+  stashSave: (repo: string, message: string | null, includeUntracked: boolean, keepIndex: boolean, quiet = false, paths?: string[]) =>
+    call<void>("stash_save", { repo, message, includeUntracked, keepIndex, quiet, paths: paths ?? null }),
+  searchLog: (repo: string, scope: string, filter: LogFilter, limit: number) => call<SearchResult>("search_log", { repo, scope, filter, limit }),
   stashApply: (repo: string, index: number) => call<void>("stash_apply", { repo, index }),
   stashPop: (repo: string, index: number, quiet = false) => call<void>("stash_pop", { repo, index, quiet }),
   stashDrop: (repo: string, index: number) => call<void>("stash_drop", { repo, index }),

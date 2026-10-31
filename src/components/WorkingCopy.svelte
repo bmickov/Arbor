@@ -9,6 +9,7 @@
   import DiffView from "./DiffView.svelte";
   import FileList from "./FileList.svelte";
   import Icon from "./Icon.svelte";
+  import Splitter from "./Splitter.svelte";
 
   const st = $derived(app.status);
   let selStaged = $state<Set<string>>(new Set());
@@ -132,6 +133,7 @@
         ? { label: `Unstage ${label}`, action: () => unstage(paths) }
         : { label: `Stage ${label}`, action: () => stage(paths) },
       ...(area === "unstaged" ? [{ label: `Discard changes to ${label}`, danger: true, action: () => discard(paths) }] : []),
+      ...(area !== "conflicted" ? [{ label: `Stash ${label}…`, hint: "only these", action: () => act.stashChanges(paths) }] : []),
       { separator: true },
       { label: "Open file", disabled: !one, action: () => api.openExternal(full) },
       { label: "Show in folder", disabled: !one, action: () => api.openExternal(full.replace(/\/[^/]+$/, "")) },
@@ -159,13 +161,22 @@
   }
 </script>
 
-<div class="wc">
+<div class="wc" style:--left-w="{app.size('wc.left', 330)}px">
   <div class="left">
     {#if st && st.state !== "clean"}
       <div class="banner">
         <Icon name="warning" />
         <div>
-          {#if st.state === "rebase"}
+          {#if st.pausedRebase}
+            {@const p = st.pausedRebase}
+            <b>{p.label}: paused at {p.step} of {p.total}</b>
+            <span><span class="mono">{p.commit}</span> “{p.summary}” {st.conflicted.length ? `conflicts in ${st.conflicted.length} file${st.conflicted.length === 1 ? "" : "s"}. Resolve them, then Continue.` : "is resolved. Continue to commit it and replay the rest."}</span>
+            <div class="rbtns">
+              <button class="btn small primary" disabled={!!st.conflicted.length || !!app.busy} onclick={act.rebaseContinue} title={st.conflicted.length ? "Resolve the conflicts first" : "Commit this step and carry on"}>Continue</button>
+              <button class="btn small" disabled={!!app.busy} onclick={act.rebaseSkip} title="Leave this commit out">Skip commit</button>
+              <button class="btn small" disabled={!!app.busy} onclick={act.rebaseAbort} title="Go back to how everything was before the rebase">Abort</button>
+            </div>
+          {:else if st.state === "rebase"}
             <b>A rebase is in progress</b>
             <span>It was started outside Arbor. Finish it with <span class="mono">git rebase --continue</span> or <span class="mono">--abort</span>.</span>
           {:else}
@@ -219,9 +230,15 @@
       </section>
     </div>
 
-    <Composer />
+    <Splitter id="wc.composer" axis="y" after min={150} keep={120} />
+    {#if app.layout.sizes["wc.composer"] != null}
+      <div class="composer-box" style:height="{app.layout.sizes['wc.composer']}px"><Composer /></div>
+    {:else}
+      <Composer />
+    {/if}
   </div>
 
+  <Splitter id="wc.left" min={240} keep={360} />
   <div class="right">
     {#if app.selectedFile && entry}
       <div class="fhead">
@@ -266,14 +283,17 @@
 </div>
 
 <style>
-  .wc { display: grid; grid-template-columns: minmax(280px, 340px) 1fr; height: 100%; min-height: 0; }
-  .left { display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-right: 1px solid var(--line); }
+  .wc { display: grid; grid-template-columns: var(--left-w) auto minmax(0, 1fr); height: 100%; min-height: 0; }
+  .left { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); }
+  .composer-box { flex: none; display: flex; flex-direction: column; min-height: 0; }
+  .composer-box > :global(.composer) { flex: 1; min-height: 0; }
   .scroll { flex: 1; overflow-y: auto; padding-bottom: 8px; }
   .banner {
     display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin: 8px;
     border-radius: 8px; background: var(--warn-soft); color: var(--ink);
   }
   .banner :global(svg) { color: var(--warn); flex: none; margin-top: 1px; }
+  .banner div.rbtns { flex-direction: row; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .banner div { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: calc(var(--fs) * 12); }
   section header { display: flex; align-items: baseline; gap: 6px; padding: 12px 14px 4px; }
   h3 { margin: 0; font-size: calc(var(--fs) * 12); font-weight: 700; color: var(--ink-2); }

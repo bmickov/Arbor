@@ -98,7 +98,7 @@
       <Icon name="sync" /><span>Sync</span>
     </button>
     <span class="gap"></span>
-    <button class="tool" onclick={act.stashChanges} disabled={!!app.busy} title="Stash your changes">
+    <button class="tool" onclick={() => act.stashChanges()} disabled={!!app.busy} title="Stash your changes">
       <Icon name="stash" /><span>Stash</span>
     </button>
     <button class="tool" onclick={() => app.undo()} disabled={!!app.busy || !app.undoTop} title={undoTitle}>

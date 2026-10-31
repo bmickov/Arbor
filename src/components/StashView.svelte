@@ -7,6 +7,7 @@
   import { menu } from "../lib/ui.svelte";
   import CommitDetail from "./CommitDetail.svelte";
   import Icon from "./Icon.svelte";
+  import Splitter from "./Splitter.svelte";
   import { SvelteSet } from "svelte/reactivity";
 
   const sel = $derived(app.stashes.find((s) => s.index === app.selectedStash) ?? null);
@@ -80,7 +81,7 @@
   }
 </script>
 
-<div class="stashes">
+<div class="stashes" style:--list-w="{app.size('stash.list', 300)}px">
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="list" onkeydown={listKey}>
     {#each app.stashes as s (s.oid)}
@@ -96,6 +97,7 @@
       <div class="empty"><div><strong>No stashes</strong>Stash puts your changes aside so you can switch tasks with a clean working copy.</div></div>
     {/each}
   </div>
+  <Splitter id="stash.list" min={180} keep={320} />
   <div class="detail">
     {#if multi}
       <div class="empty">
@@ -132,8 +134,8 @@
 </div>
 
 <style>
-  .stashes { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; height: 100%; min-height: 0; background: var(--surface); }
-  .list { overflow-y: auto; border-right: 1px solid var(--line); padding: 6px; }
+  .stashes { display: grid; grid-template-columns: var(--list-w) auto minmax(0, 1fr); height: 100%; min-height: 0; background: var(--surface); }
+  .list { overflow-y: auto; padding: 6px; min-width: 0; }
   .item { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 8px 10px; border-radius: 6px; text-align: left; }
   .item:hover { background: var(--surface-2); }
   .item.sel { background: var(--sel); }

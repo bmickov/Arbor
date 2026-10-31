@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { CommitRow, RefLabel } from "../lib/api";
+  import { api, type CommitRow, type RefLabel, type SearchResult } from "../lib/api";
   import * as act from "../lib/actions";
   import { draggable, dropTarget, type Payload } from "../lib/drag.svelte";
   import { authorHue, initials, laneVar, relTime, fullDate } from "../lib/format";
-  import { app } from "../lib/state.svelte";
+  import { app, NO_FILTER } from "../lib/state.svelte";
   import { menu } from "../lib/ui.svelte";
   import CommitDetail from "./CommitDetail.svelte";
   import GraphCell from "./GraphCell.svelte";
@@ -33,8 +33,49 @@
   let dropLine = $state<{ oid: string; below: boolean } | null>(null);
 
   const q = $derived(app.historyQuery.trim().toLowerCase());
+
+  // Filters search the whole history on the backend (not just loaded commits).
+  const f = $derived(app.historyFilter);
+  const dated = $derived(f.when === "custom" ? !!(f.since || f.until) : !!f.when);
+  const activeFilters = $derived([f.author, f.path, f.contains].filter((v) => v.trim()).length + (dated ? 1 : 0));
+  let filtersOpen = $state(false);
+  $effect(() => {
+    if (activeFilters) filtersOpen = true;
+  });
+  let found = $state.raw<SearchResult | null>(null);
+  let searching = $state(false);
+  let searchSeq = 0;
+  const day = (d: string, end: boolean) => (d ? Math.floor(new Date(`${d}T${end ? "23:59:59" : "00:00:00"}`).getTime() / 1000) : null);
+  $effect(() => {
+    void app.version;
+    const filter = {
+      text: q || null, author: f.author.trim() || null, path: f.path.trim() || null, contains: f.contains || null,
+      since: f.when === "custom" ? day(f.since, false) : f.when ? Math.floor(Date.now() / 1000) - Number(f.when) * 86400 : null,
+      until: f.when === "custom" ? day(f.until, true) : null,
+    };
+    const scope = app.scope;
+    const repo = app.path;
+    if (!activeFilters) {
+      found = null;
+      searching = false;
+      return;
+    }
+    const seq = ++searchSeq;
+    searching = true;
+    const t = setTimeout(() => {
+      api.searchLog(repo, scope, filter, 2000)
+        .then((r) => seq === searchSeq && (found = r))
+        .catch(() => seq === searchSeq && (found = { rows: [], scanned: 0, more: false }))
+        .finally(() => seq === searchSeq && (searching = false));
+    }, 300);
+    return () => clearTimeout(t);
+  });
+  const authors = $derived([...new Set(app.log.slice(0, 5000).map((r) => r.author))].sort((a, b) => a.localeCompare(b)));
+  const filtering = $derived(!!q || activeFilters > 0);
+
   const rows = $derived(
-    q ? app.log.filter((r) => r.summary.toLowerCase().includes(q) || r.author.toLowerCase().includes(q) || r.oid.startsWith(q) || r.refs.some((l) => l.name.toLowerCase().includes(q))) : app.log,
+    activeFilters ? (found?.rows ?? [])
+    : q ? app.log.filter((r) => r.summary.toLowerCase().includes(q) || r.author.toLowerCase().includes(q) || r.oid.startsWith(q) || r.refs.some((l) => l.name.toLowerCase().includes(q))) : app.log,
   );
   const lanes = $derived(Math.min(MAX_LANES, Math.max(1, ...app.log.slice(0, 4000).map((r) => r.graph.width))));
   const first = $derived(Math.max(0, Math.floor(scrollTop / ROW) - 15));
@@ -145,7 +186,40 @@
           onkeydown={(e) => { if (e.key === "Escape") { app.historyQuery = ""; scroller?.focus(); } if (e.key === "Enter") scroller?.focus(); }} />
         {#if app.historyQuery}<button class="clear" onclick={() => (app.historyQuery = "")} aria-label="Clear search"><Icon name="x" size={12} /></button>{/if}
       </div>
+      <button class="ftoggle" class:on={filtersOpen || activeFilters} onclick={() => (filtersOpen = !filtersOpen)} aria-expanded={filtersOpen}
+        title="Filter by author, date, path or changed text">
+        <Icon name="filter" size={13} /> Filters{#if activeFilters}<span class="fcount">{activeFilters}</span>{/if}
+      </button>
     </div>
+    {#if filtersOpen}
+      <div class="filters">
+        <label><span>Author</span><input list="hist-authors" bind:value={app.historyFilter.author} placeholder="Name or email" spellcheck="false" /></label>
+        <datalist id="hist-authors">{#each authors as a}<option value={a}></option>{/each}</datalist>
+        <label><span>When</span>
+          <select bind:value={app.historyFilter.when}>
+            <option value="">Any time</option>
+            <option value="1">Last 24 hours</option>
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 3 months</option>
+            <option value="365">Last year</option>
+            <option value="custom">Between dates…</option>
+          </select>
+        </label>
+        {#if app.historyFilter.when === "custom"}
+          <label><span>From</span><input type="date" bind:value={app.historyFilter.since} /></label>
+          <label><span>To</span><input type="date" bind:value={app.historyFilter.until} /></label>
+        {/if}
+        <label class="wide"><span>Path</span><input bind:value={app.historyFilter.path} placeholder="File or folder, e.g. src/lib" spellcheck="false" /></label>
+        <label class="wide" title="Commits that add or remove this text (like git log -S)"><span>Changes containing</span><input class="mono" bind:value={app.historyFilter.contains} placeholder="Code or text that was added or removed" spellcheck="false" /></label>
+        <div class="fstatus">
+          {#if searching}<span class="spin"></span> Searching history…
+          {:else if found && activeFilters}{found.rows.length.toLocaleString()} commit{found.rows.length === 1 ? "" : "s"}{found.more ? "+" : ""} match · searched {found.scanned.toLocaleString()}{found.more ? " (stopped early; narrow the filters)" : ""}{/if}
+          <span class="sp"></span>
+          {#if activeFilters}<button class="link" onclick={() => (app.historyFilter = { ...NO_FILTER })}>Clear filters</button>{/if}
+        </div>
+      </div>
+    {/if}
 
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div class="rows" tabindex="0" role="listbox" aria-label="Commits" bind:this={scroller} bind:clientHeight={viewH}
@@ -167,7 +241,7 @@
               hover: (_p, f) => (dropLine = { oid: row.oid, below: f > 0.5 }),
               leave: () => { if (dropLine?.oid === row.oid) dropLine = null; },
             }}>
-            {#if !q}
+            {#if !filtering}
               <GraphCell g={row.graph} h={ROW} lane={LANE} {lanes} head={row.oid === head} merge={row.parents.length > 1} />
             {:else}
               <span class="nograph"></span>
@@ -190,27 +264,28 @@
               {/each}
               <span class="summary" class:merge={row.parents.length > 1}>{row.summary}</span>
             </div>
-            {#if canMove && !q}<span class="grip" title="Drag to reorder" class:pushed={pushed.has(row.oid)}><Icon name="grip" size={12} /></span>{/if}
+            {#if canMove && !filtering}<span class="grip" title="Drag to reorder" class:pushed={pushed.has(row.oid)}><Icon name="grip" size={12} /></span>{/if}
             <span class="avatar" style:--h={authorHue(row.email)} title="{row.author} <{row.email}>">{initials(row.author)}</span>
             <span class="author">{row.author}</span>
             <span class="date" title={fullDate(row.time)}>{relTime(row.time)}</span>
           </div>
         {/each}
-        {#if app.logMore && !q}
+        {#if app.logMore && !filtering}
           <button class="btn more" style:top="{rows.length * ROW + 12}px" onclick={() => app.loadMoreLog()}>Load more commits</button>
         {/if}
       </div>
       {#if !rows.length}
         <div class="empty"><div>
           {#if app.logLoading}<strong>Loading history…</strong>
-          {:else if q}<strong>No matching commits</strong>Searching the {app.log.length} loaded commits.
+          {:else if activeFilters}<strong>{searching ? "Searching…" : "No matching commits"}</strong>{searching ? "" : "Across the whole history of this branch selection."}
+          {:else if q}<strong>No matching commits</strong>Searching the {app.log.length} loaded commits. Open Filters to search the whole history.
           {:else}<strong>No commits yet</strong>Stage some changes and commit them.{/if}
         </div></div>
       {/if}
     </div>
   </div>
 
-  <div class="splitter" role="separator" aria-orientation="vertical" onpointerdown={startResize}></div>
+  <div class="splitter" role="separator" aria-orientation="vertical" title="Drag to resize · double-click to reset" onpointerdown={startResize} ondblclick={() => (app.layout.listW = 55)}></div>
 
   <div class="detail">
     {#if app.selectedCommit}
@@ -241,6 +316,17 @@
   }
   .search input { border: 0; padding: 0; height: 26px; background: transparent; box-shadow: none; }
   .clear { color: var(--ink-3); display: grid; }
+  .ftoggle { display: flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px; color: var(--ink-2); font-weight: 600; font-size: calc(var(--fs) * 12); white-space: nowrap; }
+  .ftoggle:hover, .ftoggle.on { background: var(--surface-3); color: var(--ink); }
+  .fcount { background: var(--accent); color: var(--accent-ink); border-radius: 8px; padding: 0 6px; font-size: calc(var(--fs) * 10.5); }
+  .filters { display: flex; flex-wrap: wrap; gap: 6px 10px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--surface-2); font-size: calc(var(--fs) * 12); }
+  .filters label { display: flex; flex-direction: column; gap: 2px; color: var(--ink-3); font-weight: 600; flex: 1 1 130px; min-width: 0; }
+  .filters label.wide { flex: 1 1 220px; }
+  .filters input, .filters select { padding: 0 7px; height: 28px; font-weight: 400; }
+  .fstatus { flex: 1 0 100%; display: flex; align-items: center; gap: 6px; color: var(--ink-3); min-height: 18px; }
+  .fstatus .sp { flex: 1; }
+  .spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: hspin 0.8s linear infinite; }
+  @keyframes hspin { to { rotate: 1turn; } }
 
   .rows { flex: 1; overflow: auto; position: relative; outline: none; }
   .spacer { position: relative; min-width: 100%; }
