@@ -21,11 +21,39 @@ function mergeMessage(m: MergeOutcome | undefined, source: string): string | nul
   }
 }
 
-function afterMerge(m: MergeOutcome | undefined) {
-  if (m?.result === "conflicts") {
+function afterMerge(m: { result?: string; conflicts: string[] } | undefined, what = "merge") {
+  if (m?.result === "conflicts" || (m && what !== "merge" && m.conflicts.length)) {
     app.view = "changes";
-    toasts.push("error", `The merge stopped on ${m.conflicts.length} conflicted file${m.conflicts.length === 1 ? "" : "s"}. Resolve them, then commit.`);
+    const n = m.conflicts.length;
+    const then = what === "rebase" ? "choose Continue" : "commit";
+    toasts.push("error", `The ${what} stopped on ${n} conflicted file${n === 1 ? "" : "s"}. Resolve them, then ${then}.`);
   }
+}
+
+/** Cherry-pick a commit onto the current branch; a conflict stops it to be resolved. */
+export async function cherryPick(oid: string) {
+  const r = await app.act("Cherry-picking", () => api.cherryPick(P(), oid), { success: (r) => (r.conflicts.length ? null : `Cherry-picked as ${r.short}.`) });
+  afterMerge(r, "cherry-pick");
+}
+
+export async function revertCommit(oid: string) {
+  const r = await app.act("Reverting", () => api.revert(P(), oid), { success: (r) => (r.conflicts.length ? null : `Reverted in ${r.short}.`) });
+  afterMerge(r, "revert");
+}
+
+/** Carry on with a paused rebase (after resolving), skip its commit, or abort it. */
+export async function rebaseContinue() {
+  const r = await app.act("Continuing rebase", () => api.rebaseContinue(P()), { success: (r) => (r.result === "conflicts" ? null : "Rebase finished. Undo reverts all of it.") });
+  afterMerge(r, "rebase");
+}
+export async function rebaseSkip() {
+  const p = app.status?.pausedRebase;
+  if (p && !(await dialog.confirm("Skip this commit?", `${p.commit} “${p.summary}” will be left out of the rebased branch.`, "Skip commit", true))) return;
+  const r = await app.act("Skipping commit", () => api.rebaseSkip(P()), { success: (r) => (r.result === "conflicts" ? null : "Rebase finished.") });
+  afterMerge(r, "rebase");
+}
+export async function rebaseAbort() {
+  await app.act("Aborting rebase", () => api.rebaseAbort(P()), { success: "Rebase aborted. Everything is as it was." });
 }
 
 const validBranch = (v: string) =>
@@ -47,7 +75,7 @@ export async function pull(): Promise<boolean> {
     success: (r) => (r.result === "up-to-date" ? "Already up to date." : r.result === "conflicts" ? null : `Pulled (${r.result.replace("-", " ")}).`),
   });
   if (r) app.noteFetched(P());
-  if (r?.result === "conflicts") afterMerge({ result: "conflicts", conflicts: r.conflicts });
+  if (r?.result === "conflicts") afterMerge({ result: "conflicts", conflicts: r.conflicts }, app.settings.pullRebase ? "rebase" : "merge");
   return !!r && r.result !== "conflicts";
 }
 
@@ -124,7 +152,7 @@ export async function sync() {
     const r = await app.act("Syncing: pulling", (c) => api.pull(P(), app.settings.pullRebase, c));
     app.noteFetched(P());
     if (r === undefined) return;
-    if (r.result === "conflicts") return afterMerge({ result: "conflicts", conflicts: r.conflicts });
+    if (r.result === "conflicts") return afterMerge({ result: "conflicts", conflicts: r.conflicts }, app.settings.pullRebase ? "rebase" : "merge");
     await app.refresh();
     if (!app.status?.ahead) {
       return toasts.push("success", r.result === "up-to-date" ? "Already in sync." : `Pulled (${r.result.replace("-", " ")}); nothing to push.`);
@@ -237,9 +265,10 @@ export async function mergeInto(source: string, target: string) {
 
 export async function rebaseOnto(branch: string, onto: string) {
   const here = app.headBranch;
-  await app.act(`Rebasing ${branch}`, () => (branch === here ? api.rebase(P(), onto) : api.rebaseBranch(P(), branch, onto)), {
-    success: (r) => (r.result === "up-to-date" ? `${branch} already contains ${onto}.` : `Rebased ${branch} onto ${onto}.`),
+  const r = await app.act(`Rebasing ${branch}`, () => (branch === here ? api.rebase(P(), onto) : api.rebaseBranch(P(), branch, onto)), {
+    success: (r) => (r.result === "conflicts" ? null : r.result === "up-to-date" ? `${branch} already contains ${onto}.` : `Rebased ${branch} onto ${onto}.`),
   });
+  afterMerge(r, "rebase");
 }
 
 export function branchMenu(e: MouseEvent, name: string) {
@@ -444,7 +473,8 @@ export async function rewrite(label: string, edit: (steps: Step[]) => Step[] | n
   if (!edited) return;
   steps = edited;
   if (!(await confirmRewritePushed(touched))) return;
-  await app.act(label, () => api.interactiveRebase(P(), base, steps, label), { success: done ?? `${label}: done.` });
+  const r = await app.act(label, () => api.interactiveRebase(P(), base, steps, label), { success: (r) => (r.result === "conflicts" ? null : done ?? `${label}: done.`) });
+  afterMerge(r, "rebase");
 }
 
 export async function reword(c: CommitRow) {
@@ -518,8 +548,8 @@ export function commitMenu(e: MouseEvent, c: CommitRow, openRebase: (from: Commi
     { label: "New branch here…", action: () => newBranch(c.oid, c.short) },
     { label: "New tag here…", action: () => newTag(c.oid, c.short) },
     { separator: true },
-    { label: `Cherry-pick into ${head ?? "HEAD"}`, disabled: c.oid === app.status?.head, action: () => app.act("Cherry-picking", () => api.cherryPick(P(), c.oid), { success: (r) => `Cherry-picked as ${r.short}.` }) },
-    { label: "Revert commit", action: () => app.act("Reverting", () => api.revert(P(), c.oid), { success: (r) => `Reverted in ${r.short}.` }) },
+    { label: `Cherry-pick into ${head ?? "HEAD"}`, disabled: c.oid === app.status?.head, action: () => cherryPick(c.oid) },
+    { label: "Revert commit", action: () => revertCommit(c.oid) },
     { label: `Reset ${head ?? "HEAD"} to here…`, action: () => resetTo(c) },
     { separator: true },
     { label: "Edit message…", disabled: !canRewrite, action: () => reword(c) },
@@ -623,16 +653,23 @@ export async function applyPatch() {
 
 // ------------------------------------------------------------------- stash
 
-export async function stashChanges() {
+/** Stash all changes, or only those in `paths`. */
+export async function stashChanges(paths?: string[]) {
   const s = app.status;
   if (s && !s.staged.length && !s.unstaged.length) {
     toasts.push("info", "There are no local changes to stash.");
     return;
   }
+  const partial = !!paths?.length;
+  const untrackedChosen = partial && paths!.some((p) => s?.unstaged.some((f) => f.path === p && f.status === "untracked"));
   const r = await dialog.show({
-    title: "Stash changes",
-    body: "Saves your changes and cleans the working copy.",
-    fields: [
+    title: partial ? `Stash ${paths!.length === 1 ? paths![0].split("/").pop() : `${paths!.length} files`}` : "Stash changes",
+    body: partial ? "Saves the changes to just these files and undoes them in the working copy. Everything else stays as it is." : "Saves your changes and cleans the working copy.",
+    items: partial && paths!.length > 1 ? paths!.map((p) => ({ text: p })) : undefined,
+    fields: partial ? [
+      { key: "message", label: "Description (optional)", placeholder: "What were you working on?" },
+      { key: "untracked", label: "Include new files", type: "checkbox", checked: true },
+    ] : [
       { key: "message", label: "Description (optional)", placeholder: "What were you working on?" },
       { key: "untracked", label: "Include new files", type: "checkbox", checked: true },
       { key: "keep", label: "Keep staged changes in the working copy", type: "checkbox", checked: false },
@@ -640,8 +677,9 @@ export async function stashChanges() {
     confirm: "Stash",
   });
   if (r.button !== "confirm") return;
-  await app.act("Stashing", () => api.stashSave(P(), String(r.values.message ?? "").trim() || null, !!r.values.untracked, !!r.values.keep), {
-    success: "Changes stashed.",
+  const untracked = partial ? untrackedChosen && !!r.values.untracked : !!r.values.untracked;
+  await app.act("Stashing", () => api.stashSave(P(), String(r.values.message ?? "").trim() || null, untracked, !!r.values.keep, false, paths), {
+    success: partial ? "Those changes are stashed." : "Changes stashed.",
   });
 }
 
@@ -689,7 +727,7 @@ export function dropOnBranch(p: Payload, target: string, e: PointerEvent) {
   if (p.kind === "commit") {
     menu.open(e.clientX, e.clientY, [
       { label: `Cherry-pick into ${target}`, disabled: target !== head, hint: target !== head ? "check it out first" : undefined,
-        action: () => app.act("Cherry-picking", () => api.cherryPick(P(), p.oid), { success: (r) => `Cherry-picked as ${r.short}.` }) },
+        action: () => cherryPick(p.oid) },
     ], p.summary);
     return;
   }

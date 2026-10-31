@@ -61,9 +61,9 @@
     }
   });
 
-  // Prefill git's prepared message when a merge stopped on conflicts.
+  // Prefill git's prepared message when a merge, cherry-pick or revert stopped on conflicts.
   $effect(() => {
-    if (st?.state === "merge" && !subject && st.mergeMessage) {
+    if ((st?.state === "merge" || st?.state === "cherrypick" || st?.state === "revert") && !subject && st.mergeMessage) {
       const [s, ...rest] = st.mergeMessage.split("\n");
       subject = s;
       body = rest.join("\n").trim();
@@ -86,12 +86,13 @@
   }
 
   const staged = $derived(st?.staged.length ?? 0);
-  const merging = $derived(st?.state === "merge");
+  const merging = $derived(st?.state === "merge" || st?.state === "cherrypick" || st?.state === "revert");
+  const rebasePaused = $derived(!!st?.pausedRebase);
   const canCommit = $derived(
-    !!subject.trim() && !app.busy && !st?.conflicted.length && (staged > 0 || amend || merging),
+    !!subject.trim() && !app.busy && !rebasePaused && !st?.conflicted.length && (staged > 0 || amend || merging),
   );
   const label = $derived(
-    amend ? "Amend last commit" : merging ? "Commit merge" : staged ? `Commit ${staged} file${staged === 1 ? "" : "s"}` : "Commit",
+    amend ? "Amend last commit" : st?.state === "cherrypick" ? "Commit cherry-pick" : st?.state === "revert" ? "Commit revert" : merging ? "Commit merge" : staged ? `Commit ${staged} file${staged === 1 ? "" : "s"}` : "Commit",
   );
 
   async function commit() {
@@ -251,7 +252,8 @@
 </div>
 
 <style>
-  .composer { border-top: 1px solid var(--line); padding: 10px; display: flex; flex-direction: column; gap: 6px; background: var(--surface-2); }
+  .composer { border-top: 0; padding: 10px; display: flex; flex-direction: column; gap: 6px; background: var(--surface-2); }
+  textarea { flex: 1 1 auto; min-height: 3.6em; resize: none; }
   .subject { position: relative; }
   .subject input { font-weight: 600; padding-right: 36px; }
   .len { position: absolute; right: 9px; top: 50%; translate: 0 -50%; font-size: calc(var(--fs) * 11); color: var(--ink-3); font-variant-numeric: tabular-nums; }

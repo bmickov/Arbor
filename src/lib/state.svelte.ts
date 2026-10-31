@@ -30,7 +30,20 @@ export interface TabUI {
   compare?: { base: string; target: string } | null;
   /** The commit, branch or tag whose files are shown (Browse view). */
   browse?: { rev: string; label: string } | null;
+  /** History filters (empty strings are off). */
+  historyFilter?: HistoryFilter | null;
 }
+
+export interface HistoryFilter {
+  author: string;
+  /** "" any time, a number of days back, or "custom" (since/until). */
+  when: string;
+  since: string;
+  until: string;
+  path: string;
+  contains: string;
+}
+export const NO_FILTER: HistoryFilter = { author: "", when: "", since: "", until: "", path: "", contains: "" };
 
 /** Data loaded for a tab, kept in memory so switching tabs is instant. */
 interface TabData {
@@ -60,10 +73,12 @@ export interface Layout {
   sidebarHidden: boolean;
   sections: { branches: boolean; remotes: boolean; tags: boolean; worktrees: boolean; submodules: boolean };
   remotes: Record<string, boolean>;
+  /** Sizes of resizable panels in px, by panel id (missing: default). */
+  sizes: Record<string, number>;
 }
 const DEFAULT_LAYOUT: Layout = {
   sideW: 240, listW: 55, sidebarHidden: false,
-  sections: { branches: true, remotes: true, tags: false, worktrees: true, submodules: true }, remotes: {},
+  sections: { branches: true, remotes: true, tags: false, worktrees: true, submodules: true }, remotes: {}, sizes: {},
 };
 
 interface Session {
@@ -164,8 +179,13 @@ class App {
   compare = $state<{ base: string; target: string } | null>(null);
   browse = $state<{ rev: string; label: string } | null>(null);
   historyQuery = $state("");
+  historyFilter = $state<HistoryFilter>({ ...NO_FILTER });
   historyScroll = $state(0);
   layout = $state<Layout>(structuredClone(DEFAULT_LAYOUT));
+  /** A resizable panel's size, or its default. */
+  size(id: string, def: number): number {
+    return this.layout.sizes[id] ?? def;
+  }
 
   /** Preferences window: closed, or open at a section. */
   prefs = $state<null | "general" | "appearance" | "diffs" | "commits" | "keyboard">(null);
@@ -292,8 +312,8 @@ class App {
 
   /** Just the view-and-selection part of a tab's saved state. */
   private pickUI(t: TabState): TabUI {
-    const { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath, compare, browse } = t;
-    return { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath, compare, browse };
+    const { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath, compare, browse, historyFilter } = t;
+    return { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath, compare, browse, historyFilter };
   }
 
   private uiSnapshot(): TabUI {
@@ -302,6 +322,7 @@ class App {
       selectedFile: this.selectedFile, historyQuery: this.historyQuery, historyScroll: this.historyScroll,
       logLimit: this.logLimit, fileHistoryPath: this.fileHistoryPath,
       compare: this.compare ? { ...this.compare } : null, browse: this.browse ? { ...this.browse } : null,
+      historyFilter: { ...this.historyFilter },
     };
   }
 
@@ -334,6 +355,7 @@ class App {
     this.fileHistoryPath = t?.fileHistoryPath ?? null;
     this.compare = t?.compare ?? null;
     this.browse = t?.browse ?? null;
+    this.historyFilter = { ...NO_FILTER, ...(t?.historyFilter ?? {}) };
     // A view that needs something it no longer has falls back to history.
     if ((this.view === "compare" && !this.compare) || (this.view === "browse" && !this.browse)) this.view = "history";
   }
@@ -548,7 +570,7 @@ class App {
       localStorage.removeItem("arbor.last");
     } catch {}
     if (session) {
-      this.layout = { ...structuredClone(DEFAULT_LAYOUT), ...session.layout, sections: { ...DEFAULT_LAYOUT.sections, ...session.layout?.sections } };
+      this.layout = { ...structuredClone(DEFAULT_LAYOUT), ...session.layout, sections: { ...DEFAULT_LAYOUT.sections, ...session.layout?.sections }, sizes: { ...session.layout?.sizes } };
       for (const t of session.tabs) {
         try {
           const info = await api.openRepo(t.path);

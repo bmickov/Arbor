@@ -11,6 +11,8 @@ use serde::Serialize;
 pub struct CommitResult {
     pub oid: String,
     pub short: String,
+    /// Conflicted files when a cherry-pick or revert stopped to be resolved.
+    pub conflicts: Vec<String>,
 }
 
 fn tidy(msg: &str) -> Result<String> {
@@ -28,7 +30,23 @@ pub fn commit(repo_path: &str, message: &str, amend: bool, skip_hooks: bool) -> 
 /// Commit, signing per `sign` (None follows commit.gpgsign).
 pub fn commit_signed(repo_path: &str, message: &str, amend: bool, skip_hooks: bool, sign: Option<bool>) -> Result<CommitResult> {
     let mut repo = open(repo_path)?;
+    if super::rebase::paused(&repo).is_some() {
+        return err("A rebase is paused. Resolve the conflicts, then choose Continue.");
+    }
     let merging = repo.state() == git2::RepositoryState::Merge;
+    let state = repo.state();
+    // A cherry-pick or revert that stopped on conflicts: one parent, and a
+    // cherry-pick keeps the original author.
+    let picking = matches!(state, git2::RepositoryState::CherryPick | git2::RepositoryState::Revert);
+    let picked_author = if state == git2::RepositoryState::CherryPick {
+        std::fs::read_to_string(repo.path().join("CHERRY_PICK_HEAD"))
+            .ok()
+            .and_then(|s| Oid::from_str(s.trim()).ok())
+            .and_then(|id| repo.find_commit(id).ok())
+            .map(|c| c.author().to_owned())
+    } else {
+        None
+    };
     let mut merge_heads: Vec<Oid> = vec![];
     if merging {
         repo.mergehead_foreach(|id| {
@@ -79,10 +97,11 @@ pub fn commit_signed(repo_path: &str, message: &str, amend: bool, skip_hooks: bo
             }
         }
         let refs: Vec<&git2::Commit> = parents.iter().collect();
-        let kind = if refs.is_empty() { " (initial)" } else if merging { " (merge)" } else { "" };
+        let kind = if refs.is_empty() { " (initial)" } else if merging { " (merge)" } else if picking { " (cherry-pick)" } else { "" };
         let reflog = format!("commit{kind}: {}", super::first_line(&msg));
-        let id = sign::create(&repo, Some(&reflog), &sig, &sig, &msg, &tree, &refs, sign)?;
-        if merging {
+        let author = picked_author.unwrap_or_else(|| sig.clone());
+        let id = sign::create(&repo, Some(&reflog), &author, &sig, &msg, &tree, &refs, sign)?;
+        if merging || picking {
             repo.cleanup_state()?;
         }
         id
@@ -96,7 +115,7 @@ pub fn commit_signed(repo_path: &str, message: &str, amend: bool, skip_hooks: bo
         format!("Commit {}", super::first_line(&msg))
     };
     record_commit_undo(&repo, label, before, new);
-    Ok(CommitResult { oid: new.to_string(), short: short(new) })
+    Ok(CommitResult { oid: new.to_string(), short: short(new), conflicts: vec![] })
 }
 
 fn record_commit_undo(repo: &Repository, label: String, before: Option<Oid>, after: Oid) {
@@ -121,16 +140,24 @@ pub fn head_message(repo_path: &str) -> Result<Option<String>> {
 
 pub fn cherry_pick(repo_path: &str, id: &str) -> Result<CommitResult> {
     let repo = open(repo_path)?;
+    if repo.state() != git2::RepositoryState::Clean {
+        return err("Finish or abort the operation in progress first.");
+    }
+    super::rebase::require_not_paused(&repo)?;
     require_tracked_clean(&repo, "cherry-pick")?;
     let c = repo.find_commit(oid(id)?)?;
     let head = repo.head()?.peel_to_commit()?;
     let mainline = if c.parent_count() > 1 { 1 } else { 0 };
     let mut idx = repo.cherrypick_commit(&c, &head, mainline, None)?;
     if idx.has_conflicts() {
-        return err(format!(
-            "Cherry-picking {} conflicts with your branch. Nothing was changed.",
-            short(c.id())
-        ));
+        // Stop like git: the conflicts go in the working tree to resolve, then commit.
+        let mut opts = git2::CherrypickOptions::new();
+        if mainline > 0 {
+            opts.mainline(mainline);
+        }
+        repo.cherrypick(&c, Some(&mut opts))?;
+        undo::record(&repo, format!("Cherry-pick {}", super::summary(&c)), Action::AbortMerge { oid: head.id().to_string() });
+        return Ok(CommitResult { oid: head.id().to_string(), short: short(head.id()), conflicts: conflicted(&repo)? });
     }
     let tree = repo.find_tree(idx.write_tree_to(&repo)?)?;
     if tree.id() == head.tree_id() {
@@ -141,18 +168,28 @@ pub fn cherry_pick(repo_path: &str, id: &str) -> Result<CommitResult> {
     let new = sign::create(&repo, None, &c.author(), &sig, msg, &tree, &[&head], sign::wanted(&repo, None))?;
     advance_head(&repo, new, &format!("cherry-pick: {}", super::first_line(msg)))?;
     record_commit_undo(&repo, format!("Cherry-pick {}", super::first_line(msg)), Some(head.id()), new);
-    Ok(CommitResult { oid: new.to_string(), short: short(new) })
+    Ok(CommitResult { oid: new.to_string(), short: short(new), conflicts: vec![] })
 }
 
 pub fn revert(repo_path: &str, id: &str) -> Result<CommitResult> {
     let repo = open(repo_path)?;
+    if repo.state() != git2::RepositoryState::Clean {
+        return err("Finish or abort the operation in progress first.");
+    }
+    super::rebase::require_not_paused(&repo)?;
     require_tracked_clean(&repo, "revert a commit")?;
     let c = repo.find_commit(oid(id)?)?;
     let head = repo.head()?.peel_to_commit()?;
     let mainline = if c.parent_count() > 1 { 1 } else { 0 };
     let mut idx = repo.revert_commit(&c, &head, mainline, None)?;
     if idx.has_conflicts() {
-        return err(format!("Reverting {} conflicts with later changes. Nothing was changed.", short(c.id())));
+        let mut opts = git2::RevertOptions::new();
+        if mainline > 0 {
+            opts.mainline(mainline);
+        }
+        repo.revert(&c, Some(&mut opts))?;
+        undo::record(&repo, format!("Revert {}", super::summary(&c)), Action::AbortMerge { oid: head.id().to_string() });
+        return Ok(CommitResult { oid: head.id().to_string(), short: short(head.id()), conflicts: conflicted(&repo)? });
     }
     let tree = repo.find_tree(idx.write_tree_to(&repo)?)?;
     let sig = signature(&repo)?;
@@ -161,7 +198,7 @@ pub fn revert(repo_path: &str, id: &str) -> Result<CommitResult> {
     let new = sign::create(&repo, None, &sig, &sig, &msg, &tree, &[&head], sign::wanted(&repo, None))?;
     advance_head(&repo, new, &format!("revert: {summary}"))?;
     record_commit_undo(&repo, format!("Revert {summary}"), Some(head.id()), new);
-    Ok(CommitResult { oid: new.to_string(), short: short(new) })
+    Ok(CommitResult { oid: new.to_string(), short: short(new), conflicts: vec![] })
 }
 
 /// Move the current branch to `id`. mode: soft | mixed | hard.
@@ -177,4 +214,14 @@ pub fn reset(repo_path: &str, id: &str, mode: &str) -> Result<()> {
     repo.reset(&target, kind, None)?;
     undo::record_head_move(&repo, format!("Reset to {}", short(target.id())), before, mode);
     Ok(())
+}
+
+fn conflicted(repo: &Repository) -> Result<Vec<String>> {
+    Ok(repo
+        .index()?
+        .conflicts()?
+        .filter_map(|c| c.ok())
+        .filter_map(|c| c.our.or(c.their).or(c.ancestor))
+        .map(|e| String::from_utf8_lossy(&e.path).to_string())
+        .collect())
 }

@@ -29,6 +29,11 @@ contains none of their code or artwork.
   position
 - Folders that moved or were deleted are flagged, with Locate… and Remove
 
+**Resizable panels**
+- Drag any divider: the sidebar, file lists, the commit composer, the stash,
+  reflog, compare and file-browser lists, and the split between a commit's
+  details and its diff. Double-click a divider to reset it; sizes are saved
+
 **Pick up where you left off**
 - When you quit and start Arbor again, it reopens your tabs on the same tab,
   and each one comes back on the same view (Changes, History or Stashes), with
@@ -53,6 +58,9 @@ contains none of their code or artwork.
 - **Patches**: save uncommitted changes or any commit as a `.patch` file
   (commits in `git format-patch` format), and apply patch files. Applying an
   emailed patch puts its message in the commit box
+- **Partial stash**: right-click files and "Stash … (only these)" puts just
+  those changes aside; everything else stays as it is. Stashes can be named
+  and include new files, and apply even while other changes are staged
 - Runs your `pre-commit`, `commit-msg` and `post-commit` hooks (respects `core.hooksPath`)
 - **Conflict wizard**: every conflict in a file side by side, mine against
   theirs (and the common base). Click a side to use it, take both in either
@@ -88,6 +96,13 @@ contains none of their code or artwork.
 - **Reflog**: everywhere HEAD or a branch pointed recently. Commits that are on
   no branch any more (after a reset, rebase or deleted branch) are marked
   *lost*; **Recover as new branch** brings them back
+- **Rebase, cherry-pick and revert pause on conflicts** instead of giving up:
+  resolve them in the conflict wizard, then **Continue**, **Skip commit** or
+  **Abort** from the banner (a rebase shows which commit it's on, "2 of 5").
+  The branch only moves when the rebase finishes, and one Undo reverts it all
+- **History filters** (the Filters button): author, a time range, a file or
+  folder, and "changes containing" some text (like `git log -S`). They search
+  the whole history, not just the loaded commits
 - Right-click a commit to check out, branch, tag, cherry-pick, revert, reset,
   edit its message, squash or fixup into its parent, or remove it
 - **Drag a commit up or down to reorder it**
@@ -319,8 +334,9 @@ cd src-tauri && cargo test
 
 - Signing uses the `gpg` and `ssh-keygen` programs, like Git. An SSH key with
   a passphrase needs to be in ssh-agent; GnuPG asks in its own window.
-- Rebases that hit a conflict stop without changing anything instead of
-  pausing for you to resolve. Merge instead, or finish that rebase with the git CLI.
+- A rebase paused by Arbor is Arbor's own (Continue/Skip/Abort in Arbor);
+  `git rebase --continue` doesn't know about it. Cherry-picks and reverts use
+  git's own state, so the command line can finish those too.
 - Rebasing across merge commits isn't supported.
 - LFS and bisect aren't handled in the UI. Adding or removing submodules is
   left to the git CLI (listing, cloning, updating and opening them works).

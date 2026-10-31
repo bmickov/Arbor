@@ -8,6 +8,7 @@
   import { menu, toasts } from "../lib/ui.svelte";
   import CommitDetail from "./CommitDetail.svelte";
   import Icon from "./Icon.svelte";
+  import Splitter from "./Splitter.svelte";
 
   let refname = $state("HEAD");
   let entries = $state<ReflogEntry[]>([]);
@@ -51,7 +52,7 @@
     menu.fromEvent(e, [
       { label: "New branch here…", hint: x.lost ? "recovers it" : undefined, action: () => act.newBranch(x.oid, x.short) },
       { label: "Check out this commit", action: () => app.act("Checking out", () => api.checkoutCommit(app.path, x.oid), { success: `Checked out ${x.short} (detached).` }) },
-      { label: `Cherry-pick into ${app.headBranch ?? "HEAD"}`, action: () => app.act("Cherry-picking", () => api.cherryPick(app.path, x.oid), { success: (r) => `Cherry-picked as ${r.short}.` }) },
+      { label: `Cherry-pick into ${app.headBranch ?? "HEAD"}`, action: () => act.cherryPick(x.oid) },
       { label: `Reset ${app.headBranch ?? "HEAD"} to here…`, action: () => act.resetTo(x) },
       { separator: true },
       { label: "Show in history", disabled: x.lost, action: () => act.selectCommit(x.oid) },
@@ -60,7 +61,7 @@
   }
 </script>
 
-<div class="reflog">
+<div class="reflog" style:--list-w="{app.size('reflog.list', 380)}px">
   <div class="list">
     <div class="top">
       <select bind:value={refname} aria-label="Whose history of positions">
@@ -88,6 +89,7 @@
       {/each}
     </div>
   </div>
+  <Splitter id="reflog.list" min={220} keep={320} />
   <div class="detail">
     {#if sel?.summary}
       {#key sel.oid}
@@ -108,8 +110,8 @@
 </div>
 
 <style>
-  .reflog { display: grid; grid-template-columns: minmax(300px, 420px) 1fr; height: 100%; min-height: 0; background: var(--surface); }
-  .list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+  .reflog { display: grid; grid-template-columns: var(--list-w) auto minmax(0, 1fr); height: 100%; min-height: 0; background: var(--surface); }
+  .list { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .top { display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 4px; }
   .lost-only { display: flex; align-items: center; gap: 6px; font-size: calc(var(--fs) * 12); color: var(--ink-2); }
   .intro { margin: 2px 12px 8px; font-size: calc(var(--fs) * 11.5); line-height: 1.45; }

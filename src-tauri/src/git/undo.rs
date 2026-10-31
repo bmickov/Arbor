@@ -159,6 +159,7 @@ pub fn list(repo_path: &str) -> Result<Vec<Entry>> {
 /// Reverse the most recent operation. Returns its label.
 pub fn undo(repo_path: &str) -> Result<String> {
     let repo = super::open(repo_path)?;
+    super::rebase::require_not_paused(&repo)?;
     let mut entries = load(&repo);
     let Some(entry) = entries.pop() else {
         return err("Nothing to undo.");

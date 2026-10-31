@@ -72,6 +72,8 @@ body {
 }
 img, svg, a { -webkit-user-drag: none; }
 body.dragging, body.dragging * { cursor: grabbing !important; }
+body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none; }
+body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none; }
 
 .mono { font-family: var(--font-mono); font-size: calc(var(--cs) * 12); font-variant-ligatures: none; }
 .muted { color: var(--ink-2); }

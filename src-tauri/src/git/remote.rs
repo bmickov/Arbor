@@ -190,7 +190,7 @@ pub fn pull(repo_path: &str, rebase: bool, creds: Option<Creds>, progress: Progr
     }
     if rebase {
         let r = super::rebase::rebase(repo_path, &up_name)?;
-        Ok(PullOutcome { result: r.result.into(), conflicts: vec![] })
+        Ok(PullOutcome { result: r.result.into(), conflicts: r.conflicts })
     } else {
         let m = super::merge::merge(repo_path, &up_name, false)?;
         Ok(PullOutcome { result: m.result.into(), conflicts: m.conflicts })

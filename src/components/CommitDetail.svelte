@@ -12,6 +12,7 @@
   import { menu, toasts } from "../lib/ui.svelte";
   import DiffView from "./DiffView.svelte";
   import Icon from "./Icon.svelte";
+  import Splitter from "./Splitter.svelte";
 
   let { oid, header }: { oid: string; header?: Snippet } = $props();
 
@@ -93,6 +94,8 @@
   {#if error}
     <div class="empty"><div><strong>Couldn't load this commit</strong>{error}</div></div>
   {:else if info}
+    {@const topH = app.layout.sizes["commit.top"]}
+    <div class="top" class:sized={topH != null} style:height={topH != null ? `${topH}px` : null}>
     <div class="head">
       {#if header}{@render header()}{/if}
       <h2 class="selectable">{info.summary}</h2>
@@ -129,6 +132,8 @@
         </button>
       {/each}
     </div>
+    </div>
+    <Splitter id="commit.top" axis="y" min={70} keep={140} />
 
     <div class="diff">
       <DiffView {diff} onshowall={() => app.largeDiffs.add(`${app.path}|${oid}|${file}`)} loading={!!file && diffKey !== `${oid}:${file}`} mode="readonly" split={app.settings.splitDiff} image={{ old: info.parents[0] ?? null, new: info.oid }} />
@@ -138,7 +143,7 @@
 
 <style>
   .cd { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-  .head { padding: 14px 16px 10px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+  .head { padding: 14px 16px 10px; border-bottom: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 8px; }
   h2 { margin: 0; font-size: calc(var(--fs) * 15); font-weight: 700; line-height: 1.35; }
   .body {
     margin: 0; font-family: var(--font-ui); white-space: pre-wrap; color: var(--ink-2);
@@ -160,7 +165,11 @@
   .plink { color: var(--accent); }
   .plink:hover { text-decoration: underline; }
 
-  .files { max-height: 34%; overflow-y: auto; padding: 4px 6px 6px; border-bottom: 1px solid var(--line); flex: none; }
+  .top { display: flex; flex-direction: column; flex: none; min-height: 0; max-height: 60%; }
+  .top.sized { max-height: none; overflow-y: auto; }
+  .head { flex: none; }
+  .files { max-height: 34vh; overflow-y: auto; padding: 4px 6px 6px; flex: none; }
+  .top.sized .files { max-height: none; flex: 1 0 60px; }
   .fsum { font-size: calc(var(--fs) * 12); padding: 4px 8px 4px; }
   .file { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; padding: 0 8px; border-radius: 5px; text-align: left; }
   .file:hover { background: var(--surface-2); }

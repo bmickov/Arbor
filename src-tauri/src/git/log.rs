@@ -2,7 +2,7 @@
 
 use super::{oid, open, short, Result};
 use git2::{DiffFindOptions, Oid, Repository, Sort};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -353,4 +353,142 @@ pub fn file_history(repo_path: &str, path: &str, limit: usize) -> Result<Vec<Fil
         }
     }
     Ok(out)
+}
+
+// ---- Searching the whole history ----
+
+#[derive(Deserialize, Default, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct LogFilter {
+    /// Message, author or commit ID contains this (case-insensitive).
+    pub text: Option<String>,
+    /// Author name or email contains this (case-insensitive).
+    pub author: Option<String>,
+    /// Unix seconds, inclusive.
+    pub since: Option<i64>,
+    pub until: Option<i64>,
+    /// Commits that change this file or anything inside this folder.
+    pub path: Option<String>,
+    /// Commits that add or remove this text (like `git log -S`).
+    pub contains: Option<String>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult {
+    pub rows: Vec<CommitRow>,
+    /// How many commits were looked at.
+    pub scanned: usize,
+    /// Stopped early: more matches may exist.
+    pub more: bool,
+}
+
+fn nonempty(s: &Option<String>) -> Option<&str> {
+    s.as_deref().map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// How often `needle` occurs in a blob (0 for binary or missing).
+fn occurrences(repo: &Repository, id: Oid, needle: &[u8]) -> usize {
+    if id.is_zero() {
+        return 0;
+    }
+    let Ok(b) = repo.find_blob(id) else { return 0 };
+    if b.is_binary() {
+        return 0;
+    }
+    let hay = b.content();
+    if needle.is_empty() || hay.len() < needle.len() {
+        return 0;
+    }
+    hay.windows(needle.len()).filter(|w| *w == needle).count()
+}
+
+pub fn search(repo_path: &str, scope: &str, f: &LogFilter, limit: usize) -> Result<SearchResult> {
+    let repo = open(repo_path)?;
+    let mut walk = repo.revwalk()?;
+    walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
+    match scope {
+        "all" => {
+            let _ = walk.push_head();
+            walk.push_glob("refs/heads")?;
+            walk.push_glob("refs/remotes")?;
+            walk.push_glob("refs/tags")?;
+        }
+        "head" => {
+            if walk.push_head().is_err() {
+                return Ok(SearchResult { rows: vec![], scanned: 0, more: false });
+            }
+        }
+        other => {
+            let id = super::branches::resolve(&repo, other)?;
+            walk.push(id)?;
+        }
+    }
+    let text = nonempty(&f.text).map(str::to_lowercase);
+    let author = nonempty(&f.author).map(str::to_lowercase);
+    let path = nonempty(&f.path).map(|p| p.trim_matches('/').to_string());
+    let contains = nonempty(&f.contains).map(|s| s.as_bytes().to_vec());
+    let labels = ref_labels(&repo)?;
+    // Searching inside changes is slow on huge histories; give up after a while.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut rows = vec![];
+    let mut scanned = 0;
+    let mut more = false;
+    for id in walk {
+        let id = id?;
+        if rows.len() >= limit || std::time::Instant::now() > deadline {
+            more = true;
+            break;
+        }
+        scanned += 1;
+        let c = repo.find_commit(id)?;
+        let a = c.author();
+        let when = a.when().seconds();
+        if f.since.is_some_and(|s| when < s) || f.until.is_some_and(|u| when > u) {
+            continue;
+        }
+        let name = a.name().unwrap_or("");
+        let email = a.email().unwrap_or("");
+        if let Some(au) = &author {
+            if !name.to_lowercase().contains(au) && !email.to_lowercase().contains(au) {
+                continue;
+            }
+        }
+        if let Some(t) = &text {
+            let msg = c.message().unwrap_or("").to_lowercase();
+            if !msg.contains(t) && !name.to_lowercase().contains(t) && !id.to_string().starts_with(t.as_str()) {
+                continue;
+            }
+        }
+        if path.is_some() || contains.is_some() {
+            let tree = c.tree()?;
+            let parent = c.parent(0).ok().map(|p| p.tree()).transpose()?;
+            let mut opts = git2::DiffOptions::new();
+            if let Some(p) = &path {
+                opts.pathspec(p);
+            }
+            let diff = repo.diff_tree_to_tree(parent.as_ref(), Some(&tree), Some(&mut opts))?;
+            if diff.deltas().len() == 0 {
+                continue;
+            }
+            if let Some(needle) = &contains {
+                let hit = diff.deltas().any(|d| occurrences(&repo, d.old_file().id(), needle) != occurrences(&repo, d.new_file().id(), needle));
+                if !hit {
+                    continue;
+                }
+            }
+        }
+        rows.push(CommitRow {
+            oid: id.to_string(),
+            short: short(id),
+            summary: super::summary(&c),
+            author: name.to_string(),
+            email: email.to_string(),
+            time: when,
+            parents: c.parent_ids().map(|p| p.to_string()).collect(),
+            refs: labels.get(&id).cloned().unwrap_or_default(),
+            graph: GraphRow { col: 0, color: 0, width: 0, segs: vec![] },
+        });
+    }
+    Ok(SearchResult { rows, scanned, more })
 }

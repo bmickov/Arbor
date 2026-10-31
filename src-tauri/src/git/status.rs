@@ -30,6 +30,8 @@ pub struct WorkingStatus {
     pub behind: usize,
     /// Message git prepared for a merge in progress (MERGE_MSG).
     pub merge_message: Option<String>,
+    /// A rebase Arbor paused on a conflict.
+    pub paused_rebase: Option<super::rebase::PausedInfo>,
 }
 
 fn state_name(s: RepositoryState) -> &'static str {
@@ -127,7 +129,7 @@ pub fn status(repo_path: &str) -> Result<WorkingStatus> {
         staged,
         unstaged,
         conflicted,
-        state: state_name(repo.state()),
+        state: if super::rebase::paused(&repo).is_some() { "rebase" } else { state_name(repo.state()) },
         branch: head_branch(&repo),
         head: head.as_ref().map(|c| c.id().to_string()),
         head_summary: head.as_ref().map(super::summary),
@@ -136,6 +138,7 @@ pub fn status(repo_path: &str) -> Result<WorkingStatus> {
         ahead,
         behind,
         merge_message,
+        paused_rebase: super::rebase::paused_info(&repo),
     })
 }
 

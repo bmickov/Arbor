@@ -106,7 +106,7 @@
       <div class="top"><Toolbar /></div>
       {#if !app.layout.sidebarHidden}
         <aside><Sidebar /></aside>
-        <div class="resize" role="separator" aria-orientation="vertical" onpointerdown={resizeSide}></div>
+        <div class="resize" role="separator" aria-orientation="vertical" title="Drag to resize · double-click to reset" onpointerdown={resizeSide} ondblclick={() => (app.layout.sideW = 240)}></div>
       {/if}
       <main>
         <!-- Remount per tab so each view restores that tab's scroll and selection. -->
