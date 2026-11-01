@@ -1,6 +1,6 @@
 [package]
 name = "arbor"
-version = "0.13.0"
+version = "0.14.0"
 description = "A friendly Git client for Linux, the BSDs, macOS and Windows"
 license = "0BSD"
 authors = ["The Arbor authors"]
@@ -18,12 +18,14 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 git2 = { version = "0.21", features = ["https", "ssh", "vendored-libgit2"] }
 thiserror = "2"
 dirs = "6"
 tempfile = "3"
+regex-lite = "0.1"
 open = "5"
 chrono = "0.4"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }

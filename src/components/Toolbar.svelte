@@ -27,6 +27,7 @@
       { label: "Show in file manager", action: () => api.openExternal(app.path) },
       { label: "Open terminal here", action: () => api.openTerminal(app.path) },
       { label: "Add remote…", action: act.addRemote },
+      { label: "Repository settings…", action: () => (app.repoSettings = true) },
       { separator: true },
       { label: "Apply patch…", action: act.applyPatch },
       { label: "Save changes as patch…", action: act.saveChangesPatch },
@@ -61,7 +62,7 @@
     return m < 1 ? " · fetched just now" : ` · fetched ${m} min ago`;
   });
 
-  const undoTitle = $derived(app.undoTop ? keyText(`Undo “${app.undoTop.label}” (Ctrl+Z)`) : "Nothing to undo");
+  const undoTitle = $derived(app.undoTop ? keyText(`Undo “${app.undoTop.label}” (Ctrl+Z) · right-click for history`) : "Nothing to undo");
 </script>
 
 <header class="bar">
@@ -104,7 +105,7 @@
     <button class="tool" onclick={(e) => act.flowMenu(e)} disabled={!!app.busy} title="Git-flow: start and finish features, releases and hotfixes">
       <Icon name="flow" /><span>Git-flow</span>
     </button>
-    <button class="tool" onclick={() => app.undo()} disabled={!!app.busy || !app.undoTop} title={undoTitle}>
+    <button class="tool" onclick={() => app.undo()} oncontextmenu={(e) => act.undoMenu(e)} data-undo disabled={!!app.busy || !app.undoTop} title={undoTitle}>
       <Icon name="undo" /><span>Undo</span>
     </button>
   </div>

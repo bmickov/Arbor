@@ -108,6 +108,8 @@ export interface Settings {
   codeFollowsUi: boolean;
   /** Colour code by language in diffs and the file viewer. */
   syntax: boolean;
+  /** Tell me when background fetches find new commits. */
+  notify: boolean;
   /** Highlight the changed words within changed lines. */
   wordDiff: boolean;
   /** How changed images are compared: side, swipe, onion or difference. */
@@ -140,7 +142,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false,
   theme: "system", uiFont: "atkinson", uiSize: 13, codeFont: "commit", codeSize: 12, shortcuts: {},
-  restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10, syntax: true, wordDiff: true, imageMode: "side", fileTree: false, issueLinks: [],
+  restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10, syntax: true, wordDiff: true, notify: true, imageMode: "side", fileTree: false, issueLinks: [],
   diffTool: "", mergeTool: "", diffCommand: "", mergeCommand: "", pinned: {},
   commitTemplates: [], profiles: [],
 };
@@ -221,6 +223,8 @@ class App {
   focusRepoFilter = $state(0);
   /** When each repository was last fetched (ms), by path. */
   lastFetched = $state<Record<string, number>>({});
+  /** The Repository settings dialog is open. */
+  repoSettings = $state(false);
   /** Git LFS in the active repository. */
   lfs = $state<LfsInfo | null>(null);
   async loadLfs() {
@@ -459,10 +463,14 @@ class App {
       for (const p of due) {
         if (p === this.path && this.busy) continue;
         try {
+          const behind = () => (p === this.path ? this.status?.behind : library.summaries[p]?.behind) ?? 0;
+          const before = behind();
           await api.fetch(p, null, false);
           this.noteFetched(p);
           if (p === this.path) await this.refresh();
           else await library.refreshSummaries([p]);
+          const after = behind();
+          if (after > before) this.announce(p, after - before);
         } catch {
           this.autoFetchOff.add(p);
         }
@@ -760,6 +768,27 @@ class App {
       return await this.run(label, fn, opts);
     } catch {
       return undefined;
+    }
+  }
+
+  /** New commits arrived for a repository's branch: a desktop notification when Arbor isn't in front, a toast when it is. */
+  private async announce(path: string, n: number) {
+    if (!this.settings.notify) return;
+    const name = library.repos.find((r) => r.path === path)?.name ?? path.split(/[\\/]/).pop();
+    const branch = path === this.path ? this.status?.branch : library.summaries[path]?.branch;
+    const title = `${n} new commit${n === 1 ? "" : "s"} on ${branch ?? "your branch"}`;
+    const body = `${name}: pull to get ${n === 1 ? "it" : "them"}.`;
+    if (document.hasFocus()) {
+      toasts.push("info", `${name}: ${title}.`, path === this.path ? { label: "Pull", run: () => import("./actions").then((a) => a.pull()) } : undefined);
+      return;
+    }
+    try {
+      const n = await import("@tauri-apps/plugin-notification");
+      let ok = await n.isPermissionGranted();
+      if (!ok) ok = (await n.requestPermission()) === "granted";
+      if (ok) n.sendNotification({ title, body });
+    } catch {
+      // Notifications aren't available on this desktop.
     }
   }
 

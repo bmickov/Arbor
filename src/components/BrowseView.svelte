@@ -1,7 +1,8 @@
 <script lang="ts">
   // Browse the repository's files as they were at any commit, branch or tag,
   // view any file, and export the whole tree as a ZIP.
-  import { api, type FileContent, type TreeEntry } from "../lib/api";
+  import { api, type FileContent, type GrepResult, type TreeEntry } from "../lib/api";
+  import { markRanges } from "../lib/worddiff";
   import * as act from "../lib/actions";
   import { IMAGE_EXT } from "../lib/format";
   import { app } from "../lib/state.svelte";
@@ -75,7 +76,53 @@
     return out;
   });
 
-  async function show(path: string) {
+  // Find in files: search the contents of every file at this revision.
+  let mode = $state<"files" | "search">("files");
+  let query = $state("");
+  let caseSensitive = $state(false);
+  let useRegex = $state(false);
+  let found = $state.raw<GrepResult | null>(null);
+  let searching = $state(false);
+  let searchError = $state<string | null>(null);
+  let hitLine = $state(0);
+  let seq = 0;
+  $effect(() => {
+    const q = query, r = rev, c = caseSensitive, x = useRegex;
+    if (mode !== "search" || !q.trim()) {
+      found = null;
+      searchError = null;
+      return;
+    }
+    const my = ++seq;
+    searching = true;
+    const t = setTimeout(() => {
+      api.grepTree(app.path, r, q, c, x)
+        .then((g) => { if (my === seq) { found = g; searchError = null; } })
+        .catch((e) => { if (my === seq) { found = null; searchError = String(e); } })
+        .finally(() => { if (my === seq) searching = false; });
+    }, 250);
+    return () => clearTimeout(t);
+  });
+  const groups = $derived.by(() => {
+    const m = new Map<string, GrepResult["matches"]>();
+    for (const x of found?.matches ?? []) m.set(x.path, [...(m.get(x.path) ?? []), x]);
+    return [...m];
+  });
+
+  /** The matching line, starting a little before the first match so it's in view. */
+  function snippet(m: GrepResult["matches"][number]): string {
+    const chars = [...m.text];
+    const lead = chars.findIndex((c) => !/\s/.test(c));
+    const from = Math.max(lead < 0 ? 0 : lead, (m.ranges[0]?.[0] ?? 0) - 12);
+    const cut = from > Math.max(lead, 0);
+    const text = (cut ? "…" : "") + chars.slice(from).join("");
+    const shift = from - (cut ? 1 : 0);
+    return markRanges(null, text, m.ranges.map(([a, b]) => [a - shift, b - shift] as [number, number]).filter(([a]) => a >= 0));
+  }
+
+  async function show(path: string, line = 0) {
+    hitLine = line;
+    if (selected === path && content) return;
     selected = path;
     content = null;
     image = null;
@@ -115,6 +162,38 @@
   </header>
   <div class="body" style:--side-w="{app.size('browse.tree', 300)}px">
     <div class="side">
+      <div class="modes" role="tablist">
+        <button role="tab" aria-selected={mode === "files"} class:on={mode === "files"} onclick={() => (mode = "files")}><Icon name="folder" size={12} /> Files</button>
+        <button role="tab" aria-selected={mode === "search"} class:on={mode === "search"} onclick={() => (mode = "search")}><Icon name="search" size={12} /> Find in files</button>
+      </div>
+      {#if mode === "search"}
+        <div class="filter">
+          <Icon name="search" size={13} />
+          <!-- svelte-ignore a11y_autofocus -->
+          <input placeholder="Text in any file at {label}" bind:value={query} spellcheck="false" aria-label="Find in files" autofocus />
+          <button class="opt" class:on={caseSensitive} onclick={() => (caseSensitive = !caseSensitive)} title="Match case" aria-pressed={caseSensitive}>Aa</button>
+          <button class="opt mono" class:on={useRegex} onclick={() => (useRegex = !useRegex)} title="Regular expression" aria-pressed={useRegex}>.*</button>
+        </div>
+        <div class="tree results">
+          {#if searchError}<div class="none err">{searchError}</div>
+          {:else if searching && !found}<div class="none faint">Searching…</div>
+          {:else if found}
+            <div class="rsum faint">{found.matches.length.toLocaleString()}{found.more ? "+" : ""} match{found.matches.length === 1 ? "" : "es"} in {found.files} file{found.files === 1 ? "" : "s"}{searching ? " · updating…" : ""}</div>
+            {#each groups as [path, ms] (path)}
+              <div class="rfile" title={path}><Icon name="file" size={12} /> <b>{path.split("/").pop()}</b> <span class="faint">{path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""}</span> <span class="n">{ms.length}</span></div>
+              {#each ms as m (m.line)}
+                <button class="hit" class:sel={selected === path && hitLine === m.line} onclick={() => show(path, m.line)}>
+                  <span class="no">{m.line}</span><span class="t mono">{@html snippet(m)}</span>
+                </button>
+              {/each}
+            {:else}
+              <div class="none faint">Nothing found.</div>
+            {/each}
+          {:else}
+            <div class="none faint">Searches every text file as it was at {label}.</div>
+          {/if}
+        </div>
+      {:else}
       <div class="filter">
         <Icon name="search" size={13} />
         <input placeholder="Filter files" bind:value={filter} spellcheck="false" aria-label="Filter files" />
@@ -138,6 +217,7 @@
           <div class="none faint">{loading ? "Loading…" : filter ? "No files match." : "No files."}</div>
         {/each}
       </div>
+      {/if}
     </div>
     <Splitter id="browse.tree" min={180} keep={320} />
     <div class="view">
@@ -147,7 +227,7 @@
         <div class="img"><img src={image} alt={selected} /></div>
       {:else if content?.text != null}
         <div class="fhead mono">{selected}</div>
-        <div class="text"><TextView text={content.text} path={selected} /></div>
+        <div class="text"><TextView text={content.text} path={selected} line={hitLine} /></div>
       {:else if content}
         <div class="empty"><div><strong>{content.binary ? "Binary file" : "Too large to show"}</strong>{size(content.size)}. Export as ZIP to get it.</div></div>
       {:else}
@@ -177,6 +257,21 @@
   .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
   .sz { font-size: calc(var(--fs) * 11); flex: none; }
   .none { padding: 12px; }
+  .none.err { color: var(--danger); }
+  .modes { display: flex; gap: 2px; margin: 8px 8px 0; background: var(--surface-3); border-radius: 7px; padding: 2px; }
+  .modes button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 3px 6px; border-radius: 5px; font-weight: 600; font-size: calc(var(--fs) * 12); color: var(--ink-2); }
+  .modes button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
+  .opt { flex: none; padding: 1px 5px; border-radius: 4px; font-size: calc(var(--fs) * 11); font-weight: 700; color: var(--ink-3); }
+  .opt.on { background: var(--accent); color: var(--accent-ink); }
+  .rsum { padding: 4px 8px 6px; font-size: calc(var(--fs) * 11.5); }
+  .rfile { display: flex; align-items: center; gap: 4px; padding: 6px 6px 2px; font-size: calc(var(--fs) * 12); min-width: 0; white-space: nowrap; overflow: hidden; }
+  .rfile .n { margin-left: auto; color: var(--ink-3); font-size: calc(var(--fs) * 11); }
+  .hit { display: flex; gap: 8px; width: 100%; text-align: left; padding: 2px 6px 2px 10px; border-radius: 4px; min-width: 0; }
+  .hit:hover { background: var(--surface-2); }
+  .hit.sel { background: var(--sel); }
+  .hit .no { flex: none; width: 3.5ch; text-align: right; color: var(--ink-3); font-size: calc(var(--cs) * 11); }
+  .hit .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: calc(var(--cs) * 11.5); color: var(--ink-2); }
+  .hit .t :global(mark.wd) { background: var(--warn-soft); color: var(--ink); border-radius: 2px; box-shadow: 0 0 0 1px var(--warn); }
   .view { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .fhead { padding: 6px 12px; border-bottom: 1px solid var(--line-soft); color: var(--ink-2); font-size: calc(var(--cs) * 12); background: var(--surface-2); }
   .text { flex: 1; min-height: 0; }

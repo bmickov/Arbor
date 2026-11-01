@@ -1651,3 +1651,52 @@ fn external_tools_get_the_right_files() {
     assert!(git::tools::diff(&r.path, "f.txt", "unstaged", "custom", "").is_err());
     assert!(git::tools::list().iter().any(|t| t.id == "meld"));
 }
+
+#[test]
+fn merge_prediction_grep_and_repo_settings() {
+    let r = Repo::new();
+    r.write("a.txt", "one\ntwo\n");
+    r.write("b.txt", "bee\n");
+    r.commit_all("base");
+    r.git(&["checkout", "-q", "-b", "side"]);
+    r.write("a.txt", "one\nTWO\n");
+    r.write("b.txt", "bee side\n");
+    r.commit_all("side");
+    r.git(&["checkout", "-q", "main"]);
+    // Clean at first (a.txt untouched on main), then conflicting.
+    r.write("c.txt", "c\n");
+    r.commit_all("main adds c");
+    let p = git::insight::predict_merge(&r.path, "side", "main").unwrap();
+    assert_eq!((p.result, p.conflicts.len()), ("clean", 0));
+    r.write("a.txt", "one\n2\n");
+    r.write("b.txt", "bee side\n");
+    r.commit_all("main edits a");
+    let p = git::insight::predict_merge(&r.path, "side", "main").unwrap();
+    assert_eq!(p.result, "conflicts");
+    assert_eq!(p.conflicts, vec!["a.txt"]);
+    assert_eq!(p.both_changed, 2);
+    // Nothing was touched.
+    assert!(r.git(&["status", "--porcelain"]).trim().is_empty());
+    assert_eq!(git::insight::predict_merge(&r.path, "main", "main").unwrap().result, "up-to-date");
+
+    // Search contents at a revision.
+    let g = git::insight::grep(&r.path, "side", "two", false, false, 100).unwrap();
+    assert_eq!(g.matches.len(), 1);
+    assert_eq!((g.matches[0].path.as_str(), g.matches[0].line, g.matches[0].ranges[0]), ("a.txt", 2, [0, 3]));
+    assert!(git::insight::grep(&r.path, "side", "two", true, false, 100).unwrap().matches.is_empty(), "case-sensitive");
+    assert_eq!(git::insight::grep(&r.path, "main", r"^\w+$", false, true, 100).unwrap().files, 2, "a.txt and c.txt; \"bee side\" has a space");
+    assert!(git::insight::grep(&r.path, "main", "(", false, true, 100).is_err());
+    assert_eq!(git::insight::grep(&r.path, "main", "e", false, false, 2).unwrap().matches.len(), 2);
+
+    // Remotes, .gitignore and config.
+    r.git(&["remote", "add", "origin", "https://example.com/a.git"]);
+    git::insight::edit_remote(&r.path, "origin", "upstream", "https://example.com/b.git", Some("git@example.com:b.git")).unwrap();
+    let rs = git::insight::remotes(&r.path).unwrap();
+    assert_eq!((rs[0].name.as_str(), rs[0].url.as_str(), rs[0].push_url.as_deref()), ("upstream", "https://example.com/b.git", Some("git@example.com:b.git")));
+    git::insight::write_ignore(&r.path, "target/\n*.log").unwrap();
+    assert_eq!(git::insight::read_ignore(&r.path).unwrap(), "target/\n*.log\n");
+    git::insight::set_config(&r.path, "pull.rebase", Some("true")).unwrap();
+    assert!(git::insight::config(&r.path).unwrap().iter().any(|e| e.key == "pull.rebase" && e.value == "true" && e.level == "local"));
+    git::insight::set_config(&r.path, "pull.rebase", None).unwrap();
+    assert!(git::insight::set_config(&r.path, "nodot", Some("x")).is_err());
+}

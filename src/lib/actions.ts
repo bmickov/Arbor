@@ -265,8 +265,28 @@ export async function setUpstream(branch: string) {
   await app.act("Setting upstream", () => api.setUpstream(P(), branch, v || null), { success: v ? `${branch} now tracks ${v}.` : `${branch} no longer tracks a remote branch.` });
 }
 
+/** Warn before a merge (or rebase) that's going to conflict. Resolves false to cancel. */
+async function warnConflicts(source: string, target: string, what: "merge" | "rebase"): Promise<boolean> {
+  let p;
+  try {
+    p = await api.predictMerge(P(), source, target);
+  } catch {
+    return true; // Can't tell; let the operation itself report problems.
+  }
+  if (p.result !== "conflicts") return true;
+  const n = p.conflicts.length;
+  const r = await dialog.show({
+    title: what === "merge" ? `Merging ${source} will conflict` : `Rebasing will probably stop on conflicts`,
+    body: `${source} and ${target} made conflicting changes to ${n} file${n === 1 ? "" : "s"}. You can go ahead and resolve ${n === 1 ? "it" : "them"} in the conflict wizard, or cancel.`,
+    items: p.conflicts.slice(0, 50).map((c) => ({ text: c, warn: true })),
+    confirm: what === "merge" ? "Merge anyway" : "Rebase anyway",
+  });
+  return r.button === "confirm";
+}
+
 export async function mergeInto(source: string, target: string) {
   const here = app.headBranch;
+  if (!(await warnConflicts(source, target, "merge"))) return;
   const m = await app.act(`Merging ${source}`, () => (target === here ? api.merge(P(), source) : api.mergeInto(P(), source, target)), {
     success: (m) => mergeMessage(m, source),
   });
@@ -275,6 +295,7 @@ export async function mergeInto(source: string, target: string) {
 
 export async function rebaseOnto(branch: string, onto: string) {
   const here = app.headBranch;
+  if (!(await warnConflicts(onto, branch, "rebase"))) return;
   const r = await app.act(`Rebasing ${branch}`, () => (branch === here ? api.rebase(P(), onto) : api.rebaseBranch(P(), branch, onto)), {
     success: (r) => (r.result === "conflicts" ? null : r.result === "up-to-date" ? `${branch} already contains ${onto}.` : `Rebased ${branch} onto ${onto}.`),
   });
@@ -1061,4 +1082,27 @@ export async function lfsPull() {
 
 export async function lfsLock(path: string, unlock = false) {
   await app.act(unlock ? "Unlocking" : "Locking", () => api.lfsLock(P(), path, unlock), { success: unlock ? `Unlocked ${path}.` : `Locked ${path}. Others can't push changes to it until you unlock it.` });
+}
+
+// ---- Undo history ----
+
+/** The undo steps, newest first; pick one to undo back to (and including) it. */
+export async function undoMenu(e: MouseEvent) {
+  e.preventDefault();
+  const list = await api.undoList(P()).catch(() => []); // newest first
+  if (!list.length) {
+    toasts.push("info", "Nothing to undo.");
+    return;
+  }
+  menu.fromEvent(e, list.slice(0, 20).map((u, i) => ({
+    label: u.label,
+    hint: relTime(u.time),
+    action: async () => {
+      if (i > 0 && !(await dialog.confirm(`Undo ${i + 1} actions?`, `Undoes everything from “${list[0].label}” back to “${u.label}”, newest first.`, `Undo ${i + 1}`))) return;
+      for (let k = 0; k <= i; k++) {
+        if (!app.undoTop) break;
+        await app.undo();
+      }
+    },
+  })), "Undo history");
 }

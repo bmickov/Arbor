@@ -335,6 +335,10 @@
             </div>
             <p class="hint">Open repositories are fetched quietly in the background, so the counts of commits to pull stay current. Repositories that need a password are skipped.</p>
             <label class="toggle">
+              <input type="checkbox" checked={s.notify} onchange={() => { s.notify = !s.notify; save(); }} />
+              <span><b>Tell me about new commits</b><small>When a background fetch finds new commits to pull: a desktop notification if Arbor is in the background, a message inside it otherwise.</small></span>
+            </label>
+            <label class="toggle">
               <input type="checkbox" checked={s.pullRebase} onchange={() => { s.pullRebase = !s.pullRebase; save(); }} />
               <span><b>Pull with rebase</b><small>Replay your local commits on top of the remote ones instead of creating a merge commit.</small></span>
             </label>

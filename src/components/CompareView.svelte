@@ -1,7 +1,7 @@
 <script lang="ts">
   // Compare two branches (or tags, or remote branches): the commits each has
   // that the other doesn't, and the files the target would bring to the base.
-  import { api, type Comparison, type FileDiff } from "../lib/api";
+  import { api, type Comparison, type FileDiff, type MergePrediction } from "../lib/api";
   import * as act from "../lib/actions";
   import { basename, dirname, relTime, STATUS_GLYPH } from "../lib/format";
   import { app } from "../lib/state.svelte";
@@ -19,6 +19,18 @@
 
   const base = $derived(app.compare?.base ?? "");
   const target = $derived(app.compare?.target ?? "");
+
+  // Would merging target into base conflict? Worked out without touching anything.
+  let prediction = $state.raw<MergePrediction | null>(null);
+  $effect(() => {
+    const b = base, t = target;
+    void app.version;
+    prediction = null;
+    if (!b || !t || b === t) return;
+    api.predictMerge(app.path, t, b).then((p) => {
+      if (base === b && target === t) prediction = p;
+    }).catch(() => {});
+  });
 
   $effect(() => {
     const b = base, t = target;
@@ -89,6 +101,18 @@
         {cmp.files.length} file{cmp.files.length === 1 ? "" : "s"} would change.
         {#if canMerge}<button class="btn small primary" onclick={() => act.mergeInto(target, base)}><Icon name="merge" size={13} /> Merge {target} into {base}</button>{/if}
       </p>
+      {#if prediction && (prediction.result === "clean" || prediction.result === "conflicts" || prediction.result === "fast-forward")}
+        <p class="predict {prediction.result}" title={prediction.conflicts.join("\n")}>
+          {#if prediction.result === "conflicts"}
+            <Icon name="warning" size={13} /> Merging would conflict in {prediction.conflicts.length} file{prediction.conflicts.length === 1 ? "" : "s"}:
+            <span class="mono">{prediction.conflicts.slice(0, 4).join(", ")}{prediction.conflicts.length > 4 ? ", …" : ""}</span>
+          {:else if prediction.result === "fast-forward"}
+            <Icon name="check" size={13} /> {base} can simply move forward to {target}: no merge commit, no conflicts.
+          {:else}
+            <Icon name="check" size={13} /> Merges cleanly{prediction.bothChanged ? ` (both changed ${prediction.bothChanged} file${prediction.bothChanged === 1 ? "" : "s"}, in different places)` : ""}.
+          {/if}
+        </p>
+      {/if}
     {:else if error}
       <p class="summary err">{error.replace(/^\w+:/, "")}</p>
     {:else if !target}
@@ -179,4 +203,7 @@
   .st-deleted { color: var(--del-ink); }
   .none { padding: 8px 10px; font-size: calc(var(--fs) * 12); }
   .detail { min-width: 0; min-height: 0; }
+  .predict { margin: 4px 0 0; display: flex; align-items: center; gap: 6px; font-size: calc(var(--fs) * 12.5); color: var(--add-ink); flex-wrap: wrap; }
+  .predict.conflicts { color: var(--warn); }
+  .predict .mono { color: var(--ink-2); font-size: calc(var(--cs) * 12); }
 </style>

@@ -437,6 +437,40 @@ async fn bisect_reset(repo: String) -> R<()> {
     blocking(move || git::bisect::reset(&repo)).await
 }
 
+// ------------------------------------------------------------------ prediction, search, repo settings
+#[tauri::command]
+async fn predict_merge(repo: String, source: String, target: String) -> R<git::insight::MergePrediction> {
+    blocking(move || git::insight::predict_merge(&repo, &source, &target)).await
+}
+#[tauri::command]
+async fn grep_tree(repo: String, rev: String, query: String, case: bool, regex: bool, limit: usize) -> R<git::insight::GrepResult> {
+    blocking(move || git::insight::grep(&repo, &rev, &query, case, regex, limit)).await
+}
+#[tauri::command]
+async fn remotes_info(repo: String) -> R<Vec<git::insight::RemoteInfo>> {
+    blocking(move || git::insight::remotes(&repo)).await
+}
+#[tauri::command]
+async fn edit_remote(repo: String, name: String, new_name: String, url: String, push_url: Option<String>) -> R<()> {
+    blocking(move || git::insight::edit_remote(&repo, &name, &new_name, &url, push_url.as_deref())).await
+}
+#[tauri::command]
+async fn read_ignore(repo: String) -> R<String> {
+    blocking(move || git::insight::read_ignore(&repo)).await
+}
+#[tauri::command]
+async fn write_ignore(repo: String, text: String) -> R<()> {
+    blocking(move || git::insight::write_ignore(&repo, &text)).await
+}
+#[tauri::command]
+async fn repo_config(repo: String) -> R<Vec<git::insight::ConfigEntry>> {
+    blocking(move || git::insight::config(&repo)).await
+}
+#[tauri::command]
+async fn set_repo_config(repo: String, key: String, value: Option<String>) -> R<()> {
+    blocking(move || git::insight::set_config(&repo, &key, value.as_deref())).await
+}
+
 // ------------------------------------------------------------------ LFS and external tools
 #[tauri::command]
 async fn lfs_info(repo: String) -> R<git::lfs::LfsInfo> {
@@ -619,6 +653,7 @@ fn open_terminal(path: String) -> R<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         // Window size and position are saved on exit; the UI decides whether
         // to restore them (the "pick up where you left off" preference).
         .plugin(tauri_plugin_window_state::Builder::default().skip_initial_state("main").build())
@@ -640,7 +675,7 @@ pub fn run() {
             library_get, library_save, library_add_many, scan_folder, repo_summaries,
             get_status, diff_unstaged, diff_staged, file_at,
             stage_files, unstage_files, stage_all, unstage_all, discard_files,
-            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, rebase_continue, rebase_skip, rebase_abort, search_log, lfs_info, lfs_checkout, lfs_pull, lfs_track, lfs_locks, lfs_lock, tools_list, diff_tool, merge_tool, flow_config, flow_suggest, flow_init, flow_start, flow_finish, stack_list, stack_set_parent, stack_restack, stack_descendants, bisect_start, bisect_mark, bisect_reset, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
+            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, rebase_continue, rebase_skip, rebase_abort, search_log, predict_merge, grep_tree, remotes_info, edit_remote, read_ignore, write_ignore, repo_config, set_repo_config, lfs_info, lfs_checkout, lfs_pull, lfs_track, lfs_locks, lfs_lock, tools_list, diff_tool, merge_tool, flow_config, flow_suggest, flow_init, flow_start, flow_finish, stack_list, stack_set_parent, stack_restack, stack_descendants, bisect_start, bisect_mark, bisect_reset, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
             commit, head_message, cherry_pick, revert_commit, reset_to,
             get_log, commit_info, tracked_files, reflog, branches_review, compare_branches, compare_file_diff,
             tree_at, file_content, export_zip, ignore_pattern, untrack_files, restore_file,
