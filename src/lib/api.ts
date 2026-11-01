@@ -152,6 +152,11 @@ export interface BisectState {
 export interface LfsInfo { used: boolean; installed: boolean; patterns: string[]; missing: number; files: number }
 export interface LfsLock { id: string; path: string; owner: { name: string } | null; lockedAt: string | null }
 export interface ToolInfo { id: string; name: string; installed: boolean; merges: boolean }
+export interface MergePrediction { result: "up-to-date" | "fast-forward" | "clean" | "conflicts"; conflicts: string[]; bothChanged: number }
+export interface GrepMatch { path: string; line: number; text: string; ranges: [number, number][] }
+export interface GrepResult { matches: GrepMatch[]; files: number; more: boolean }
+export interface RemoteInfo { name: string; url: string; pushUrl: string | null }
+export interface ConfigEntry { key: string; value: string; level: "local" | "global" | "system" | "other" }
 export interface LogFilter { text?: string | null; author?: string | null; since?: number | null; until?: number | null; path?: string | null; contains?: string | null }
 export interface SearchResult { rows: CommitRow[]; scanned: number; more: boolean }
 export interface SigningSettings {
@@ -337,6 +342,16 @@ export const api = {
   toolsList: () => call<ToolInfo[]>("tools_list"),
   diffTool: (repo: string, path: string, area: string, tool: string, custom: string) => call<void>("diff_tool", { repo, path, area, tool, custom }),
   mergeTool: (repo: string, path: string, tool: string, custom: string) => call<{ markersLeft: boolean }>("merge_tool", { repo, path, tool, custom }),
+  predictMerge: (repo: string, source: string, target: string) => call<MergePrediction>("predict_merge", { repo, source, target }),
+  grepTree: (repo: string, rev: string, query: string, caseSensitive: boolean, regex: boolean, limit = 2000) =>
+    call<GrepResult>("grep_tree", { repo, rev, query, case: caseSensitive, regex, limit }),
+  remotesInfo: (repo: string) => call<RemoteInfo[]>("remotes_info", { repo }),
+  editRemote: (repo: string, name: string, newName: string, url: string, pushUrl: string | null) =>
+    call<void>("edit_remote", { repo, name, newName, url, pushUrl }),
+  readIgnore: (repo: string) => call<string>("read_ignore", { repo }),
+  writeIgnore: (repo: string, text: string) => call<void>("write_ignore", { repo, text }),
+  repoConfig: (repo: string) => call<ConfigEntry[]>("repo_config", { repo }),
+  setRepoConfig: (repo: string, key: string, value: string | null) => call<void>("set_repo_config", { repo, key, value }),
   searchLog: (repo: string, scope: string, filter: LogFilter, limit: number) => call<SearchResult>("search_log", { repo, scope, filter, limit }),
   stashApply: (repo: string, index: number) => call<void>("stash_apply", { repo, index }),
   stashPop: (repo: string, index: number, quiet = false) => call<void>("stash_pop", { repo, index, quiet }),

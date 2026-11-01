@@ -92,6 +92,12 @@ export const COMMANDS: Command[] = [
   } },
   { id: "repo.files", label: "Show in file manager", group: "Repository", keys: ["Ctrl+Shift+E"], repo: true, run: () => api.openExternal(app.path).catch((e) => toasts.push("error", String(e))) },
   { id: "patch.apply", label: "Apply a patch file…", group: "Repository", keys: [], repo: true, run: () => act.applyPatch() },
+  { id: "undo.history", label: "Undo history…", group: "Repository", keys: [], repo: true, run: () => {
+    const b = document.querySelector<HTMLElement>("[data-undo]");
+    const r = b?.getBoundingClientRect();
+    act.undoMenu(new MouseEvent("contextmenu", { clientX: r ? r.left : 200, clientY: r ? r.bottom + 4 : 80 }));
+  } },
+  { id: "repo.settings", label: "Repository settings…", group: "Repository", keys: [], repo: true, run: () => (app.repoSettings = true) },
   { id: "worktree.new", label: "New worktree…", group: "Repository", keys: [], repo: true, run: () => act.addWorktree() },
   { id: "submodules.update", label: "Update submodules", group: "Repository", keys: [], repo: true, run: () => act.updateSubmodules([], "submodules") },
   { id: "patch.save", label: "Save uncommitted changes as a patch…", group: "Repository", keys: [], repo: true, run: () => act.saveChangesPatch() },

@@ -101,8 +101,12 @@ contains none of their code or artwork.
 - Restore any file to how it was in a commit, or just before it
 - **Browse files** at any commit, branch or tag: a folder tree with a fast file
   viewer (even for huge files), and **Export as ZIP**
+- **Find in files**: search every file's contents at that commit, branch or
+  tag (plain text or a regular expression, optionally case-sensitive); click a
+  match to open the file at that line
 - **Compare branches**: the commits each side has that the other doesn't, and
-  every file the branch would change, with one-click merge
+  every file the branch would change, with one-click merge. It also tells you
+  whether merging would conflict, and in which files, before you try
 - **Reflog**: everywhere HEAD or a branch pointed recently. Commits that are on
   no branch any more (after a reset, rebase or deleted branch) are marked
   *lost*; **Recover as new branch** brings them back
@@ -126,15 +130,22 @@ contains none of their code or artwork.
 - **Drag a branch onto another branch** to merge or rebase
 - **Drag a branch onto a remote** to push it there
 - Drag a commit onto the current branch to cherry-pick it
+- **Conflict prediction**: merging or rebasing a branch that would conflict
+  says so first, listing the files, so you can cancel or go ahead
 - Fetch (with prune), pull (merge or rebase), push with rejection handling
 - **Sync**: pull, then push, in one click
 - **Fetch automatically** in the background (every 10 minutes by default), so
-  the counts of commits to pull stay current
+  the counts of commits to pull stay current, with a desktop notification when
+  new commits arrive for a branch (turn it off in Preferences → Diffs & Git)
 - **Safe force push**: force pushes check the remote first, like
   `--force-with-lease`, and refuse if someone pushed since your last fetch
 - SSH via ssh-agent or `~/.ssh/id_*` keys; HTTPS via your git credential helper,
   or a username and token prompt
 - Clone, init, add and remove remotes, track upstream branches, push and delete tags
+- **Repository settings** (the repository menu): rename remotes and change
+  their fetch and push URLs, edit `.gitignore` (with common patterns for
+  macOS, Windows, editors, Node, Rust, Python and PHP), and see every git
+  setting that applies, where it comes from, and change this repository's own
 
 **Git-flow, stacked branches and bisect**
 - **Git-flow** (toolbar button): set it up once, then start and finish
@@ -196,13 +207,16 @@ contains none of their code or artwork.
 - Ctrl+Z undoes commits, amends, staging, discards (even of untracked files),
   merges, rebases, history rewrites, cherry-picks, reverts, resets, checkouts,
   branch and tag creation, deletion and renames, stash operations, and remote changes
+- **Undo history**: right-click Undo to see recent operations and undo back
+  to any of them in one go
 - The undo history lives in `.git/arbor/undo.json`, so it survives restarts
 - Undo refuses rather than guesses when the repository changed since the operation
 
 **Safety**
 - Merges, rebases and rewrites refuse to start over uncommitted changes, and
   offer to stash them, run the operation, and put them back
-- Rebases are replayed in memory: if any commit conflicts, nothing changes
+- Rebases are replayed in memory, and the branch only moves when they finish:
+  abort a paused rebase and everything is as it was
 - Rewriting commits that are already pushed asks for confirmation first
 
 ## Download

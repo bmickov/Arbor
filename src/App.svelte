@@ -8,6 +8,7 @@
   import QuickActions from "./components/QuickActions.svelte";
   import BranchesReview from "./components/BranchesReview.svelte";
   import BisectBar from "./components/BisectBar.svelte";
+  import RepoSettings from "./components/RepoSettings.svelte";
   import BrowseView from "./components/BrowseView.svelte";
   import CompareView from "./components/CompareView.svelte";
   import ReflogView from "./components/ReflogView.svelte";
@@ -144,6 +145,7 @@
 {#if app.prefs}<Preferences />{/if}
 {#if app.switcher && app.repo}<BranchSwitcher />{/if}
 {#if app.quick}<QuickActions />{/if}
+{#if app.repoSettings && app.repo}<RepoSettings onclose={() => (app.repoSettings = false)} />{/if}
 <Menu />
 <Dialog />
 <Toasts />

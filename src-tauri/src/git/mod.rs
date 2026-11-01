@@ -15,6 +15,7 @@ pub mod files;
 pub mod gitflow;
 pub mod hooks;
 pub mod identity;
+pub mod insight;
 pub mod lfs;
 pub mod library;
 pub mod log;
