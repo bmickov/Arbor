@@ -76,6 +76,7 @@ export async function pull(): Promise<boolean> {
   });
   if (r) app.noteFetched(P());
   if (r?.result === "conflicts") afterMerge({ result: "conflicts", conflicts: r.conflicts }, app.settings.pullRebase ? "rebase" : "merge");
+  else if (r && r.result !== "up-to-date" && app.lfs?.used && app.lfs.installed) await app.act("Downloading LFS files", () => api.lfsPull(P()));
   return !!r && r.result !== "conflicts";
 }
 
@@ -311,6 +312,7 @@ export function branchMenu(e: MouseEvent, name: string) {
     { separator: true },
     { label: "New branch from here…", action: () => newBranch(name, name) },
     { label: "Check out in a new worktree…", disabled: name === head, action: () => addWorktree(name) },
+    { label: pinnedBranches().includes(name) ? "Unpin" : "Pin to top", action: () => togglePin(name) },
     ...stackItems(name),
     { label: "Rename…", action: () => renameBranch(name) },
     { label: "Show history", action: () => showHistory(name) },
@@ -328,6 +330,7 @@ export function remoteBranchMenu(e: MouseEvent, fullName: string) {
   const head = app.headBranch;
   menu.fromEvent(e, [
     { label: "Check out as local branch", action: () => checkoutRemote(fullName) },
+    { label: pinnedBranches().includes(fullName) ? "Unpin" : "Pin to top", action: () => togglePin(fullName) },
     { separator: true },
     { label: `Merge into ${head}`, disabled: !head, action: () => mergeInto(fullName, head!) },
     { label: `Rebase ${head} onto it`, disabled: !head, action: () => rebaseOnto(head!, fullName) },
@@ -978,4 +981,84 @@ export async function bisectMark(verdict: "good" | "bad" | "skip") {
 
 export async function bisectStop() {
   await app.act("Stopping bisect", () => api.bisectReset(P()), { success: "Bisect stopped; back where you started." });
+}
+
+// ---- External tools ----
+
+export function hasDiffTool() {
+  return !!app.settings.diffTool;
+}
+
+/** Open a file's change in the external diff tool. area: unstaged | staged | a commit id. */
+export async function openDiffTool(path: string, area: string) {
+  const s = app.settings;
+  if (!s.diffTool) {
+    toasts.push("info", "Pick a diff tool in Preferences → Diffs & Git first.");
+    app.prefs = "diffs";
+    return;
+  }
+  try {
+    await api.diffTool(P(), path, area, s.diffTool, s.diffCommand);
+  } catch (e) {
+    toasts.push("error", String(e));
+  }
+}
+
+/** Resolve a conflicted file in the external merge tool; offer to mark it resolved after. */
+export async function openMergeTool(path: string) {
+  const s = app.settings;
+  if (!s.mergeTool) {
+    toasts.push("info", "Pick a merge tool in Preferences → Diffs & Git first.");
+    app.prefs = "diffs";
+    return;
+  }
+  const r = await app.act(`Waiting for the merge tool (${path.split("/").pop()})`, () => api.mergeTool(P(), path, s.mergeTool, s.mergeCommand));
+  if (!r) return;
+  if (r.markersLeft) {
+    toasts.push("info", `${path.split("/").pop()} still has conflict markers.`);
+    return;
+  }
+  if (await dialog.confirm("Mark as resolved?", `The merge tool closed and ${path} has no conflict markers left.`, "Mark resolved")) {
+    await app.act("Resolving", () => api.stageFiles(P(), [path]), { success: `Resolved ${path.split("/").pop()}.` });
+  }
+}
+
+// ---- Pinned branches ----
+
+export function pinnedBranches(): string[] {
+  return app.settings.pinned[app.path] ?? [];
+}
+
+export function togglePin(name: string) {
+  const list = pinnedBranches();
+  app.settings.pinned[app.path] = list.includes(name) ? list.filter((n) => n !== name) : [...list, name];
+  app.saveSettings();
+}
+
+// ---- Git LFS ----
+
+export async function lfsTrack(pattern?: string) {
+  const p = pattern ?? (await dialog.prompt("Track files with Git LFS", "File pattern", {
+    confirm: "Track",
+    placeholder: "*.psd",
+    body: "Matching files are stored with LFS from now on (in .gitattributes, which you then commit). Files already committed stay as they are.",
+    validate: (v) => (!v.trim() ? "Enter a pattern." : null),
+  }));
+  if (!p) return;
+  await app.act("Tracking with LFS", () => api.lfsTrack(P(), p), { success: `New ${p} files are stored with LFS. Commit .gitattributes to share that.` });
+  await app.loadLfs();
+}
+
+export async function lfsUntrack(pattern: string) {
+  await app.act("Untracking", () => api.lfsTrack(P(), pattern, true), { success: `${pattern} isn't stored with LFS any more.` });
+  await app.loadLfs();
+}
+
+export async function lfsPull() {
+  await app.act("Downloading LFS files", () => api.lfsPull(P()), { success: "LFS files are up to date." });
+  await app.loadLfs();
+}
+
+export async function lfsLock(path: string, unlock = false) {
+  await app.act(unlock ? "Unlocking" : "Locking", () => api.lfsLock(P(), path, unlock), { success: unlock ? `Unlocked ${path}.` : `Locked ${path}. Others can't push changes to it until you unlock it.` });
 }

@@ -138,6 +138,11 @@
       { label: "Open file", disabled: !one, action: () => api.openExternal(full) },
       { label: "Show in folder", disabled: !one, action: () => api.openExternal(full.replace(/\/[^/]+$/, "")) },
       { label: "File history & blame", disabled: !one || untracked, action: () => (app.fileHistoryPath = path) },
+      ...(area === "conflicted"
+        ? [{ label: "Open in merge tool", action: () => act.openMergeTool(path) }]
+        : [{ label: "Open in diff tool", disabled: !one || untracked, action: () => act.openDiffTool(path, area) }]),
+      ...(app.lfs?.used && one && !untracked ? [{ label: "Lock file", hint: "Git LFS", action: () => act.lfsLock(path) }, { label: "Unlock file", action: () => act.lfsLock(path, true) }] : []),
+      ...(one && /\.[^/.]+$/.test(path) && app.lfs?.installed ? [{ label: `Track *${path.slice(path.lastIndexOf("."))} with LFS`, action: () => act.lfsTrack(`*${path.slice(path.lastIndexOf("."))}`) }] : []),
       { separator: true },
       ...(one ? act.ignoreItems(path) : []),
       ...(!untracked && area !== "conflicted" && st?.unstaged.find((f) => f.path === path)?.status !== "deleted"
@@ -253,12 +258,16 @@
           {#if loading}<span class="faint">…</span>{/if}
         </div>
         <div class="factions">
+          {#if app.selectedFile.area !== "conflicted" && app.settings.diffTool}
+            <button class="btn small ghost" onclick={() => act.openDiffTool(entry.path, app.selectedFile!.area)} title="Open in your diff tool">Diff tool</button>
+          {/if}
           {#if app.selectedFile.area === "unstaged"}
             <button class="btn small" onclick={() => discard([entry.path])}><Icon name="discard" size={13} /> Discard file</button>
             <button class="btn small primary" onclick={() => stage([entry.path])}><Icon name="plus" size={13} /> Stage file</button>
           {:else if app.selectedFile.area === "staged"}
             <button class="btn small" onclick={() => unstage([entry.path])}><Icon name="minus" size={13} /> Unstage file</button>
           {:else}
+            {#if app.settings.mergeTool}<button class="btn small" onclick={() => act.openMergeTool(entry.path)}>Open in merge tool</button>{/if}
             <button class="btn small" onclick={() => api.openExternal(`${app.path}/${entry.path}`)}>Open in editor</button>
           {/if}
         </div>

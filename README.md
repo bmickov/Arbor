@@ -142,6 +142,20 @@ contains none of their code or artwork.
   this…". Arbor checks out commits in between; mark each **Good**, **Bad** or
   **Skip** until it names the first bad commit. Uses git's own bisect state
 
+**External tools, pinned branches and Git LFS**
+- **External diff and merge tools**: Meld, Visual Studio Code, Beyond
+  Compare, KDiff3, P4Merge, Kaleidoscope, WinMerge or Kompare, git's own
+  difftool/mergetool settings, or any command (`$LOCAL $REMOTE $BASE
+  $MERGED`). "Open in diff tool" on any changed file or commit file; "Open
+  in merge tool" on a conflict, then mark it resolved when the tool closes
+- **Pinned branches**: "Pin to top" on any local or remote branch keeps it
+  in a Pinned section at the top of the sidebar
+- **Git LFS**: files tracked with LFS are staged as LFS pointers (through
+  git), and get their real contents back after every checkout, pull, merge,
+  rebase or stash. The sidebar lists tracked patterns, how many files still
+  need downloading, and file locks (lock and unlock from a file's menu).
+  "Track *.ext with LFS" on any file. Needs git-lfs installed
+
 **Worktrees and submodules**
 - **Worktrees**: check out a branch in its own folder ("Check out in a new
   worktree…" on any branch, or New worktree in Quick Actions), so you can work
@@ -234,7 +248,7 @@ Open with **Ctrl+,** or the sliders button.
   difference you set; turn off "Scale with interface text" to keep it fixed.
   History rows and the graph scale with the interface size
 - **Diffs & Git:** context lines, when to ask before showing large diffs,
-  syntax highlighting, ignore whitespace, side-by-side history diffs, how often to fetch
+  syntax highlighting, external diff and merge tools, ignore whitespace, side-by-side history diffs, how often to fetch
   automatically, pull with rebase
 - **Commits:** commit templates, author profiles, and commit signing
 - **Keyboard:** every shortcut below can be changed. Click it and press new keys;
@@ -354,7 +368,8 @@ cd src-tauri && cargo test
   `git rebase --continue` doesn't know about it. Cherry-picks and reverts use
   git's own state, so the command line can finish those too.
 - Rebasing across merge commits isn't supported.
-- LFS isn't handled in the UI. Adding or removing submodules is
+- LFS needs `git` and `git-lfs` installed, since libgit2 can't run the LFS
+  filter itself. Adding or removing submodules is
   left to the git CLI (listing, cloning, updating and opening them works).
 - Pull requests and hosting-service integrations aren't included.
 - On Windows, Git hooks run through Git for Windows' `sh`, so hooks need

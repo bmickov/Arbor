@@ -167,6 +167,9 @@ pub fn resolve_with_content(repo_path: &str, path: &str, content: &str) -> Resul
         std::fs::create_dir_all(dir)?;
     }
     std::fs::write(&full, content)?;
+    if super::lfs::is_lfs(&repo, path) && super::lfs::used(&repo) {
+        return super::lfs::add(&repo, &[path.to_string()]);
+    }
     let mut index = repo.index()?;
     index.add_path(Path::new(path))?;
     index.write()?;

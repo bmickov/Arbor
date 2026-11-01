@@ -1,6 +1,6 @@
 [package]
 name = "arbor"
-version = "0.11.0"
+version = "0.12.0"
 description = "A friendly Git client for Linux, the BSDs, macOS and Windows"
 license = "0BSD"
 authors = ["The Arbor authors"]

@@ -48,7 +48,11 @@ fn state_name(s: RepositoryState) -> &'static str {
 }
 
 pub fn status(repo_path: &str) -> Result<WorkingStatus> {
-    let repo = open(repo_path)?;
+    let mut repo = open(repo_path)?;
+    if super::lfs::refresh_if_needed(&repo) {
+        // git rewrote the index; don't use libgit2's cached copy.
+        repo = open(repo_path)?;
+    }
     let mut opts = StatusOptions::new();
     opts.include_untracked(true)
         .recurse_untracked_dirs(true)

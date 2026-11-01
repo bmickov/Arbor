@@ -1569,3 +1569,85 @@ fn bisect_finds_the_first_bad_commit() {
     assert!(git::bisect::state(&r.path).unwrap().is_none());
     assert!(r.git(&["for-each-ref", "refs/bisect"]).trim().is_empty());
 }
+
+#[test]
+fn lfs_files_are_staged_as_pointers_and_checked_out() {
+    if !git::lfs::installed() {
+        eprintln!("git-lfs isn't installed; skipping");
+        return;
+    }
+    let r = Repo::new();
+    r.write("readme", "x\n");
+    r.commit_all("init");
+    git::lfs::track(&r.path, "*.bin", false).unwrap();
+    assert!(r.read(".gitattributes").contains("*.bin filter=lfs"));
+    let info = git::lfs::info(&r.path).unwrap();
+    assert!(info.used && info.installed);
+    assert_eq!(info.patterns, vec!["*.bin"]);
+
+    let big: String = "0123456789abcdef".repeat(4096);
+    r.write("assets/big.bin", &big);
+    git::patch::stage_files(&r.path, &[".gitattributes".to_string(), "assets/big.bin".to_string()]).unwrap();
+    let staged = r.staged_content("assets/big.bin");
+    assert!(staged.starts_with("version https://git-lfs.github.com/spec/v1"), "staged a pointer, got {} bytes", staged.len());
+    r.git(&["commit", "-q", "-m", "add big"]);
+
+    // A checkout by libgit2 leaves the pointer in the working tree; lfs checkout fixes it.
+    r.write("assets/big.bin", &staged);
+    git::lfs::checkout(&r.path).unwrap();
+    assert_eq!(r.read("assets/big.bin"), big);
+    assert_eq!(git::lfs::info(&r.path).unwrap().files, 1);
+    // Stale file times make libgit2 compare raw bytes with the pointer; status still says clean.
+    let f = std::fs::File::options().write(true).open(Path::new(&r.path).join("assets/big.bin")).unwrap();
+    f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600)).unwrap();
+    drop(f);
+    let un: Vec<String> = git::status::status(&r.path).unwrap().unstaged.iter().map(|f| f.path.clone()).collect();
+    assert!(un.is_empty(), "downloaded LFS file shows as unchanged: {un:?} / git says {:?}", r.git(&["status", "--porcelain"]));
+
+    // Stage all goes through LFS too.
+    r.write("other.bin", "binary-ish\n");
+    git::patch::stage_all(&r.path).unwrap();
+    assert!(r.staged_content("other.bin").starts_with("version https://git-lfs"));
+    assert_eq!(r.staged_content("readme"), "x\n");
+}
+
+#[test]
+fn external_tools_get_the_right_files() {
+    if cfg!(windows) {
+        return; // The stand-in tools below are Unix commands.
+    }
+    let r = Repo::new();
+    r.write("f.txt", "base\n");
+    r.commit_all("base");
+    r.git(&["checkout", "-q", "-b", "side"]);
+    r.write("f.txt", "theirs\n");
+    r.commit_all("side");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("f.txt", "mine\n");
+    r.commit_all("mine");
+    git::merge::merge(&r.path, "side", false).unwrap();
+    // A "merge tool" that takes their version.
+    let out = git::tools::merge(&r.path, "f.txt", "custom", "cp $REMOTE $MERGED").unwrap();
+    assert!(!out.markers_left);
+    assert_eq!(r.read("f.txt"), "theirs\n");
+    // One that leaves the file alone: markers are reported.
+    git::merge::abort(&r.path).unwrap();
+    git::merge::merge(&r.path, "side", false).unwrap();
+    assert!(git::tools::merge(&r.path, "f.txt", "custom", "true").unwrap().markers_left);
+    git::merge::abort(&r.path).unwrap();
+
+    // A "diff tool" that copies the old side somewhere we can look.
+    r.write("f.txt", "edited\n");
+    let dest = tempfile::tempdir().unwrap();
+    let copy = dest.path().join("old.txt");
+    git::tools::diff(&r.path, "f.txt", "unstaged", "custom", &format!("cp $LOCAL '{}'", copy.display())).unwrap();
+    for _ in 0..50 {
+        if copy.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(std::fs::read_to_string(&copy).unwrap(), "mine\n");
+    assert!(git::tools::diff(&r.path, "f.txt", "unstaged", "custom", "").is_err());
+    assert!(git::tools::list().iter().any(|t| t.id == "meld"));
+}

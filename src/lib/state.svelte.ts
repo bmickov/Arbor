@@ -7,7 +7,7 @@ import { saveWindowState, StateFlags } from "@tauri-apps/plugin-window-state";
 import { SvelteSet } from "svelte/reactivity";
 import {
   api, type CommitRow, type Creds, type DiffSettings, type Refs, type RepoInfo,
-  type SigningSettings, type StashEntry, type UndoEntry, type WorkingStatus,
+  type LfsInfo, type SigningSettings, type StashEntry, type UndoEntry, type WorkingStatus,
 } from "./api";
 import { library } from "./library.svelte";
 import { applyTheme, type ThemeId } from "./themes";
@@ -71,14 +71,14 @@ export interface Layout {
   sideW: number;
   listW: number;
   sidebarHidden: boolean;
-  sections: { branches: boolean; remotes: boolean; tags: boolean; worktrees: boolean; submodules: boolean };
+  sections: { branches: boolean; remotes: boolean; tags: boolean; worktrees: boolean; submodules: boolean; pinned: boolean; lfs: boolean };
   remotes: Record<string, boolean>;
   /** Sizes of resizable panels in px, by panel id (missing: default). */
   sizes: Record<string, number>;
 }
 const DEFAULT_LAYOUT: Layout = {
   sideW: 240, listW: 55, sidebarHidden: false,
-  sections: { branches: true, remotes: true, tags: false, worktrees: true, submodules: true }, remotes: {}, sizes: {},
+  sections: { branches: true, remotes: true, tags: false, worktrees: true, submodules: true, pinned: true, lfs: true }, remotes: {}, sizes: {},
 };
 
 interface Session {
@@ -108,6 +108,14 @@ export interface Settings {
   codeFollowsUi: boolean;
   /** Colour code by language in diffs and the file viewer. */
   syntax: boolean;
+  /** External diff and merge tools: "" none, "git" (git's own settings), a preset id, or "custom". */
+  diffTool: string;
+  mergeTool: string;
+  /** Custom commands, with $LOCAL $REMOTE (and $BASE $MERGED for merging). */
+  diffCommand: string;
+  mergeCommand: string;
+  /** Branches pinned to the top of the sidebar, per repository path. */
+  pinned: Record<string, string[]>;
   /** Ask before showing diffs with more changed lines than this; 0 never asks. */
   largeDiffLines: number;
   /** Fetch open repositories in the background every N minutes; 0 is off. */
@@ -125,6 +133,7 @@ export const DEFAULT_SETTINGS: Settings = {
   context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false,
   theme: "system", uiFont: "atkinson", uiSize: 13, codeFont: "commit", codeSize: 12, shortcuts: {},
   restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10, syntax: true,
+  diffTool: "", mergeTool: "", diffCommand: "", mergeCommand: "", pinned: {},
   commitTemplates: [], profiles: [],
 };
 export const UI_SIZES = { min: 10, max: 20, default: 13 };
@@ -204,6 +213,18 @@ class App {
   focusRepoFilter = $state(0);
   /** When each repository was last fetched (ms), by path. */
   lastFetched = $state<Record<string, number>>({});
+  /** Git LFS in the active repository. */
+  lfs = $state<LfsInfo | null>(null);
+  async loadLfs() {
+    const p = this.path;
+    if (!p) return void (this.lfs = null);
+    try {
+      const l = await api.lfsInfo(p);
+      if (this.path === p) this.lfs = l;
+    } catch {
+      this.lfs = null;
+    }
+  }
   /** Commit signing as configured for the active repository. */
   signing = $state<SigningSettings | null>(null);
   async loadSigning() {
@@ -708,6 +729,14 @@ class App {
         } catch (e) {
           toasts.push("error", String(e));
         }
+      }
+      // libgit2 writes LFS pointers, not file contents: let git-lfs put them
+      // in place. Asked every time, since a checkout can bring LFS in (the
+      // backend only reads .gitattributes when the repository doesn't use it).
+      if (!/^fetch/i.test(label)) {
+        this.progress = "LFS files";
+        await api.lfsCheckout(path).catch(() => {});
+        if (this.path === path) await this.loadLfs();
       }
       this.busy = null;
       this.progress = "";

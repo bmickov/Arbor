@@ -78,6 +78,7 @@
     menu.fromEvent(e, [
       { label: "File history & blame", action: () => (app.fileHistoryPath = path) },
       { label: "Open current version", action: () => api.openExternal(`${app.path}/${path}`) },
+      { label: "Open in diff tool", action: () => act.openDiffTool(path, oid) },
       { separator: true },
       { label: `Restore the version from ${short}`, hint: "into your working copy", disabled: isStash || f?.status === "deleted", action: () => act.restoreFile(oid, path, `as of ${short}`) },
       { label: "Restore the version before this commit", disabled: isStash || !info?.parents.length || f?.status === "added", action: () => act.restoreFile(`${oid}^`, f?.oldPath ?? path, `as it was before ${short}`) },
