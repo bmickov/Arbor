@@ -33,6 +33,8 @@
   let dropLine = $state<{ oid: string; below: boolean } | null>(null);
 
   const q = $derived(app.historyQuery.trim().toLowerCase());
+  const bis = $derived(app.status?.bisect ?? null);
+  const bisGood = $derived(new Set(bis?.good ?? []));
 
   // Filters search the whole history on the backend (not just loaded commits).
   const f = $derived(app.historyFilter);
@@ -262,6 +264,12 @@
                   </span>
                 {/if}
               {/each}
+              {#if bis}
+                {#if bis.bad === row.oid}<span class="bmark bad" title="Bisect: has the bug">{bis.found === row.oid ? "first bad" : "bad"}</span>
+                {:else if bisGood.has(row.oid)}<span class="bmark good" title="Bisect: works">good</span>
+                {:else if bis.skipped.includes(row.oid)}<span class="bmark" title="Bisect: skipped">skipped</span>
+                {:else if bis.current === row.oid && !bis.found}<span class="bmark test" title="Bisect: being tested">testing</span>{/if}
+              {/if}
               <span class="summary" class:merge={row.parents.length > 1}>{row.summary}</span>
             </div>
             {#if canMove && !filtering}<span class="grip" title="Drag to reorder" class:pushed={pushed.has(row.oid)}><Icon name="grip" size={12} /></span>{/if}
@@ -316,6 +324,10 @@
   }
   .search input { border: 0; padding: 0; height: 26px; background: transparent; box-shadow: none; }
   .clear { color: var(--ink-3); display: grid; }
+  .bmark { flex: none; font-size: calc(var(--fs) * 10.5); font-weight: 700; border-radius: 4px; padding: 0 5px; margin-right: 6px; color: var(--ink-3); border: 1px solid currentColor; }
+  .bmark.bad { color: var(--danger); }
+  .bmark.good { color: var(--add-ink); }
+  .bmark.test { color: var(--warn); }
   .ftoggle { display: flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px; color: var(--ink-2); font-weight: 600; font-size: calc(var(--fs) * 12); white-space: nowrap; }
   .ftoggle:hover, .ftoggle.on { background: var(--surface-3); color: var(--ink); }
   .fcount { background: var(--accent); color: var(--accent-ink); border-radius: 8px; padding: 0 6px; font-size: calc(var(--fs) * 10.5); }

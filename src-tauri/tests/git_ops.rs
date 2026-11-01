@@ -1449,3 +1449,123 @@ fn partial_stash_and_history_filters() {
     assert_eq!(subjects(LogFilter { until: Some(y2021), ..Default::default() }), vec!["ana's change"]);
     assert!(!subjects(LogFilter { since: Some(y2021), ..Default::default() }).contains(&"ana's change".to_string()));
 }
+
+#[test]
+fn gitflow_start_and_finish() {
+    let r = Repo::new();
+    r.write("a", "1\n");
+    r.commit_all("init");
+    let c = git::gitflow::suggest(&r.path).unwrap();
+    assert_eq!((c.main.as_str(), c.develop.as_str()), ("main", "develop"));
+    let c = git::gitflow::FlowConfig { version_tag: "v".into(), ..c };
+    git::gitflow::init(&r.path, &c).unwrap();
+    assert_eq!(r.git(&["config", "gitflow.branch.develop"]).trim(), "develop");
+    r.git(&["rev-parse", "--verify", "develop"]);
+
+    // Feature: from develop, merged back with a merge commit, then deleted.
+    assert_eq!(git::gitflow::start(&r.path, "feature", "login").unwrap(), "feature/login");
+    r.write("login", "x\n");
+    r.commit_all("login screen");
+    let f = git::gitflow::finish(&r.path, "feature/login", None, false).unwrap();
+    assert_eq!(f.result, "finished");
+    assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]).trim(), "develop");
+    assert!(r.git(&["branch", "--list", "feature/login"]).trim().is_empty());
+    assert_eq!(r.git(&["log", "-1", "--format=%P", "develop"]).split_whitespace().count(), 2, "no fast-forward");
+
+    // Release: merged into main and tagged, then main into develop.
+    git::gitflow::start(&r.path, "release", "1.0").unwrap();
+    assert!(git::gitflow::start(&r.path, "release", "1.1").is_err(), "one release at a time");
+    r.write("version", "1.0\n");
+    r.commit_all("bump version");
+    let f = git::gitflow::finish(&r.path, "release/1.0", Some("First release"), false).unwrap();
+    assert_eq!((f.result, f.tag.as_deref()), ("finished", Some("v1.0")));
+    assert_eq!(r.git(&["rev-parse", "v1.0^{commit}"]), r.git(&["rev-parse", "main"]));
+    assert!(r.git(&["cat-file", "-p", "v1.0"]).contains("First release"));
+    r.git(&["merge-base", "--is-ancestor", "main", "develop"]);
+
+    // Hotfix from main, finished into both; a conflict stops it and finishing again carries on.
+    git::gitflow::start(&r.path, "hotfix", "1.0.1").unwrap();
+    r.write("version", "1.0.1\n");
+    r.commit_all("hotfix");
+    r.git(&["checkout", "-q", "develop"]);
+    r.write("version", "2.0-dev\n");
+    r.commit_all("start 2.0");
+    let f = git::gitflow::finish(&r.path, "hotfix/1.0.1", None, false).unwrap();
+    assert_eq!(f.result, "conflicts");
+    assert_eq!(f.merging_into.as_deref(), Some("develop"));
+    assert_eq!(f.tag.as_deref(), Some("v1.0.1"));
+    git::conflict::resolve_with_content(&r.path, "version", "2.0-dev\n").unwrap();
+    git::commit::commit(&r.path, "Merge main into develop", false, true).unwrap();
+    let f = git::gitflow::finish(&r.path, "hotfix/1.0.1", None, false).unwrap();
+    assert_eq!(f.result, "finished");
+    assert!(r.git(&["branch", "--list", "hotfix/1.0.1"]).trim().is_empty());
+    assert_eq!(r.git(&["show", "main:version"]), "1.0.1\n");
+}
+
+#[test]
+fn stacked_branches_restack() {
+    let r = Repo::new();
+    r.write("a", "1\n");
+    r.commit_all("init");
+    r.git(&["checkout", "-q", "-b", "part1"]);
+    r.write("p1", "1\n");
+    r.commit_all("part 1");
+    r.git(&["checkout", "-q", "-b", "part2"]);
+    r.write("p2", "2\n");
+    r.commit_all("part 2");
+    git::stack::set_parent(&r.path, "part1", Some("main")).unwrap();
+    git::stack::set_parent(&r.path, "part2", Some("part1")).unwrap();
+    assert!(git::stack::set_parent(&r.path, "part1", Some("part2")).is_err(), "no loops");
+    assert_eq!(git::stack::descendants(&r.path, "main").unwrap(), vec!["part1", "part2"]);
+
+    // part1 gets amended (rewritten) and main moves on.
+    r.git(&["checkout", "-q", "main"]);
+    r.write("m", "m\n");
+    r.commit_all("main moves");
+    r.git(&["checkout", "-q", "part1"]);
+    r.write("p1", "1 amended\n");
+    r.git(&["commit", "-q", "-a", "--amend", "-m", "part 1 (amended)"]);
+    let list = git::stack::list(&r.path).unwrap();
+    let p1 = list.iter().find(|s| s.branch == "part1").unwrap();
+    assert_eq!((p1.behind, p1.own), (1, 1));
+
+    assert_eq!(git::stack::restack(&r.path, "part1").unwrap().result, "rebased");
+    assert_eq!(r.git(&["log", "--format=%s", "part1"]).lines().collect::<Vec<_>>(), vec!["part 1 (amended)", "main moves", "init"]);
+    // part2's own commit only: the old "part 1" isn't replayed on top of the amended one.
+    assert_eq!(git::stack::restack(&r.path, "part2").unwrap().result, "rebased");
+    assert_eq!(r.git(&["log", "--format=%s", "part2"]).lines().collect::<Vec<_>>(), vec!["part 2", "part 1 (amended)", "main moves", "init"]);
+    assert!(git::stack::list(&r.path).unwrap().iter().all(|s| s.behind == 0));
+    assert_eq!(git::stack::restack(&r.path, "part2").unwrap().result, "up-to-date");
+    git::stack::set_parent(&r.path, "part2", None).unwrap();
+    assert_eq!(git::stack::list(&r.path).unwrap().len(), 1);
+}
+
+#[test]
+fn bisect_finds_the_first_bad_commit() {
+    let r = Repo::new();
+    for i in 1..=16 {
+        r.write("n", &format!("{i}\n"));
+        r.commit_all(&format!("c{i}"));
+    }
+    let ids: Vec<String> = r.git(&["log", "--format=%H", "--reverse"]).lines().map(str::to_string).collect();
+    let id = |n: usize| ids[n - 1].clone();
+    let first_bad = 11;
+    let good = id(1);
+    let mut st = git::bisect::start(&r.path, None, &good).unwrap();
+    assert_eq!(st.original, "main");
+    let mut tests = 0;
+    while st.found.is_none() {
+        tests += 1;
+        assert!(tests <= 6, "too many steps");
+        let v: usize = r.read("n").trim().parse().unwrap();
+        st = git::bisect::mark(&r.path, if v >= first_bad { "bad" } else { "good" }, None).unwrap();
+    }
+    assert_eq!(st.found.as_deref(), Some(id(first_bad).as_str()));
+    assert!(tests <= 4, "{tests} tests for 15 commits");
+    // git sees the same session.
+    assert!(r.git(&["rev-parse", "refs/bisect/bad"]).trim() == id(first_bad));
+    git::bisect::reset(&r.path).unwrap();
+    assert_eq!(r.git(&["symbolic-ref", "--short", "HEAD"]).trim(), "main");
+    assert!(git::bisect::state(&r.path).unwrap().is_none());
+    assert!(r.git(&["for-each-ref", "refs/bisect"]).trim().is_empty());
+}

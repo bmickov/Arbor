@@ -32,6 +32,8 @@ pub struct WorkingStatus {
     pub merge_message: Option<String>,
     /// A rebase Arbor paused on a conflict.
     pub paused_rebase: Option<super::rebase::PausedInfo>,
+    /// A bisect in progress.
+    pub bisect: Option<super::bisect::BisectState>,
 }
 
 fn state_name(s: RepositoryState) -> &'static str {
@@ -139,6 +141,7 @@ pub fn status(repo_path: &str) -> Result<WorkingStatus> {
         behind,
         merge_message,
         paused_rebase: super::rebase::paused_info(&repo),
+        bisect: super::bisect::state_of(&repo).ok().flatten(),
     })
 }
 

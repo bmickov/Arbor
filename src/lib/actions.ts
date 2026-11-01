@@ -172,19 +172,28 @@ export async function checkoutRemote(fullName: string) {
 }
 
 export async function newBranch(from: string | null = null, fromLabel?: string) {
+  // A new branch starting at a local branch can be stacked on it.
+  const local = (b: string | null) => (b && app.refs?.local.some((x) => x.name === b) ? b : null);
+  const base = from ? local(from) : local(app.headBranch);
   const r = await dialog.show({
     title: "New branch",
     body: fromLabel ? `Starts at ${fromLabel}.` : "Starts at the current commit.",
     fields: [
       { key: "name", label: "Name", placeholder: "feature/short-description" },
       { key: "checkout", label: "Check it out", type: "checkbox", checked: true },
+      ...(base ? [{ key: "stack", label: `Stack it on ${base}`, type: "checkbox" as const, checked: false, hint: `Keep it on top of ${base}: when ${base} changes, Restack replays this branch's commits on it.` }] : []),
     ],
     confirm: "Create branch",
     validate: (v) => validBranch(String(v.name ?? "").trim()),
   });
   if (r.button !== "confirm") return;
   const name = String(r.values.name).trim();
-  await app.act("Creating branch", () => api.createBranch(P(), name, from, !!r.values.checkout), { success: `Created ${name}.` });
+  const made = await app.act("Creating branch", async () => {
+    await api.createBranch(P(), name, from, !!r.values.checkout);
+    if (base && r.values.stack) await api.stackSetParent(P(), name, base);
+    return true;
+  }, { success: base && r.values.stack ? `Created ${name}, stacked on ${base}.` : `Created ${name}.` });
+  void made;
 }
 
 export async function renameBranch(name: string) {
@@ -271,6 +280,23 @@ export async function rebaseOnto(branch: string, onto: string) {
   afterMerge(r, "rebase");
 }
 
+/** Stacked-branch items for a branch's menu (from the sidebar's stack list). */
+let stacks: { branch: string; parent: string; behind: number }[] = [];
+export function setStacks(s: typeof stacks) {
+  stacks = s;
+}
+function stackItems(name: string): MenuItem[] {
+  const me = stacks.find((s) => s.branch === name);
+  const kids = stacks.filter((s) => s.parent === name).length;
+  if (!me) return [{ label: "Stack on another branch…", action: () => stackOn(name) }];
+  return [
+    { label: `Restack onto ${me.parent}`, hint: me.behind ? `${me.behind} new` : "up to date", action: () => restack(name) },
+    ...(kids ? [{ label: `Restack ${name} and branches on it`, action: () => restack(name, true) }] : []),
+    { label: "Stack on another branch…", action: () => stackOn(name) },
+    { label: "Remove from stack", action: () => unstack(name) },
+  ];
+}
+
 export function branchMenu(e: MouseEvent, name: string) {
   const head = app.headBranch;
   const b = app.refs?.local.find((x) => x.name === name);
@@ -285,6 +311,7 @@ export function branchMenu(e: MouseEvent, name: string) {
     { separator: true },
     { label: "New branch from here…", action: () => newBranch(name, name) },
     { label: "Check out in a new worktree…", disabled: name === head, action: () => addWorktree(name) },
+    ...stackItems(name),
     { label: "Rename…", action: () => renameBranch(name) },
     { label: "Show history", action: () => showHistory(name) },
     { label: `Compare with ${head ?? "HEAD"}`, disabled: name === head, action: () => compareWith(name) },
@@ -550,6 +577,7 @@ export function commitMenu(e: MouseEvent, c: CommitRow, openRebase: (from: Commi
     { separator: true },
     { label: `Cherry-pick into ${head ?? "HEAD"}`, disabled: c.oid === app.status?.head, action: () => cherryPick(c.oid) },
     { label: "Revert commit", action: () => revertCommit(c.oid) },
+    { label: "Find the bad commit after this…", hint: "bisect", disabled: !!app.status?.bisect || c.oid === app.status?.head, action: () => bisectStart(c) },
     { label: `Reset ${head ?? "HEAD"} to here…`, action: () => resetTo(c) },
     { separator: true },
     { label: "Edit message…", disabled: !canRewrite, action: () => reword(c) },
@@ -802,4 +830,152 @@ export async function updateSubmodules(paths: string[], label: string) {
   await app.act(`Updating ${label}`, (creds) => api.updateSubmodules(P(), paths, creds), {
     success: (n) => `Updated ${n} submodule${n === 1 ? "" : "s"}.`,
   });
+}
+
+// ---- Git-flow ----
+
+export async function flowSetup() {
+  const c = (await api.flowConfig(P())) ?? (await api.flowSuggest(P()));
+  const r = await dialog.show({
+    title: "Set up git-flow",
+    body: "Features and releases branch off the development branch; hotfixes off the production branch. These are git-flow's own settings, so the git-flow command line agrees.",
+    fields: [
+      { key: "main", label: "Production branch", value: c.main },
+      { key: "develop", label: "Development branch", value: c.develop, hint: "Created from the production branch if it doesn't exist." },
+      { key: "feature", label: "Feature prefix", value: c.feature },
+      { key: "release", label: "Release prefix", value: c.release },
+      { key: "hotfix", label: "Hotfix prefix", value: c.hotfix },
+      { key: "versionTag", label: "Version tag prefix", value: c.versionTag, placeholder: "e.g. v (optional)" },
+    ],
+    confirm: "Set up",
+    validate: (v) => (!String(v.main).trim() || !String(v.develop).trim() ? "Name both branches." : null),
+  });
+  if (r.button !== "confirm") return false;
+  const v = r.values;
+  const config = { main: String(v.main).trim(), develop: String(v.develop).trim(), feature: String(v.feature), release: String(v.release), hotfix: String(v.hotfix), versionTag: String(v.versionTag ?? "") };
+  await app.act("Setting up git-flow", () => api.flowInit(P(), config), { success: "Git-flow is set up." });
+  return true;
+}
+
+const FLOW_NOUN: Record<string, string> = { feature: "feature", release: "release", hotfix: "hotfix" };
+
+export async function flowStart(kind: "feature" | "release" | "hotfix") {
+  const c = await api.flowConfig(P());
+  if (!c) return flowSetup();
+  const prefix = kind === "feature" ? c.feature : kind === "release" ? c.release : c.hotfix;
+  const name = await dialog.prompt(`Start ${FLOW_NOUN[kind]}`, kind === "feature" ? "Feature name" : "Version", {
+    confirm: `Start ${FLOW_NOUN[kind]}`,
+    placeholder: kind === "feature" ? "login-form" : "1.4.0",
+    body: `Creates ${prefix}… from ${kind === "hotfix" ? c.main : c.develop} and checks it out.`,
+    validate: (v) => (!v.trim() ? "Give it a name." : validBranch(prefix + v.trim())),
+  });
+  if (!name) return;
+  await app.act(`Starting ${FLOW_NOUN[kind]}`, () => api.flowStart(P(), kind, name), { success: (b) => `Started ${b}.` });
+}
+
+export async function flowFinish(branch: string) {
+  const c = await api.flowConfig(P());
+  if (!c) return;
+  const kind = branch.startsWith(c.feature) ? "feature" : branch.startsWith(c.release) ? "release" : "hotfix";
+  const name = branch.slice((kind === "feature" ? c.feature : kind === "release" ? c.release : c.hotfix).length);
+  const tagged = kind !== "feature";
+  const r = await dialog.show({
+    title: `Finish ${branch}`,
+    body: tagged
+      ? `Merges ${branch} into ${c.main}, tags it ${c.versionTag}${name}, and merges ${c.main} back into ${c.develop}.`
+      : `Merges ${branch} into ${c.develop} (with a merge commit).`,
+    fields: [
+      ...(tagged ? [{ key: "tag", label: "Tag message", value: `${kind === "release" ? "Release" : "Hotfix"} ${name}` }] : []),
+      { key: "keep", label: "Keep the branch afterwards", type: "checkbox" as const, checked: false },
+    ],
+    confirm: "Finish",
+  });
+  if (r.button !== "confirm") return;
+  const out = await app.act(`Finishing ${branch}`, () => api.flowFinish(P(), branch, tagged ? String(r.values.tag ?? "") : null, !!r.values.keep), {
+    success: (o) => (o.result === "finished" ? `Finished ${branch}${o.tag ? `, tagged ${o.tag}` : ""}.` : null),
+  });
+  if (out?.result === "conflicts") {
+    app.view = "changes";
+    toasts.push("error", `Merging into ${out.mergingInto} stopped on ${out.conflicts.length} conflicted file${out.conflicts.length === 1 ? "" : "s"}. Resolve them and commit, then finish ${branch} again.`);
+  }
+}
+
+export async function flowMenu(e: MouseEvent) {
+  const c = await api.flowConfig(P());
+  if (!c) {
+    menu.fromEvent(e, [{ label: "Set up git-flow…", action: () => flowSetup() }], "Git-flow");
+    return;
+  }
+  const open = (app.refs?.local ?? []).map((b) => b.name).filter((n) => n.startsWith(c.feature) || n.startsWith(c.release) || n.startsWith(c.hotfix));
+  const head = app.headBranch;
+  menu.fromEvent(e, [
+    { label: "Start feature…", action: () => flowStart("feature") },
+    { label: "Start release…", action: () => flowStart("release") },
+    { label: "Start hotfix…", action: () => flowStart("hotfix") },
+    ...(open.length ? [{ separator: true } as MenuItem] : []),
+    ...open.map((b) => ({ label: `Finish ${b}…`, hint: b === head ? "current" : undefined, action: () => flowFinish(b) })),
+    { separator: true },
+    { label: "Git-flow settings…", action: () => flowSetup() },
+  ], "Git-flow");
+}
+
+// ---- Stacked branches ----
+
+export async function stackOn(branch: string) {
+  const choices = (app.refs?.local ?? []).map((b) => b.name).filter((n) => n !== branch);
+  const r = await dialog.show({
+    title: `Stack ${branch} on…`,
+    body: `When that branch changes, "Restack" replays ${branch}'s own commits on top of it.`,
+    fields: [{ key: "parent", label: "Parent branch", placeholder: choices.slice(0, 3).join(", "), value: app.status?.branch !== branch ? app.status?.branch ?? "" : "" }],
+    confirm: "Stack",
+    validate: (v) => (choices.includes(String(v.parent).trim()) ? null : "Pick one of your local branches."),
+  });
+  if (r.button !== "confirm") return;
+  const parent = String(r.values.parent).trim();
+  await app.act("Stacking", () => api.stackSetParent(P(), branch, parent), { success: `${branch} is stacked on ${parent}.` });
+}
+
+export async function unstack(branch: string) {
+  await app.act("Unstacking", () => api.stackSetParent(P(), branch, null), { success: `${branch} isn't stacked any more.` });
+}
+
+/** Restack a branch, then the branches stacked on it, stopping at a conflict. */
+export async function restack(branch: string, withChildren = false) {
+  const chain = withChildren ? [branch, ...(await api.stackDescendants(P(), branch))] : [branch];
+  for (const b of chain) {
+    const r = await app.act(`Restacking ${b}`, () => api.stackRestack(P(), b));
+    if (!r) return;
+    if (r.result === "conflicts") {
+      app.view = "changes";
+      const rest = chain.slice(chain.indexOf(b) + 1);
+      toasts.push("error", `Restacking ${b} stopped on a conflict. Resolve it and Continue${rest.length ? `, then restack ${rest.join(", ")}` : ""}.`);
+      return;
+    }
+  }
+  toasts.push("success", chain.length > 1 ? `Restacked ${chain.length} branches.` : `Restacked ${branch}.`);
+}
+
+// ---- Bisect ----
+
+export async function bisectStart(good: { oid: string; short: string; summary: string }) {
+  const head = app.status?.head?.slice(0, 7);
+  const ok = await dialog.show({
+    title: "Find the commit that broke it",
+    body: `Bisect checks out commits between ${good.short} (works) and ${head} (broken, what's checked out now). Test each one and mark it good or bad; it narrows down to the first bad commit in a few steps.`,
+    items: [{ text: `Good: ${good.short} ${good.summary}` }, { text: `Bad: ${head} ${app.status?.headSummary ?? ""}` }],
+    confirm: "Start bisect",
+  });
+  if (ok.button !== "confirm") return;
+  await app.act("Starting bisect", () => api.bisectStart(P(), null, good.oid), { success: (s) => `Testing ${s.current?.slice(0, 7)} · about ${s.steps} step${s.steps === 1 ? "" : "s"} left.` });
+  app.view = "history";
+}
+
+export async function bisectMark(verdict: "good" | "bad" | "skip") {
+  await app.act(`Marking ${verdict}`, () => api.bisectMark(P(), verdict), {
+    success: (s) => (s.found ? `Found it: ${s.found.slice(0, 7)} is the first bad commit.` : `Now testing ${s.current?.slice(0, 7)}.`),
+  });
+}
+
+export async function bisectStop() {
+  await app.act("Stopping bisect", () => api.bisectReset(P()), { success: "Bisect stopped; back where you started." });
 }

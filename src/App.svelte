@@ -7,6 +7,7 @@
   import BranchSwitcher from "./components/BranchSwitcher.svelte";
   import QuickActions from "./components/QuickActions.svelte";
   import BranchesReview from "./components/BranchesReview.svelte";
+  import BisectBar from "./components/BisectBar.svelte";
   import BrowseView from "./components/BrowseView.svelte";
   import CompareView from "./components/CompareView.svelte";
   import ReflogView from "./components/ReflogView.svelte";
@@ -109,6 +110,8 @@
         <div class="resize" role="separator" aria-orientation="vertical" title="Drag to resize · double-click to reset" onpointerdown={resizeSide} ondblclick={() => (app.layout.sideW = 240)}></div>
       {/if}
       <main>
+        <BisectBar />
+        <div class="view">
         <!-- Remount per tab so each view restores that tab's scroll and selection. -->
         {#key app.repo.path}
           {#if app.view === "changes"}
@@ -127,6 +130,7 @@
             <StashView />
           {/if}
         {/key}
+        </div>
       </main>
     </div>
     {#if app.fileHistoryPath}
@@ -159,5 +163,6 @@
   aside { grid-area: side; min-height: 0; overflow: hidden; }
   .resize { grid-area: resize; background: var(--line); cursor: col-resize; position: relative; }
   .resize::after { content: ""; position: absolute; inset: 0 -3px; }
-  main { grid-area: main; min-width: 0; min-height: 0; overflow: hidden; }
+  main { grid-area: main; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .view { flex: 1; min-height: 0; position: relative; }
 </style>
