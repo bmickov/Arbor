@@ -2,7 +2,10 @@
   import type { FileEntry } from "../lib/api";
   import { draggable, dropTarget, type Payload } from "../lib/drag.svelte";
   import { basename, dirname, STATUS_GLYPH } from "../lib/format";
+  import { treeRows, under } from "../lib/filetree";
+  import { app } from "../lib/state.svelte";
   import Icon from "./Icon.svelte";
+  import { SvelteSet } from "svelte/reactivity";
 
   let {
     files,
@@ -30,37 +33,63 @@
     };
   }
 
-  function key(e: KeyboardEvent, i: number) {
+  // Flat list, or a folder tree (Preferences / the list's own toggle).
+  const collapsed = new SvelteSet<string>();
+  const tree = $derived(app.settings.fileTree);
+  const rows = $derived(tree ? treeRows(files, (f) => f.path, collapsed) : files.map((f) => ({ kind: "file" as const, item: f, name: basename(f.path), depth: 0 })));
+  const visible = $derived(rows.filter((r) => r.kind === "file").map((r) => (r as { item: FileEntry }).item));
+
+  function key(e: KeyboardEvent, f: FileEntry) {
+    const i = visible.indexOf(f);
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      const next = files[i + (e.key === "ArrowDown" ? 1 : -1)];
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      const next = visible[i + step];
       if (next) {
         onselect(next.path, e);
-        (e.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLElement>(".file")[i + (e.key === "ArrowDown" ? 1 : -1)]?.focus();
+        const all = (e.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLElement>(".file");
+        all?.[i + step]?.focus();
       }
     } else if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
-      ontoggle(selected.has(files[i].path) ? [...selected] : [files[i].path]);
+      ontoggle(selected.has(f.path) ? [...selected] : [f.path]);
     }
   }
 </script>
 
 <div class="files"
   use:dropTarget={{ accepts: (p) => p.kind === "files" && p.from !== area, drop: (p) => p.kind === "files" && ondropfiles(p.paths) }}>
-  {#each files as f, i (f.path)}
+  {#each rows as row (row.kind === "dir" ? `d:${row.path}` : row.item.path)}
+    {#if row.kind === "dir"}
+      <div class="folder" style:padding-left="{8 + row.depth * 14}px" role="treeitem" aria-expanded={row.open} aria-selected="false" tabindex="-1"
+        onclick={() => (collapsed.has(row.path) ? collapsed.delete(row.path) : collapsed.add(row.path))}
+        onkeydown={(e) => e.key === "Enter" && (collapsed.has(row.path) ? collapsed.delete(row.path) : collapsed.add(row.path))}>
+        <span class="chev" class:open={row.open}><Icon name="chevron" size={11} /></span>
+        <Icon name="folder" size={13} />
+        <span class="name">{row.name}</span>
+        <span class="cnt">{row.count}</span>
+        <button class="toggle" title={area === "staged" ? "Unstage folder" : "Stage folder"} aria-label="{area === 'staged' ? 'Unstage' : 'Stage'} {row.path}"
+          onclick={(e) => { e.stopPropagation(); ontoggle(under(files, (f) => f.path, row.path)); }}>
+          <Icon name={area === "staged" ? "minus" : "plus"} size={13} />
+        </button>
+      </div>
+    {:else}
+    {@const f = row.item}
     <div class="file" class:sel={selected.has(f.path)} role="option" aria-selected={selected.has(f.path)} tabindex="0"
+      style:padding-left={tree ? `${8 + row.depth * 14 + 14}px` : null}
       title={f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}
       onclick={(e) => onselect(f.path, e)}
-      onkeydown={(e) => key(e, i)}
+      onkeydown={(e) => key(e, f)}
       oncontextmenu={(e) => oncontext(e, f.path)}
       use:draggable={() => dragData(f)}>
       <span class="st {f.status}">{STATUS_GLYPH[f.status]}</span>
-      <span class="name"><b>{basename(f.path)}</b> <span class="dir">{dirname(f.path)}</span></span>
+      <span class="name"><b>{row.name}</b>{#if !tree}<span class="dir">{dirname(f.path)}</span>{/if}</span>
       <button class="toggle" title={area === "staged" ? "Unstage" : "Stage"} aria-label={area === "staged" ? `Unstage ${f.path}` : `Stage ${f.path}`}
         onclick={(e) => { e.stopPropagation(); ontoggle(selected.has(f.path) ? [...selected] : [f.path]); }}>
         <Icon name={area === "staged" ? "minus" : "plus"} size={13} />
       </button>
     </div>
+    {/if}
   {:else}
     <div class="none faint">{area === "staged" ? "Drag files here, or press + on a change, to stage it" : "Nothing to stage"}</div>
   {/each}
@@ -86,7 +115,7 @@
   .st.renamed { color: var(--lane-3); background: color-mix(in srgb, var(--lane-3) 18%, transparent); }
   .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .name b { font-weight: 600; }
-  .dir { color: var(--ink-3); font-size: calc(var(--fs) * 12); }
+  .dir { margin-left: 0.4em; color: var(--ink-3); font-size: calc(var(--fs) * 12); }
   .toggle {
     display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; flex: none;
     color: var(--ink-2); opacity: 0;
@@ -94,4 +123,11 @@
   .file:hover .toggle, .file.sel .toggle, .file:focus-within .toggle { opacity: 1; }
   .toggle:hover { background: var(--accent); color: var(--accent-ink); }
   .none { padding: 6px 8px; font-size: calc(var(--fs) * 12); }
+  .folder { display: flex; align-items: center; gap: 6px; height: 24px; padding-right: 4px; border-radius: 5px; color: var(--ink-2); cursor: default; }
+  .folder:hover { background: var(--surface-2); }
+  .folder:hover .toggle { opacity: 1; }
+  .folder .name { font-size: calc(var(--fs) * 12.5); }
+  .chev { display: inline-grid; transition: rotate 0.1s; color: var(--ink-3); }
+  .chev.open { rotate: 90deg; }
+  .cnt { font-size: calc(var(--fs) * 11); color: var(--ink-3); }
 </style>

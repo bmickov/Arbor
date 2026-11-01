@@ -108,6 +108,14 @@ export interface Settings {
   codeFollowsUi: boolean;
   /** Colour code by language in diffs and the file viewer. */
   syntax: boolean;
+  /** Highlight the changed words within changed lines. */
+  wordDiff: boolean;
+  /** How changed images are compared: side, swipe, onion or difference. */
+  imageMode: string;
+  /** Show changed files as a folder tree instead of a flat list. */
+  fileTree: boolean;
+  /** Issue keys in commit messages that become links: a regex and a URL ($0 = the match, $1… = groups). */
+  issueLinks: { pattern: string; url: string }[];
   /** External diff and merge tools: "" none, "git" (git's own settings), a preset id, or "custom". */
   diffTool: string;
   mergeTool: string;
@@ -132,7 +140,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false,
   theme: "system", uiFont: "atkinson", uiSize: 13, codeFont: "commit", codeSize: 12, shortcuts: {},
-  restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10, syntax: true,
+  restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10, syntax: true, wordDiff: true, imageMode: "side", fileTree: false, issueLinks: [],
   diffTool: "", mergeTool: "", diffCommand: "", mergeCommand: "", pinned: {},
   commitTemplates: [], profiles: [],
 };

@@ -7,6 +7,7 @@
   import { menu } from "../lib/ui.svelte";
   import CommitDetail from "./CommitDetail.svelte";
   import GraphCell from "./GraphCell.svelte";
+  import Linked from "./Linked.svelte";
   import Icon from "./Icon.svelte";
   import RebaseEditor from "./RebaseEditor.svelte";
 
@@ -270,7 +271,7 @@
                 {:else if bis.skipped.includes(row.oid)}<span class="bmark" title="Bisect: skipped">skipped</span>
                 {:else if bis.current === row.oid && !bis.found}<span class="bmark test" title="Bisect: being tested">testing</span>{/if}
               {/if}
-              <span class="summary" class:merge={row.parents.length > 1}>{row.summary}</span>
+              <span class="summary" class:merge={row.parents.length > 1}><Linked text={row.summary} /></span>
             </div>
             {#if canMove && !filtering}<span class="grip" title="Drag to reorder" class:pushed={pushed.has(row.oid)}><Icon name="grip" size={12} /></span>{/if}
             <span class="avatar" style:--h={authorHue(row.email)} title="{row.author} <{row.email}>">{initials(row.author)}</span>

@@ -75,6 +75,16 @@ contains none of their code or artwork.
 **History**
 - Commit graph for all branches, the current branch, or any single branch
 - Commit details with per-file diffs, unified or side by side, and image previews
+- **Changed words** are highlighted inside changed lines, so a one-character
+  edit in a long line is easy to spot
+- **Image diffs**: side by side, a swipe slider, onion skin (fade between
+  them) or the pixel difference, with the image sizes
+- Changed files as a **folder tree** or a flat list (the folder button above
+  the list), in the working copy and in commit details; stage a whole folder
+- **Issue links**: issue keys in commit messages (like `ENR-194`) link to
+  your tracker; set the pattern in Preferences → Commits (Jira and Linear
+  presets). `#123` links to the issue automatically for GitHub, GitLab and
+  Codeberg remotes
 - **Syntax highlighting** in diffs, the file browser and the conflict wizard,
   for about 50 languages (turn it off in Preferences → Diffs & Git)
 - Signature checks: signed commits show **Verified** when the key is trusted
@@ -248,9 +258,11 @@ Open with **Ctrl+,** or the sliders button.
   difference you set; turn off "Scale with interface text" to keep it fixed.
   History rows and the graph scale with the interface size
 - **Diffs & Git:** context lines, when to ask before showing large diffs,
-  syntax highlighting, external diff and merge tools, ignore whitespace, side-by-side history diffs, how often to fetch
+  syntax highlighting, changed-word highlighting, external diff and merge
+  tools, ignore whitespace, side-by-side history diffs, how often to fetch
   automatically, pull with rebase
-- **Commits:** commit templates, author profiles, and commit signing
+- **Commits:** commit templates, author profiles, issue-tracker links, and
+  commit signing
 - **Keyboard:** every shortcut below can be changed. Click it and press new keys;
   if another action used them, it's unassigned and you're told which
 

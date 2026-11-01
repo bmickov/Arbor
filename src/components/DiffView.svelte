@@ -2,8 +2,10 @@
   import { api, type DiffLine, type FileDiff, type Selection } from "../lib/api";
   import { IMAGE_EXT } from "../lib/format";
   import { Highlighter, languageFor } from "../lib/highlight";
+  import { markRanges, wordRanges, type Range } from "../lib/worddiff";
   import { app } from "../lib/state.svelte";
   import Icon from "./Icon.svelte";
+  import ImageDiff from "./ImageDiff.svelte";
 
   type Mode = "unstaged" | "staged" | "readonly";
   type Act = "stage" | "unstage" | "discard";
@@ -146,8 +148,43 @@
   const lang = $derived(app.settings.syntax && diff && !diff.binary ? languageFor(diff.path) : null);
   const sides = $derived.by(() => {
     void diff;
-    return { lang, cache: new Map<string, Side>() };
+    return { lang, words: app.settings.wordDiff, cache: new Map<string, Side>(), wd: new Map<number, Map<number, Range[]>>() };
   });
+
+  // Word-level changes: each removed line is compared with the added line
+  // in the same position of the change that follows it.
+  function wordsOf(h: number): Map<number, Range[]> {
+    let m = sides.wd.get(h);
+    if (m) return m;
+    m = new Map();
+    const lines = diff!.hunks[h].lines;
+    let i = 0;
+    while (i < lines.length) {
+      if (lines[i].origin !== "-") { i++; continue; }
+      const dels: number[] = [], adds: number[] = [];
+      while (i < lines.length && lines[i].origin === "-") dels.push(i++);
+      while (i < lines.length && lines[i].origin === "+") adds.push(i++);
+      // Big blocks are rewrites, not edits.
+      if (dels.length > 60 || adds.length > 60) continue;
+      for (let k = 0; k < Math.min(dels.length, adds.length); k++) {
+        const r = wordRanges(lines[dels[k]].content, lines[adds[k]].content);
+        if (r) {
+          m.set(dels[k], r.a);
+          m.set(adds[k], r.b);
+        }
+      }
+    }
+    sides.wd.set(h, m);
+    return m;
+  }
+
+  /** The line's HTML: syntax colours plus changed-word marks (null: plain text). */
+  function render(h: number, l: number): string | null {
+    const html = hl(h, l);
+    if (!sides.words || l < 0 || diff!.hunks[h].lines[l].origin === " ") return html;
+    const r = wordsOf(h).get(l);
+    return r ? markRanges(html, diff!.hunks[h].lines[l].content, r) : html;
+  }
   function side(h: number, old: boolean): Side {
     const k = `${h}${old ? "o" : "n"}`;
     let sd = sides.cache.get(k);
@@ -278,7 +315,7 @@
 {#snippet line(h: number, l: number)}
   {@const ln = diff!.hunks[h].lines[l]}
   {@const sel = selected.has(key(h, l))}
-  {@const html = hl(h, l)}
+  {@const html = render(h, l)}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="line {ln.origin === '+' ? 'add' : ln.origin === '-' ? 'del' : ''}" class:sel
     onmousedown={(e) => isChange(ln) && down(e, h, l)}
@@ -291,7 +328,7 @@
 {/snippet}
 
 {#snippet sideCode(h: number, ln: DiffLine | null, i: number)}
-  {@const html = ln ? hl(h, i) : null}
+  {@const html = ln ? render(h, i) : null}
   {#if html != null}{@html html}{:else}{ln?.content ?? ""}{/if}
 {/snippet}
 
@@ -312,10 +349,7 @@
     <div class="empty"><div><strong>No changes</strong>Select a file to see its changes.</div></div>
   {:else if diff.binary}
     {#if images}
-      <div class="images">
-        <figure><figcaption>Before</figcaption>{#if images.old}<img src={images.old} alt="Before" />{:else}<span class="faint">None</span>{/if}</figure>
-        <figure><figcaption>After</figcaption>{#if images.new}<img src={images.new} alt="After" />{:else}<span class="faint">Deleted</span>{/if}</figure>
-      </div>
+      <ImageDiff before={images.old} after={images.new} />
     {:else}
       <div class="empty"><div><strong>Binary file</strong>{diff.status === "added" || diff.status === "untracked" ? "Added" : diff.status === "deleted" ? "Deleted" : "Changed"} — no text diff to show.</div></div>
     {/if}
@@ -440,13 +474,6 @@
   table.split td.del { background: var(--del-bg); }
   table.split td.blank { background: repeating-linear-gradient(135deg, transparent 0 5px, var(--line-soft) 5px 6px); }
 
-  .images { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px; font-family: var(--font-ui); }
-  figure { margin: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; }
-  figcaption { color: var(--ink-3); font-size: calc(var(--fs) * 12); font-weight: 600; }
-  figure img {
-    max-width: 100%; max-height: 60vh; border: 1px solid var(--line);
-    background: repeating-conic-gradient(var(--surface-3) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px;
-  }
   .tail { height: 60px; }
 
   /* Virtualized rendering for big diffs: fixed row heights. */
@@ -491,4 +518,7 @@
     animation: pop 0.12s ease-out;
   }
   @keyframes pop { from { translate: -50% 6px; opacity: 0; } }
+  .code :global(mark.wd) { background: none; color: inherit; border-radius: 3px; }
+  .line.del .code :global(mark.wd), .code.del :global(mark.wd) { background: var(--del-bg-strong); box-shadow: 0 0 0 1px var(--del-bg-strong); }
+  .line.add .code :global(mark.wd), .code.add :global(mark.wd) { background: var(--add-bg-strong); box-shadow: 0 0 0 1px var(--add-bg-strong); }
 </style>

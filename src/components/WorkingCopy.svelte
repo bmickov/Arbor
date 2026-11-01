@@ -218,6 +218,10 @@
         <header>
           <h3>Unstaged</h3><span class="n">{st?.unstaged.length ?? 0}</span>
           <span class="sp"></span>
+          <button class="viewtoggle" onclick={() => { app.settings.fileTree = !app.settings.fileTree; app.saveSettings(); }}
+            title={app.settings.fileTree ? "Show as a list" : "Show as a folder tree"} aria-label={app.settings.fileTree ? "Show as a list" : "Show as a folder tree"}>
+            <Icon name={app.settings.fileTree ? "file" : "folder"} size={13} />
+          </button>
           {#if st?.unstaged.length}<button class="link" onclick={() => app.act("Staging", () => api.stageAll(app.path))}>Stage all</button>{/if}
         </header>
         <FileList files={st?.unstaged ?? []} area="unstaged" selected={app.selectedFile?.area === "unstaged" ? selUnstaged : new Set()}
@@ -302,6 +306,8 @@
     border-radius: 8px; background: var(--warn-soft); color: var(--ink);
   }
   .banner :global(svg) { color: var(--warn); flex: none; margin-top: 1px; }
+  .viewtoggle { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 4px; color: var(--ink-3); margin-right: 4px; }
+  .viewtoggle:hover { background: var(--surface-3); color: var(--ink); }
   .banner div.rbtns { flex-direction: row; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .banner div { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: calc(var(--fs) * 12); }
   section header { display: flex; align-items: baseline; gap: 6px; padding: 12px 14px 4px; }

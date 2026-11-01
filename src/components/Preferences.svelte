@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, type ToolInfo } from "../lib/api";
+  import { webUrl } from "../lib/issues";
   import { keyParts, keyText } from "../lib/platform";
   import { app, CODE_SIZES, UI_SIZES } from "../lib/state.svelte";
   import {
@@ -20,6 +21,11 @@
 
   const s = app.settings;
   let tools = $state.raw<ToolInfo[]>([]);
+  const autoNote = $derived.by(() => {
+    const origin = app.refs?.remotes.find((r) => r.name === "origin");
+    const web = origin ? webUrl(origin.url) : null;
+    return web && /github\.com|gitlab\.|codeberg\.org|gitea/.test(web) ? `#123 already links to ${web}/issues in this repository.` : "";
+  });
   api.toolsList().then((t) => (tools = t)).catch(() => {});
   const save = () => app.saveSettings();
 
@@ -273,6 +279,10 @@
             </div>
             <p class="hint">Big diffs (often generated files or lock files) show a "Show diff" button instead of loading right away.</p>
             <label class="toggle">
+              <input type="checkbox" checked={s.wordDiff} onchange={() => { s.wordDiff = !s.wordDiff; save(); }} />
+              <span><b>Highlight changed words</b><small>Within a changed line, mark exactly which words were added or removed.</small></span>
+            </label>
+            <label class="toggle">
               <input type="checkbox" checked={s.syntax} onchange={() => { s.syntax = !s.syntax; save(); }} />
               <span><b>Syntax highlighting</b><small>Colour keywords, strings and comments in diffs and the file browser, for about 50 languages.</small></span>
             </label>
@@ -355,6 +365,22 @@
               </div>
             {/each}
             <button class="btn small" onclick={() => { s.profiles.push({ name: "", email: "" }); save(); }}><Icon name="plus" size={13} /> Add profile</button>
+          </section>
+          <section>
+            <h4>Issue tracker links</h4>
+            <p class="hint first">Issue keys in commit messages become links. Use a regular expression and an address; <code>$0</code> is the whole match, <code>$1</code> the first group. {autoNote}</p>
+            {#each s.issueLinks as r, i}
+              <div class="prof">
+                <input class="mono" aria-label="Pattern" placeholder="[A-Z][A-Z0-9]+-\d+" bind:value={r.pattern} oninput={save} spellcheck="false" />
+                <input class="mono" aria-label="Link" placeholder="https://example.atlassian.net/browse/$0" bind:value={r.url} oninput={save} spellcheck="false" />
+                <button class="btn small ghost danger" onclick={() => { s.issueLinks.splice(i, 1); save(); }} aria-label="Remove link rule"><Icon name="discard" size={13} /></button>
+              </div>
+            {/each}
+            <div class="presets">
+              <button class="btn small" onclick={() => { s.issueLinks.push({ pattern: "\\b[A-Z][A-Z0-9]+-\\d+\\b", url: "https://YOUR-SITE.atlassian.net/browse/$0" }); save(); }}><Icon name="plus" size={13} /> Jira keys (ABC-123)</button>
+              <button class="btn small" onclick={() => { s.issueLinks.push({ pattern: "\\b[A-Z]{2,}-\\d+\\b", url: "https://linear.app/YOUR-TEAM/issue/$0" }); save(); }}><Icon name="plus" size={13} /> Linear</button>
+              <button class="btn small" onclick={() => { s.issueLinks.push({ pattern: "", url: "" }); save(); }}><Icon name="plus" size={13} /> Custom</button>
+            </div>
           </section>
           <SigningPrefs />
         {:else}
@@ -475,6 +501,7 @@
   .label { width: 110px; color: var(--ink-2); flex: none; }
   .row select { width: auto; }
   .row input.mono { flex: 1; min-width: 0; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
   .seg { display: inline-flex; background: var(--surface-3); border-radius: 8px; padding: 2px; flex-wrap: wrap; }
   .seg button { padding: 4px 12px; border-radius: 6px; font-weight: 600; color: var(--ink-2); }
   .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
