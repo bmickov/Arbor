@@ -13,6 +13,9 @@
   import DiffView from "./DiffView.svelte";
   import Icon from "./Icon.svelte";
   import Splitter from "./Splitter.svelte";
+  import Linked from "./Linked.svelte";
+  import { treeRows } from "../lib/filetree";
+  import { SvelteSet } from "svelte/reactivity";
 
   let { oid, header }: { oid: string; header?: Snippet } = $props();
 
@@ -87,6 +90,10 @@
     ], basename(path));
   }
 
+  const closedDirs = new SvelteSet<string>();
+  const fileRows = $derived(
+    !info ? [] : app.settings.fileTree ? treeRows(info.files, (f) => f.path, closedDirs) : info.files.map((f) => ({ kind: "file" as const, item: f, name: basename(f.path), depth: 0 })),
+  );
   const totals = $derived(info ? info.files.reduce((a, f) => [a[0] + f.additions, a[1] + f.deletions], [0, 0]) : [0, 0]);
   const sameCommitter = $derived(info && info.author.email === info.committer.email && info.author.name === info.committer.name);
 </script>
@@ -99,8 +106,8 @@
     <div class="top" class:sized={topH != null} style:height={topH != null ? `${topH}px` : null}>
     <div class="head">
       {#if header}{@render header()}{/if}
-      <h2 class="selectable">{info.summary}</h2>
-      {#if info.body}<pre class="body selectable">{info.body}</pre>{/if}
+      <h2 class="selectable"><Linked text={info.summary} /></h2>
+      {#if info.body}<pre class="body selectable"><Linked text={info.body} /></pre>{/if}
       <div class="meta">
         <span class="avatar" style:--h={authorHue(info.author.email)}>{initials(info.author.name)}</span>
         <div class="who">
@@ -124,13 +131,30 @@
     </div>
 
     <div class="files">
-      <div class="fsum faint">{info.files.length} file{info.files.length === 1 ? "" : "s"} changed · <span class="plus">+{totals[0]}</span> <span class="minus">−{totals[1]}</span></div>
-      {#each info.files as f (f.path)}
-        <button class="file" class:sel={file === f.path} onclick={() => (file = f.path)} oncontextmenu={(e) => fileMenu(e, f.path)} title={f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}>
-          <span class="st {f.status}">{STATUS_GLYPH[f.status]}</span>
-          <span class="name"><b>{basename(f.path)}</b> <span class="dir">{dirname(f.path)}</span></span>
-          {#if !f.binary}<span class="counts mono"><span class="plus">+{f.additions}</span> <span class="minus">−{f.deletions}</span></span>{/if}
+      <div class="fsum faint">
+        <span>{info.files.length} file{info.files.length === 1 ? "" : "s"} changed · <span class="plus">+{totals[0]}</span> <span class="minus">−{totals[1]}</span></span>
+        <button class="viewtoggle" onclick={() => { app.settings.fileTree = !app.settings.fileTree; app.saveSettings(); }}
+          title={app.settings.fileTree ? "Show as a list" : "Show as a folder tree"} aria-label={app.settings.fileTree ? "Show as a list" : "Show as a folder tree"}>
+          <Icon name={app.settings.fileTree ? "file" : "folder"} size={12} />
         </button>
+      </div>
+      {#each fileRows as row (row.kind === "dir" ? `d:${row.path}` : row.item.path)}
+        {#if row.kind === "dir"}
+          <button class="file dirrow" style:padding-left="{8 + row.depth * 14}px" onclick={() => (closedDirs.has(row.path) ? closedDirs.delete(row.path) : closedDirs.add(row.path))}>
+            <span class="chev" class:open={row.open}><Icon name="chevron" size={11} /></span>
+            <Icon name="folder" size={13} />
+            <span class="name">{row.name}</span>
+            <span class="faint">{row.count}</span>
+          </button>
+        {:else}
+          {@const f = row.item}
+          <button class="file" class:sel={file === f.path} style:padding-left={app.settings.fileTree ? `${22 + row.depth * 14}px` : null}
+            onclick={() => (file = f.path)} oncontextmenu={(e) => fileMenu(e, f.path)} title={f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}>
+            <span class="st {f.status}">{STATUS_GLYPH[f.status]}</span>
+            <span class="name"><b>{row.name}</b>{#if !app.settings.fileTree}<span class="dir">{dirname(f.path)}</span>{/if}</span>
+            {#if !f.binary}<span class="counts mono"><span class="plus">+{f.additions}</span> <span class="minus">−{f.deletions}</span></span>{/if}
+          </button>
+        {/if}
       {/each}
     </div>
     </div>
@@ -171,7 +195,12 @@
   .head { flex: none; }
   .files { max-height: 34vh; overflow-y: auto; padding: 4px 6px 6px; flex: none; }
   .top.sized .files { max-height: none; flex: 1 0 60px; }
-  .fsum { font-size: calc(var(--fs) * 12); padding: 4px 8px 4px; }
+  .fsum { font-size: calc(var(--fs) * 12); padding: 4px 8px 4px; display: flex; align-items: center; justify-content: space-between; }
+  .viewtoggle { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 4px; color: var(--ink-3); }
+  .viewtoggle:hover { background: var(--surface-3); color: var(--ink); }
+  .dirrow { color: var(--ink-2); gap: 6px; }
+  .chev { display: inline-grid; transition: rotate 0.1s; color: var(--ink-3); }
+  .chev.open { rotate: 90deg; }
   .file { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; padding: 0 8px; border-radius: 5px; text-align: left; }
   .file:hover { background: var(--surface-2); }
   .file.sel { background: var(--sel); }
@@ -185,7 +214,7 @@
   .st.renamed { color: var(--lane-3); background: color-mix(in srgb, var(--lane-3) 18%, transparent); }
   .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .name b { font-weight: 600; }
-  .dir { color: var(--ink-3); font-size: calc(var(--fs) * 12); }
+  .dir { margin-left: 0.4em; color: var(--ink-3); font-size: calc(var(--fs) * 12); }
   .counts { font-size: calc(var(--cs) * 11); white-space: nowrap; }
   .plus { color: var(--add-ink); }
   .minus { color: var(--del-ink); }
