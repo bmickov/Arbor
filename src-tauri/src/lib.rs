@@ -387,6 +387,56 @@ async fn abort_merge(repo: String) -> R<()> {
 async fn rebase(repo: String, onto: String) -> R<git::rebase::RebaseOutcome> {
     blocking(move || git::rebase::rebase(&repo, &onto)).await
 }
+// ------------------------------------------------------------------ git-flow, stacks, bisect
+#[tauri::command]
+async fn flow_config(repo: String) -> R<Option<git::gitflow::FlowConfig>> {
+    blocking(move || git::gitflow::config(&repo)).await
+}
+#[tauri::command]
+async fn flow_suggest(repo: String) -> R<git::gitflow::FlowConfig> {
+    blocking(move || git::gitflow::suggest(&repo)).await
+}
+#[tauri::command]
+async fn flow_init(repo: String, config: git::gitflow::FlowConfig) -> R<()> {
+    blocking(move || git::gitflow::init(&repo, &config)).await
+}
+#[tauri::command]
+async fn flow_start(repo: String, kind: String, name: String) -> R<String> {
+    blocking(move || git::gitflow::start(&repo, &kind, &name)).await
+}
+#[tauri::command]
+async fn flow_finish(repo: String, branch: String, tag_message: Option<String>, keep_branch: bool) -> R<git::gitflow::FinishOutcome> {
+    blocking(move || git::gitflow::finish(&repo, &branch, tag_message.as_deref(), keep_branch)).await
+}
+#[tauri::command]
+async fn stack_list(repo: String) -> R<Vec<git::stack::Stacked>> {
+    blocking(move || git::stack::list(&repo)).await
+}
+#[tauri::command]
+async fn stack_set_parent(repo: String, branch: String, parent: Option<String>) -> R<()> {
+    blocking(move || git::stack::set_parent(&repo, &branch, parent.as_deref())).await
+}
+#[tauri::command]
+async fn stack_restack(repo: String, branch: String) -> R<git::rebase::RebaseOutcome> {
+    blocking(move || git::stack::restack(&repo, &branch)).await
+}
+#[tauri::command]
+async fn stack_descendants(repo: String, branch: String) -> R<Vec<String>> {
+    blocking(move || git::stack::descendants(&repo, &branch)).await
+}
+#[tauri::command]
+async fn bisect_start(repo: String, bad: Option<String>, good: String) -> R<git::bisect::BisectState> {
+    blocking(move || git::bisect::start(&repo, bad.as_deref(), &good)).await
+}
+#[tauri::command]
+async fn bisect_mark(repo: String, verdict: String, id: Option<String>) -> R<git::bisect::BisectState> {
+    blocking(move || git::bisect::mark(&repo, &verdict, id.as_deref())).await
+}
+#[tauri::command]
+async fn bisect_reset(repo: String) -> R<()> {
+    blocking(move || git::bisect::reset(&repo)).await
+}
+
 #[tauri::command]
 async fn rebase_continue(repo: String) -> R<git::rebase::RebaseOutcome> {
     blocking(move || git::rebase::continue_rebase(&repo)).await
@@ -552,7 +602,7 @@ pub fn run() {
             library_get, library_save, library_add_many, scan_folder, repo_summaries,
             get_status, diff_unstaged, diff_staged, file_at,
             stage_files, unstage_files, stage_all, unstage_all, discard_files,
-            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, rebase_continue, rebase_skip, rebase_abort, search_log, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
+            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, rebase_continue, rebase_skip, rebase_abort, search_log, flow_config, flow_suggest, flow_init, flow_start, flow_finish, stack_list, stack_set_parent, stack_restack, stack_descendants, bisect_start, bisect_mark, bisect_reset, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
             commit, head_message, cherry_pick, revert_commit, reset_to,
             get_log, commit_info, tracked_files, reflog, branches_review, compare_branches, compare_file_diff,
             tree_at, file_content, export_zip, ignore_pattern, untrack_files, restore_file,

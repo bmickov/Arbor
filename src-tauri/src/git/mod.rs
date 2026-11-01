@@ -5,12 +5,14 @@
 //! stateless means the UI never holds a stale handle and every command is
 //! safe to run on a worker thread.
 
+pub mod bisect;
 pub mod blame;
 pub mod branches;
 pub mod commit;
 pub mod conflict;
 pub mod diff;
 pub mod files;
+pub mod gitflow;
 pub mod hooks;
 pub mod identity;
 pub mod library;
@@ -22,6 +24,7 @@ pub mod remote;
 pub mod repo;
 pub mod review;
 pub mod sign;
+pub mod stack;
 pub mod stash;
 pub mod status;
 pub mod tree;

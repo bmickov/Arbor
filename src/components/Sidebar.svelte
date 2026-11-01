@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as act from "../lib/actions";
-  import { api, type SubmoduleInfo, type WorktreeInfo } from "../lib/api";
+  import { api, type Stacked, type SubmoduleInfo, type WorktreeInfo } from "../lib/api";
   import { draggable, dropTarget, type Payload } from "../lib/drag.svelte";
   import { app, type View } from "../lib/state.svelte";
   import { menu, toasts } from "../lib/ui.svelte";
@@ -70,6 +70,37 @@
   const changeCount = $derived((st?.staged.length ?? 0) + (st?.unstaged.length ?? 0) + (st?.conflicted.length ?? 0));
   const match = (s: string) => !filter || s.toLowerCase().includes(filter.toLowerCase());
   const locals = $derived((refs?.local ?? []).filter((b) => match(b.name)));
+
+  // Stacked branches sit under their parent, indented.
+  let stacks = $state.raw<Stacked[]>([]);
+  $effect(() => {
+    void app.version;
+    const p = app.path;
+    if (!p) return;
+    api.stackList(p).then((s) => {
+      if (app.path !== p) return;
+      stacks = s;
+      act.setStacks(s);
+    }).catch(() => {});
+  });
+  const stackOf = $derived(new Map(stacks.map((s) => [s.branch, s])));
+  const ordered = $derived.by(() => {
+    const names = new Set(locals.map((b) => b.name));
+    const kids = new Map<string, typeof locals>();
+    const roots: typeof locals = [];
+    for (const b of locals) {
+      const p = stackOf.get(b.name)?.parent;
+      if (p && names.has(p) && !filter) kids.set(p, [...(kids.get(p) ?? []), b]);
+      else roots.push(b);
+    }
+    const out: { b: (typeof locals)[number]; depth: number }[] = [];
+    const walk = (b: (typeof locals)[number], depth: number) => {
+      out.push({ b, depth });
+      for (const k of kids.get(b.name) ?? []) walk(k, depth + 1);
+    };
+    roots.forEach((b) => walk(b, 0));
+    return out;
+  });
   const total = $derived((refs?.local.length ?? 0) + (refs?.remotes.reduce((n, r) => n + r.branches.length, 0) ?? 0));
 
   function go(v: View) {
@@ -191,8 +222,9 @@
       </header>
       {#if open.branches}
         <ul>
-          {#each locals as b (b.name)}
-            <li>
+          {#each ordered as { b, depth } (b.name)}
+            {@const st = stackOf.get(b.name)}
+            <li style:padding-left="{depth * 14}px">
               <button class="item" class:head={b.isHead} class:picked={picked.has(b.name)} class:shown={!picked.size && shown === b.name}
                 onclick={(e) => clickBranch(e, b.name)}
                 onkeydown={branchKey}
@@ -200,8 +232,12 @@
                 oncontextmenu={(e) => branchContext(e, b.name)}
                 use:draggable={() => ({ payload: { kind: "branch", name: b.name }, label: b.name })}
                 use:dropTarget={{ accepts: act.acceptsOnBranch(b.name, b.isHead), drop: (p, e) => act.dropOnBranch(p, b.name, e) }}>
-                <span class="dot" class:current={b.isHead}></span>
-                <span class="name">{b.name}</span>
+                {#if depth}<span class="stem" title="Stacked on {st?.parent}">↳</span>{:else}<span class="dot" class:current={b.isHead}></span>{/if}
+                <span class="name" title={st ? `${b.name} — stacked on ${st.parent}` : b.name}>{b.name}</span>
+                {#if st?.behind}
+                  <span class="restack" role="button" tabindex="-1" title="{st.parent} has {st.behind} new commit{st.behind === 1 ? '' : 's'}. Click to restack {b.name} onto it."
+                    onclick={(e) => { e.stopPropagation(); act.restack(b.name); }} onkeydown={() => {}}>restack</span>
+                {/if}
                 {#if b.upstreamGone}<span class="gone" title="The remote branch was deleted">gone</span>{/if}
                 {#if b.ahead}<span class="ab" title="{b.ahead} to push">↑{b.ahead}</span>{/if}
                 {#if b.behind}<span class="ab" title="{b.behind} to pull">↓{b.behind}</span>{/if}
@@ -405,6 +441,10 @@
   .ab { font-size: calc(var(--fs) * 11); color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .gone { font-size: calc(var(--fs) * 10); color: var(--warn); border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; }
   .none { padding: 4px 10px; font-size: calc(var(--fs) * 12); }
+  .stem { width: 8px; flex: none; color: var(--ink-3); font-size: calc(var(--fs) * 11); line-height: 1; display: grid; place-items: center; }
+  .item.head .stem { color: var(--lane-0); font-weight: 700; }
+  .restack { font-size: calc(var(--fs) * 10); color: var(--accent); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; cursor: pointer; }
+  .restack:hover { background: var(--accent); color: var(--accent-ink); }
   .item.wt, .item.sm { gap: 7px; color: var(--ink-2); }
   .item.wt .name, .item.sm .name { color: var(--ink); }
   .item.missing .name, .item.off .name { color: var(--ink-3); }

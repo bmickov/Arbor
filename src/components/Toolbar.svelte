@@ -101,6 +101,9 @@
     <button class="tool" onclick={() => act.stashChanges()} disabled={!!app.busy} title="Stash your changes">
       <Icon name="stash" /><span>Stash</span>
     </button>
+    <button class="tool" onclick={(e) => act.flowMenu(e)} disabled={!!app.busy} title="Git-flow: start and finish features, releases and hotfixes">
+      <Icon name="flow" /><span>Git-flow</span>
+    </button>
     <button class="tool" onclick={() => app.undo()} disabled={!!app.busy || !app.undoTop} title={undoTitle}>
       <Icon name="undo" /><span>Undo</span>
     </button>

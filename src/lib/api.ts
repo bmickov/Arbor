@@ -32,6 +32,8 @@ export interface WorkingStatus {
   mergeMessage: string | null;
   /** A rebase Arbor paused on a conflict. */
   pausedRebase: PausedRebase | null;
+  /** A bisect in progress. */
+  bisect: BisectState | null;
 }
 
 export interface DiffLine { origin: " " | "+" | "-"; content: string; nl: boolean; oldNo: number | null; newNo: number | null }
@@ -139,6 +141,13 @@ export interface SubmoduleInfo {
   checkedOut: string | null;
   state: "uninitialized" | "moved" | "dirty" | "ok";
   dirty: boolean;
+}
+export interface FlowConfig { main: string; develop: string; feature: string; release: string; hotfix: string; versionTag: string }
+export interface FinishOutcome { result: "finished" | "conflicts"; conflicts: string[]; mergingInto: string | null; tag: string | null }
+export interface Stacked { branch: string; parent: string; behind: number; own: number }
+export interface BisectState {
+  bad: string | null; good: string[]; skipped: string[]; current: string | null;
+  remaining: number; steps: number; found: string | null; ambiguous: string[]; original: string;
 }
 export interface LogFilter { text?: string | null; author?: string | null; since?: number | null; until?: number | null; path?: string | null; contains?: string | null }
 export interface SearchResult { rows: CommitRow[]; scanned: number; more: boolean }
@@ -303,6 +312,19 @@ export const api = {
   stashes: (repo: string) => call<StashEntry[]>("stash_list", { repo }),
   stashSave: (repo: string, message: string | null, includeUntracked: boolean, keepIndex: boolean, quiet = false, paths?: string[]) =>
     call<void>("stash_save", { repo, message, includeUntracked, keepIndex, quiet, paths: paths ?? null }),
+  flowConfig: (repo: string) => call<FlowConfig | null>("flow_config", { repo }),
+  flowSuggest: (repo: string) => call<FlowConfig>("flow_suggest", { repo }),
+  flowInit: (repo: string, config: FlowConfig) => call<void>("flow_init", { repo, config }),
+  flowStart: (repo: string, kind: string, name: string) => call<string>("flow_start", { repo, kind, name }),
+  flowFinish: (repo: string, branch: string, tagMessage: string | null, keepBranch: boolean) =>
+    call<FinishOutcome>("flow_finish", { repo, branch, tagMessage, keepBranch }),
+  stackList: (repo: string) => call<Stacked[]>("stack_list", { repo }),
+  stackSetParent: (repo: string, branch: string, parent: string | null) => call<void>("stack_set_parent", { repo, branch, parent }),
+  stackRestack: (repo: string, branch: string) => call<RebaseOutcome>("stack_restack", { repo, branch }),
+  stackDescendants: (repo: string, branch: string) => call<string[]>("stack_descendants", { repo, branch }),
+  bisectStart: (repo: string, bad: string | null, good: string) => call<BisectState>("bisect_start", { repo, bad, good }),
+  bisectMark: (repo: string, verdict: "good" | "bad" | "skip", id: string | null = null) => call<BisectState>("bisect_mark", { repo, verdict, id }),
+  bisectReset: (repo: string) => call<void>("bisect_reset", { repo }),
   searchLog: (repo: string, scope: string, filter: LogFilter, limit: number) => call<SearchResult>("search_log", { repo, scope, filter, limit }),
   stashApply: (repo: string, index: number) => call<void>("stash_apply", { repo, index }),
   stashPop: (repo: string, index: number, quiet = false) => call<void>("stash_pop", { repo, index, quiet }),

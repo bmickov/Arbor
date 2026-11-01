@@ -126,6 +126,22 @@ contains none of their code or artwork.
   or a username and token prompt
 - Clone, init, add and remove remotes, track upstream branches, push and delete tags
 
+**Git-flow, stacked branches and bisect**
+- **Git-flow** (toolbar button): set it up once, then start and finish
+  features, releases and hotfixes. Finishing merges with a merge commit,
+  tags releases and hotfixes on the production branch and merges them back
+  into develop, and deletes the branch. If a merge conflicts, resolve and
+  commit it, then finish again: it carries on where it stopped. Uses
+  git-flow's own settings, so the git-flow command line agrees
+- **Stacked branches**: mark a branch as built on another (in the New branch
+  dialog, or "Stack on another branch…" in its menu). It's shown under its
+  parent, with a **restack** badge when the parent has new commits; restack
+  replays just its own commits on the parent, even after the parent was
+  rewritten. "Restack … and branches on it" does a whole stack
+- **Bisect**: right-click a commit that works → "Find the bad commit after
+  this…". Arbor checks out commits in between; mark each **Good**, **Bad** or
+  **Skip** until it names the first bad commit. Uses git's own bisect state
+
 **Worktrees and submodules**
 - **Worktrees**: check out a branch in its own folder ("Check out in a new
   worktree…" on any branch, or New worktree in Quick Actions), so you can work
@@ -338,7 +354,7 @@ cd src-tauri && cargo test
   `git rebase --continue` doesn't know about it. Cherry-picks and reverts use
   git's own state, so the command line can finish those too.
 - Rebasing across merge commits isn't supported.
-- LFS and bisect aren't handled in the UI. Adding or removing submodules is
+- LFS isn't handled in the UI. Adding or removing submodules is
   left to the git CLI (listing, cloning, updating and opening them works).
 - Pull requests and hosting-service integrations aren't included.
 - On Windows, Git hooks run through Git for Windows' `sh`, so hooks need

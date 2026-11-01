@@ -170,6 +170,9 @@ pub struct Paused {
     /// Progress: this is step `done + 1` of `total`.
     pub done: usize,
     pub total: usize,
+    /// A stacked branch being restacked: (branch, new base) to record when done.
+    #[serde(default)]
+    pub stack: Option<(String, String)>,
 }
 
 #[derive(Serialize, Debug)]
@@ -266,6 +269,9 @@ fn finish(repo: &Repository, p: &Paused, new: Oid, reflog: &str) -> Result<Rebas
     let _ = std::fs::remove_file(state_file(repo));
     let _ = std::fs::remove_file(repo.path().join("REBASE_HEAD"));
     repo.cleanup_state()?;
+    if let Some((branch, base)) = &p.stack {
+        super::stack::record_base(repo, branch, base)?;
+    }
     undo::record(
         repo,
         p.label.clone(),
@@ -295,6 +301,20 @@ fn run(repo: &Repository, mut p: Paused, onto: Option<Commit>, steps: Vec<Step>,
 }
 
 fn start(repo: &Repository, label: String, onto_label: String, onto: Option<Commit>, steps: Vec<Step>, reflog: &str) -> Result<RebaseOutcome> {
+    start_with(repo, label, onto_label, onto, steps, reflog, None)
+}
+
+/// Replay `steps` (oldest first) on top of `onto` for the checked-out
+/// branch, pausing on conflicts. `stack` is recorded when it finishes.
+pub fn start_with(
+    repo: &Repository,
+    label: String,
+    onto_label: String,
+    onto: Option<Commit>,
+    steps: Vec<Step>,
+    reflog: &str,
+    stack: Option<(String, String)>,
+) -> Result<RebaseOutcome> {
     let head = repo.head()?.peel_to_commit()?;
     let branch = if repo.head_detached().unwrap_or(false) { None } else { repo.head()?.name().ok().map(str::to_string) };
     let p = Paused {
@@ -307,6 +327,7 @@ fn start(repo: &Repository, label: String, onto_label: String, onto: Option<Comm
         replayed_any: false,
         done: 0,
         total: steps.len(),
+        stack,
     };
     run(repo, p, onto, steps, false, reflog)
 }
