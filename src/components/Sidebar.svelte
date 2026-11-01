@@ -71,6 +71,44 @@
   const match = (s: string) => !filter || s.toLowerCase().includes(filter.toLowerCase());
   const locals = $derived((refs?.local ?? []).filter((b) => match(b.name)));
 
+  // Pinned branches (local or remote) at the top.
+  const pins = $derived.by(() => {
+    void app.settings.pinned;
+    const remoteNames = new Set((refs?.remotes ?? []).flatMap((r) => r.branches.map((b) => b.fullName)));
+    return act.pinnedBranches().map((name) => {
+      const local = refs?.local.find((b) => b.name === name);
+      return { name, local, missing: !local && !remoteNames.has(name) };
+    });
+  });
+
+  // Git LFS: what's tracked, and whether files still need downloading.
+  $effect(() => {
+    void app.path;
+    app.loadLfs();
+  });
+  let lastLfsVersion = -1;
+  $effect(() => {
+    const v = app.version;
+    if (app.lfs?.used && v !== lastLfsVersion) {
+      lastLfsVersion = v;
+      app.loadLfs();
+    }
+  });
+  let locks = $state.raw<{ id: string; path: string; owner: { name: string } | null }[] | null>(null);
+  let locksError = $state<string | null>(null);
+  async function loadLocks() {
+    locksError = null;
+    try {
+      locks = await api.lfsLocks(app.path);
+    } catch (e) {
+      locks = null;
+      locksError = String(e);
+    }
+  }
+  function lfsPatternMenu(e: MouseEvent, pattern: string) {
+    menu.fromEvent(e, [{ label: `Stop tracking ${pattern} with LFS`, danger: true, action: () => act.lfsUntrack(pattern) }], pattern);
+  }
+
   // Stacked branches sit under their parent, indented.
   let stacks = $state.raw<Stacked[]>([]);
   $effect(() => {
@@ -213,6 +251,35 @@
       </div>
     {/if}
 
+    {#if pins.length}
+      <section>
+        <header>
+          <button class="head" onclick={() => (open.pinned = !open.pinned)} aria-expanded={open.pinned}>
+            <span class="chev" class:open={open.pinned}><Icon name="chevron" size={12} /></span> Pinned
+          </button>
+        </header>
+        {#if open.pinned}
+          <ul>
+            {#each pins as p (p.name)}
+              <li>
+                <button class="item" class:head={p.local?.isHead} class:shown={shown === p.name}
+                  onclick={() => act.showHistory(p.name)}
+                  ondblclick={() => (p.local ? !p.local.isHead && act.checkout(p.name) : act.checkoutRemote(p.name))}
+                  oncontextmenu={(e) => (p.local ? branchContext(e, p.name) : act.remoteBranchMenu(e, p.name))}
+                  use:dropTarget={{ accepts: act.acceptsOnBranch(p.name, !!p.local?.isHead), drop: (pl, e) => act.dropOnBranch(pl, p.name, e) }}>
+                  <span class="pin" class:current={p.local?.isHead}><Icon name="pin" size={12} /></span>
+                  <span class="name">{p.name}</span>
+                  {#if p.local?.ahead}<span class="ab" title="{p.local.ahead} to push">↑{p.local.ahead}</span>{/if}
+                  {#if p.local?.behind}<span class="ab" title="{p.local.behind} to pull">↓{p.local.behind}</span>{/if}
+                  {#if p.missing}<span class="gone" title="This branch doesn't exist any more">gone</span>{/if}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
+
     <section>
       <header>
         <button class="head" onclick={() => (open.branches = !open.branches)} aria-expanded={open.branches}>
@@ -323,6 +390,49 @@
         </ul>
       {/if}
     </section>
+
+    {#if app.lfs?.used}
+      <section>
+        <header>
+          <button class="head" onclick={() => (open.lfs = !open.lfs)} aria-expanded={open.lfs}>
+            <span class="chev" class:open={open.lfs}><Icon name="chevron" size={12} /></span> Git LFS
+            <span class="faint count">{app.lfs.files}</span>
+          </button>
+          <button class="add" title="Track files with LFS" aria-label="Track files with LFS" onclick={() => act.lfsTrack()}><Icon name="plus" size={14} /></button>
+        </header>
+        {#if open.lfs}
+          {#if !app.lfs.installed}
+            <p class="lfsnote warn">Git LFS isn't installed, so large files show as small pointer files. Install git-lfs.</p>
+          {:else}
+            {#if app.lfs.missing}
+              <p class="lfsnote">{app.lfs.missing} file{app.lfs.missing === 1 ? " isn't" : "s aren't"} downloaded. <button class="link" onclick={act.lfsPull}>Download</button></p>
+            {/if}
+            <ul>
+              {#each app.lfs.patterns as p (p)}
+                <li><button class="item lfs" title="Files matching {p} are stored with LFS" oncontextmenu={(e) => lfsPatternMenu(e, p)}><Icon name="file" size={12} /><span class="name mono">{p}</span></button></li>
+              {:else}
+                <li class="none faint">No patterns tracked</li>
+              {/each}
+            </ul>
+            <div class="lfslocks">
+              {#if locks}
+                {#each locks as l (l.id)}
+                  <div class="lock" title="Locked by {l.owner?.name ?? 'someone'}">
+                    <Icon name="lock" size={12} /><span class="name">{l.path}</span><span class="faint">{l.owner?.name ?? ""}</span>
+                    <button class="link" onclick={() => act.lfsLock(l.path, true).then(loadLocks)}>Unlock</button>
+                  </div>
+                {:else}
+                  <p class="lfsnote">No files are locked.</p>
+                {/each}
+              {:else if locksError}
+                <p class="lfsnote" title={locksError}>Locks aren't available for this remote.</p>
+              {/if}
+              <button class="link" onclick={loadLocks}>{locks ? "Refresh locks" : "Show file locks"}</button>
+            </div>
+          {/if}
+        {/if}
+      </section>
+    {/if}
 
     {#if linked.length}
       <section>
@@ -450,4 +560,13 @@
   .item.missing .name, .item.off .name { color: var(--ink-3); }
   .tagn { font-size: calc(var(--fs) * 10); color: var(--ink-3); border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; }
   .gone.soft { color: var(--ink-3); }
+  .pin { width: 12px; flex: none; display: grid; color: var(--ink-3); }
+  .pin.current { color: var(--lane-0); }
+  .item.lfs { gap: 7px; color: var(--ink-3); }
+  .item.lfs .name { color: var(--ink-2); font-size: calc(var(--cs) * 12); }
+  .lfsnote { margin: 2px 10px 6px; font-size: calc(var(--fs) * 11.5); color: var(--ink-3); }
+  .lfsnote.warn { color: var(--warn); }
+  .lfslocks { padding: 2px 10px 6px; font-size: calc(var(--fs) * 12); display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+  .lock { display: flex; gap: 6px; width: 100%; align-items: center; }
+  .lock .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

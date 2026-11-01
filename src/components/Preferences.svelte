@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { api, type ToolInfo } from "../lib/api";
   import { keyParts, keyText } from "../lib/platform";
   import { app, CODE_SIZES, UI_SIZES } from "../lib/state.svelte";
   import {
@@ -18,6 +19,8 @@
   ];
 
   const s = app.settings;
+  let tools = $state.raw<ToolInfo[]>([]);
+  api.toolsList().then((t) => (tools = t)).catch(() => {});
   const save = () => app.saveSettings();
 
   // ------------------------------------------------------------ appearance
@@ -283,6 +286,34 @@
             </label>
           </section>
           <section>
+            <h4>External tools</h4>
+            <div class="row">
+              <span class="label">Diff tool</span>
+              <select aria-label="Diff tool" value={s.diffTool} onchange={(e) => { s.diffTool = (e.currentTarget as HTMLSelectElement).value; save(); }}>
+                <option value="">None</option>
+                <option value="git">Git's setting (git difftool)</option>
+                {#each tools as t}<option value={t.id}>{t.name}{t.installed ? "" : " (not found)"}</option>{/each}
+                <option value="custom">Custom command…</option>
+              </select>
+            </div>
+            {#if s.diffTool === "custom"}
+              <div class="row"><span class="label"></span><input class="mono" bind:value={s.diffCommand} oninput={save} placeholder="difftool $LOCAL $REMOTE" spellcheck="false" aria-label="Diff command" /></div>
+            {/if}
+            <div class="row">
+              <span class="label">Merge tool</span>
+              <select aria-label="Merge tool" value={s.mergeTool} onchange={(e) => { s.mergeTool = (e.currentTarget as HTMLSelectElement).value; save(); }}>
+                <option value="">None</option>
+                <option value="git">Git's setting (git mergetool)</option>
+                {#each tools.filter((t) => t.merges) as t}<option value={t.id}>{t.name}{t.installed ? "" : " (not found)"}</option>{/each}
+                <option value="custom">Custom command…</option>
+              </select>
+            </div>
+            {#if s.mergeTool === "custom"}
+              <div class="row"><span class="label"></span><input class="mono" bind:value={s.mergeCommand} oninput={save} placeholder="mergetool $LOCAL $BASE $REMOTE -o $MERGED" spellcheck="false" aria-label="Merge command" /></div>
+            {/if}
+            <p class="hint">Opens a file's changes ("Open in diff tool" in its menu) or a conflict ("Open in merge tool") in another app. Custom commands use <code>$LOCAL</code>, <code>$REMOTE</code>, <code>$BASE</code> and <code>$MERGED</code>.</p>
+          </section>
+          <section>
             <h4>Git</h4>
             <div class="row">
               <span class="label">Fetch automatically</span>
@@ -443,6 +474,7 @@
   .row { display: flex; align-items: center; gap: 16px; margin: 8px 0; }
   .label { width: 110px; color: var(--ink-2); flex: none; }
   .row select { width: auto; }
+  .row input.mono { flex: 1; min-width: 0; }
   .seg { display: inline-flex; background: var(--surface-3); border-radius: 8px; padding: 2px; flex-wrap: wrap; }
   .seg button { padding: 4px 12px; border-radius: 6px; font-weight: 600; color: var(--ink-2); }
   .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }

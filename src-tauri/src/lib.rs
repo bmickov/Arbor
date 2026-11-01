@@ -437,6 +437,44 @@ async fn bisect_reset(repo: String) -> R<()> {
     blocking(move || git::bisect::reset(&repo)).await
 }
 
+// ------------------------------------------------------------------ LFS and external tools
+#[tauri::command]
+async fn lfs_info(repo: String) -> R<git::lfs::LfsInfo> {
+    blocking(move || git::lfs::info(&repo)).await
+}
+#[tauri::command]
+async fn lfs_checkout(repo: String) -> R<()> {
+    blocking(move || git::lfs::checkout(&repo)).await
+}
+#[tauri::command]
+async fn lfs_pull(repo: String) -> R<()> {
+    blocking(move || git::lfs::pull(&repo)).await
+}
+#[tauri::command]
+async fn lfs_track(repo: String, pattern: String, untrack: bool) -> R<()> {
+    blocking(move || git::lfs::track(&repo, &pattern, untrack)).await
+}
+#[tauri::command]
+async fn lfs_locks(repo: String) -> R<Vec<git::lfs::Lock>> {
+    blocking(move || git::lfs::locks(&repo)).await
+}
+#[tauri::command]
+async fn lfs_lock(repo: String, path: String, unlock: bool, force: bool) -> R<()> {
+    blocking(move || git::lfs::lock(&repo, &path, unlock, force)).await
+}
+#[tauri::command]
+async fn tools_list() -> R<Vec<git::tools::ToolInfo>> {
+    blocking(|| Ok(git::tools::list())).await
+}
+#[tauri::command]
+async fn diff_tool(repo: String, path: String, area: String, tool: String, custom: String) -> R<()> {
+    blocking(move || git::tools::diff(&repo, &path, &area, &tool, &custom)).await
+}
+#[tauri::command]
+async fn merge_tool(repo: String, path: String, tool: String, custom: String) -> R<git::tools::MergeResult> {
+    blocking(move || git::tools::merge(&repo, &path, &tool, &custom)).await
+}
+
 #[tauri::command]
 async fn rebase_continue(repo: String) -> R<git::rebase::RebaseOutcome> {
     blocking(move || git::rebase::continue_rebase(&repo)).await
@@ -602,7 +640,7 @@ pub fn run() {
             library_get, library_save, library_add_many, scan_folder, repo_summaries,
             get_status, diff_unstaged, diff_staged, file_at,
             stage_files, unstage_files, stage_all, unstage_all, discard_files,
-            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, rebase_continue, rebase_skip, rebase_abort, search_log, flow_config, flow_suggest, flow_init, flow_start, flow_finish, stack_list, stack_set_parent, stack_restack, stack_descendants, bisect_start, bisect_mark, bisect_reset, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
+            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, rebase_continue, rebase_skip, rebase_abort, search_log, lfs_info, lfs_checkout, lfs_pull, lfs_track, lfs_locks, lfs_lock, tools_list, diff_tool, merge_tool, flow_config, flow_suggest, flow_init, flow_start, flow_finish, stack_list, stack_set_parent, stack_restack, stack_descendants, bisect_start, bisect_mark, bisect_reset, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
             commit, head_message, cherry_pick, revert_commit, reset_to,
             get_log, commit_info, tracked_files, reflog, branches_review, compare_branches, compare_file_diff,
             tree_at, file_content, export_zip, ignore_pattern, untrack_files, restore_file,

@@ -32,8 +32,13 @@ pub fn stage_files(repo_path: &str, paths: &[String]) -> Result<()> {
     let repo = open(repo_path)?;
     let before = undo::index_tree(&repo);
     let root = repo.workdir().unwrap().to_path_buf();
+    // LFS files go through `git add`, which stores them as LFS pointers.
+    let lfs = super::lfs::lfs_paths(&repo, paths);
     let mut index = repo.index()?;
     for p in paths {
+        if lfs.contains(p) && root.join(p).exists() {
+            continue;
+        }
         let full = root.join(p);
         if full.symlink_metadata().is_ok() {
             index.add_path(std::path::Path::new(p))?;
@@ -42,6 +47,8 @@ pub fn stage_files(repo_path: &str, paths: &[String]) -> Result<()> {
         }
     }
     index.write()?;
+    let lfs: Vec<String> = lfs.into_iter().filter(|p| root.join(p).exists()).collect();
+    super::lfs::add(&repo, &lfs)?;
     if let Some(t) = before {
         undo::record(&repo, label_for(paths, "Stage"), Action::RestoreIndex { tree: t });
     }
@@ -70,10 +77,25 @@ pub fn unstage_files(repo_path: &str, paths: &[String]) -> Result<()> {
 pub fn stage_all(repo_path: &str) -> Result<()> {
     let repo = open(repo_path)?;
     let before = undo::index_tree(&repo);
-    let mut index = repo.index()?;
-    index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
-    index.update_all(["*"].iter(), None)?;
-    index.write()?;
+    if super::lfs::used(&repo) {
+        // Let git (and its LFS filter) do it.
+        super::lfs::add(&repo, &[".".to_string()])?;
+        let mut o = git2::StatusOptions::new();
+        o.include_untracked(false);
+        let deleted: Vec<String> = repo.statuses(Some(&mut o))?.iter().filter(|e| e.status().is_wt_deleted()).filter_map(|e| e.path().ok().map(str::to_string)).collect();
+        if !deleted.is_empty() {
+            let mut index = repo.index()?;
+            for d in deleted {
+                index.remove_path(std::path::Path::new(&d))?;
+            }
+            index.write()?;
+        }
+    } else {
+        let mut index = repo.index()?;
+        index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
+        index.update_all(["*"].iter(), None)?;
+        index.write()?;
+    }
     if let Some(t) = before {
         undo::record(&repo, "Stage all changes", Action::RestoreIndex { tree: t });
     }

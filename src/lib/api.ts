@@ -149,6 +149,9 @@ export interface BisectState {
   bad: string | null; good: string[]; skipped: string[]; current: string | null;
   remaining: number; steps: number; found: string | null; ambiguous: string[]; original: string;
 }
+export interface LfsInfo { used: boolean; installed: boolean; patterns: string[]; missing: number; files: number }
+export interface LfsLock { id: string; path: string; owner: { name: string } | null; lockedAt: string | null }
+export interface ToolInfo { id: string; name: string; installed: boolean; merges: boolean }
 export interface LogFilter { text?: string | null; author?: string | null; since?: number | null; until?: number | null; path?: string | null; contains?: string | null }
 export interface SearchResult { rows: CommitRow[]; scanned: number; more: boolean }
 export interface SigningSettings {
@@ -325,6 +328,15 @@ export const api = {
   bisectStart: (repo: string, bad: string | null, good: string) => call<BisectState>("bisect_start", { repo, bad, good }),
   bisectMark: (repo: string, verdict: "good" | "bad" | "skip", id: string | null = null) => call<BisectState>("bisect_mark", { repo, verdict, id }),
   bisectReset: (repo: string) => call<void>("bisect_reset", { repo }),
+  lfsInfo: (repo: string) => call<LfsInfo>("lfs_info", { repo }),
+  lfsCheckout: (repo: string) => call<void>("lfs_checkout", { repo }),
+  lfsPull: (repo: string) => call<void>("lfs_pull", { repo }),
+  lfsTrack: (repo: string, pattern: string, untrack = false) => call<void>("lfs_track", { repo, pattern, untrack }),
+  lfsLocks: (repo: string) => call<LfsLock[]>("lfs_locks", { repo }),
+  lfsLock: (repo: string, path: string, unlock = false, force = false) => call<void>("lfs_lock", { repo, path, unlock, force }),
+  toolsList: () => call<ToolInfo[]>("tools_list"),
+  diffTool: (repo: string, path: string, area: string, tool: string, custom: string) => call<void>("diff_tool", { repo, path, area, tool, custom }),
+  mergeTool: (repo: string, path: string, tool: string, custom: string) => call<{ markersLeft: boolean }>("merge_tool", { repo, path, tool, custom }),
   searchLog: (repo: string, scope: string, filter: LogFilter, limit: number) => call<SearchResult>("search_log", { repo, scope, filter, limit }),
   stashApply: (repo: string, index: number) => call<void>("stash_apply", { repo, index }),
   stashPop: (repo: string, index: number, quiet = false) => call<void>("stash_pop", { repo, index, quiet }),
