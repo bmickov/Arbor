@@ -192,8 +192,58 @@
       name = Math.max(name, r.name.length + (openPaths.has(r.path) ? 6 : 0), shortPath(r.path).length * 0.92);
       if (s?.ok) branch = Math.max(branch, (s.detached ? 8 : (s.branch?.length ?? 1)) + (stateLabel(s) ? 9 : 0));
     }
-    return `--name-w: calc(${Math.min(name, 44).toFixed(1)}ch + 8px); --branch-w: calc(${Math.min(branch, 32)}ch + 26px)`;
+    // A column the user has dragged keeps exactly that width; the others size
+    // themselves as above.
+    const track = (id: string, auto: string) => (app.layout.sizes[`repos.${id}`] != null ? `${app.layout.sizes[`repos.${id}`]}px` : auto);
+    return [
+      `--c-name: ${track("name", `minmax(150px, calc(${Math.min(name, 44).toFixed(1)}ch + 8px))`)}`,
+      `--c-branch: ${track("branch", `minmax(80px, calc(${Math.min(branch, 32)}ch + 26px))`)}`,
+      `--c-sync: ${track("sync", "48px")}`,
+      `--c-changes: ${track("changes", "132px")}`,
+      `--c-last: ${track("last", "minmax(160px, 780px)")}`,
+    ].join("; ");
   });
+
+  /** Resizable columns: label, saved-size id, and the narrowest it may get. */
+  const COLUMNS = [
+    { id: "name", label: "Repository", min: 100 },
+    { id: "branch", label: "Branch", min: 60 },
+    { id: "sync", label: "Sync", min: 36 },
+    { id: "changes", label: "Changes", min: 56 },
+    { id: "last", label: "Last commit", min: 120 },
+  ] as const;
+  let resizing = $state<string | null>(null);
+
+  function setCol(id: string, min: number, w: number) {
+    app.layout.sizes[`repos.${id}`] = Math.round(Math.max(min, Math.min(w, 1600)));
+  }
+
+  function grab(e: PointerEvent, id: string, min: number) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const cell = (e.currentTarget as HTMLElement).parentElement!;
+    const start = cell.getBoundingClientRect().width;
+    const x0 = e.clientX;
+    resizing = id;
+    document.body.classList.add("resizing-x");
+    const move = (ev: PointerEvent) => setCol(id, min, start + ev.clientX - x0);
+    const up = () => {
+      resizing = null;
+      document.body.classList.remove("resizing-x");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  function nudge(e: KeyboardEvent, id: string, min: number) {
+    const dir = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (!dir) return;
+    e.preventDefault();
+    const w = (e.currentTarget as HTMLElement).parentElement!.getBoundingClientRect().width;
+    setCol(id, min, w + dir * (e.shiftKey ? 64 : 16));
+  }
 
   function key(e: KeyboardEvent) {
     if (e.key === "Escape") selected = new Set();
@@ -277,6 +327,22 @@
         {/if}
       </div>
     {/if}
+
+    <div class="colhead" style={colWidths} role="row">
+      <span></span>
+      {#each COLUMNS as c (c.id)}
+        <span class="col col-{c.id}" role="columnheader">
+          <span class="clabel">{c.label}</span>
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+          <span class="grip" class:on={resizing === c.id} role="separator" aria-orientation="vertical" tabindex="0"
+            aria-label="Resize {c.label} column"
+            title="Drag to resize · double-click to fit"
+            onpointerdown={(e) => grab(e, c.id, c.min)}
+            onkeydown={(e) => nudge(e, c.id, c.min)}
+            ondblclick={() => delete app.layout.sizes[`repos.${c.id}`]}></span>
+        </span>
+      {/each}
+    </div>
 
     <div class="list" style={colWidths}>
       {#each sections as sec (sec.group?.id ?? "__ungrouped")}
@@ -438,9 +504,27 @@
        the rest have sensible maximums, and spare width collects in an empty
        last column: on wide windows the columns stay together instead of
        drifting apart (name → branch, and commit message → its time). */
-    display: grid; grid-template-columns: 18px minmax(150px, var(--name-w, 300px)) minmax(80px, var(--branch-w, 230px)) 48px 132px minmax(160px, 780px) minmax(0, 1fr);
+    display: grid; grid-template-columns: 18px var(--c-name) var(--c-branch) var(--c-sync) var(--c-changes) var(--c-last) minmax(0, 1fr);
     gap: 12px; align-items: center; padding: 7px 10px; border-radius: 7px; cursor: default;
   }
+  /* Column labels, lined up with the rows below (same grid, same insets). */
+  .colhead {
+    display: grid; grid-template-columns: 18px var(--c-name) var(--c-branch) var(--c-sync) var(--c-changes) var(--c-last) minmax(0, 1fr);
+    gap: 12px; align-items: center; padding: 6px 26px 5px; border-bottom: 1px solid var(--line-soft); user-select: none;
+  }
+  .col { position: relative; min-width: 0; display: flex; }
+  /* Label type is set here, not on .colhead: the auto widths are in ch, so the
+     grid itself must use the rows' font size to line up with them. */
+  .clabel {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: calc(var(--fs) * 10.5); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3);
+  }
+  /* The handle sits in the gap after the column, centred on it. */
+  .grip { position: absolute; top: -6px; bottom: -5px; right: -12px; width: 12px; cursor: col-resize; z-index: 1; }
+  .grip::after { content: ""; position: absolute; left: 5.5px; top: 4px; bottom: 4px; width: 1px; background: var(--line); }
+  .colhead:hover .grip::after { background: var(--ink-3); }
+  .grip:hover::after, .grip.on::after, .grip:focus-visible::after { background: var(--accent); width: 2px; left: 5px; }
+  .grip:focus-visible { outline: none; }
   .row:hover { background: var(--surface-2); }
   .row.sel { background: var(--sel); }
   .row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
@@ -456,6 +540,7 @@
   .rpath { font-size: calc(var(--fs) * 12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
   .branch { display: flex; align-items: center; gap: 5px; color: var(--ink-2); min-width: 0; font-size: calc(var(--fs) * 12); }
   .branch span:not(.tag) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .branch :global(svg) { flex: none; }
   .tag { font-size: calc(var(--fs) * 10); font-weight: 700; border-radius: 4px; padding: 0 4px; flex: none; }
   .tag.warn { color: var(--warn); background: var(--warn-soft); }
   .sync { display: flex; gap: 6px; font-size: calc(var(--fs) * 12); font-variant-numeric: tabular-nums; color: var(--ink-2); }
@@ -492,7 +577,7 @@
   .first .working { margin-top: 16px; }
 
   @media (max-width: 1100px) {
-    .row { grid-template-columns: 18px minmax(160px, 1.5fr) minmax(110px, 1fr) 56px 120px; }
-    .last { display: none; }
+    .row, .colhead { grid-template-columns: 18px var(--c-name) var(--c-branch) var(--c-sync) var(--c-changes); }
+    .last, .col-last { display: none; }
   }
 </style>
