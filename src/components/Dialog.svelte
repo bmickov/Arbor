@@ -12,11 +12,17 @@
     for (const f of s.fields ?? []) v[f.key] = f.type === "checkbox" ? !!f.checked : (f.value ?? "");
     values = v;
     error = null;
+    // Give focus back to whatever had it once the dialog closes, so keyboard
+    // work carries on where it was (a row in a list, the commit box…).
+    const prev = document.activeElement as HTMLElement | null;
     queueMicrotask(() => {
       const first = form?.querySelector<HTMLElement>("input:not([type=checkbox]), textarea") ?? form?.querySelector<HTMLElement>("button.primary-action");
       first?.focus();
       if (first instanceof HTMLInputElement || first instanceof HTMLTextAreaElement) first.select();
     });
+    return () => {
+      if (prev && prev !== document.body && prev.isConnected) queueMicrotask(() => prev.focus({ preventScroll: true }));
+    };
   });
 
   function submit(e: Event) {

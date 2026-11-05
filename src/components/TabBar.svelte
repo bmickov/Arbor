@@ -36,8 +36,10 @@
 </script>
 
 <div class="tabs" role="tablist" aria-label="Open repositories">
+  <!-- Tabs don't take focus on click (mousedown), only from the keyboard, so a
+       click never leaves a focus ring around them. -->
   <button class="home" class:on={app.active === -1} role="tab" aria-selected={app.active === -1}
-    title={keyText("All repositories (Ctrl+T)")} onclick={() => app.switchTo(-1)}>
+    title={keyText("All repositories (Ctrl+T)")} onmousedown={(e) => e.preventDefault()} onclick={() => app.switchTo(-1)}>
     <Icon name="grid" size={14} /><span>Repositories</span>
   </button>
 
@@ -47,8 +49,9 @@
       <div class="tab" class:on={i === app.active} role="tab" aria-selected={i === app.active} tabindex="0"
         class:ins-before={insertAt === i} class:ins-after={insertAt === i + 1 && i === app.tabs.length - 1}
         title={t.path}
+        onmousedown={(e) => { if (e.button !== 1) e.preventDefault(); }}
         onclick={() => app.switchTo(i)}
-        onkeydown={(e) => e.key === "Enter" && app.switchTo(i)}
+        onkeydown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), app.switchTo(i))}
         onauxclick={(e) => { if (e.button === 1) { e.preventDefault(); app.closeTab(i); } }}
         oncontextmenu={(e) => tabMenu(e, i)}
         use:draggable={() => ({ payload: { kind: "tab", index: i }, label: t.name })}
@@ -94,6 +97,8 @@
   }
   .home:hover, .tab:hover { background: color-mix(in srgb, var(--bg) 55%, transparent); color: var(--ink); }
   .home.on, .tab.on { background: var(--bg); color: var(--ink); border-color: var(--line); }
+  /* Keyboard focus: drawn inside the tab, following its shape. */
+  .home:focus-visible, .tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; border-radius: 8px 8px 0 0; }
   .strip { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; align-items: flex-end; height: 100%; }
   .strip::-webkit-scrollbar { display: none; }
   .tab { position: relative; max-width: 220px; min-width: 90px; padding-right: 4px; cursor: default; }
