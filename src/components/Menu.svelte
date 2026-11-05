@@ -27,7 +27,8 @@
 
   function key(e: KeyboardEvent) {
     const n = menu.items.length;
-    if (e.key === "Escape") return menu.close();
+    // Handled here: Escape closing a menu shouldn't also clear a selection behind it.
+    if (e.key === "Escape") { e.stopPropagation(); return menu.close(); }
     if (e.key === "Enter") return choose(active);
     const dir = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
     if (!dir) return;

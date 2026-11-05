@@ -25,8 +25,14 @@ contains none of their code or artwork.
 - "Find repositories in a folder" scans something like `~/code` and adds
   everything inside it in one go, optionally as a group
 - Fetch all repositories (or one group) at once
-- Resize the columns (repository, branch, sync, changes, last commit) by
-  dragging the edges in the header; double-click an edge to fit it again
+- The list is a table that fills the window: repository, branch, commits to
+  push and pull, changes and stashes, the last commit's message and when it
+  was made. Drag the edges in the header to resize columns (double-click to
+  fit them again); the commit message takes whatever room is left
+- Keyboard: arrow keys move through the list (Shift extends the selection),
+  Enter opens, Space selects, Ctrl+A selects all, Delete removes from the list
+  after asking. Select with Ctrl+click or Shift+click; a bar at the bottom
+  opens or removes the selection
 - Open repositories in tabs; each tab keeps its own view, selection and history
   position
 - Folders that moved or were deleted are flagged, with Locate… and Remove
