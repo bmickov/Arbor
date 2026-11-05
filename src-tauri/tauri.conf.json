@@ -51,9 +51,9 @@
       }
     },
     "longDescription": "Arbor is a Git client for Linux, the BSDs, macOS and Windows: drag-and-drop merging and rebasing, commit reordering, line-by-line staging, and an undo button that covers almost everything.",
-    "license": "0BSD",
+    "license": "GPL-3.0-or-later",
     "licenseFile": "../LICENSE",
-    "copyright": "Copyright (C) 2026 The Arbor authors. Released under the 0BSD license.",
+    "copyright": "Copyright (C) 2026 The Arbor authors. Licensed under the GNU GPL, version 3 or later.",
     "publisher": "The Arbor authors",
     "macOS": {
       "minimumSystemVersion": "10.15",

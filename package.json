@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.14.0",
   "description": "A friendly Git client for Linux, the BSDs, macOS and Windows",
-  "license": "0BSD",
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "vite",

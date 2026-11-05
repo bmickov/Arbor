@@ -1,7 +1,7 @@
 # Arbor
 
 [![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
-[![License: 0BSD](https://img.shields.io/badge/license-0BSD-blue.svg)](LICENSE)
+[![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
 A free, open-source Git client for **Linux, FreeBSD, macOS and Windows**, built
 around the workflows that make Tower pleasant:
@@ -405,10 +405,22 @@ cd src-tauri && cargo test
 
 ## License
 
-Arbor is free and open-source software under the [BSD Zero Clause License
-(0BSD)](LICENSE): you may use, copy, modify and distribute it for any purpose,
-with or without fee, with no conditions. The fonts and libraries it bundles
-have their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Copyright (C) 2026 The Arbor authors
+
+Arbor is free software: you can redistribute it and/or modify it under the
+terms of the [GNU General Public License](LICENSE) as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+Arbor is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+In short: you may use, share and change Arbor freely, but if you distribute
+it, or a modified version, you must do so under the same license and make the
+source code available. The fonts and libraries it bundles have their own
+licenses, all compatible with the GPL; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Contributions are welcome. By sending a pull request you agree to license
 your contribution under the same terms.
