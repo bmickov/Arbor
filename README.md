@@ -25,14 +25,17 @@ contains none of their code or artwork.
 - "Find repositories in a folder" scans something like `~/code` and adds
   everything inside it in one go, optionally as a group
 - Fetch all repositories (or one group) at once
+- Resize the columns (repository, branch, sync, changes, last commit) by
+  dragging the edges in the header; double-click an edge to fit it again
 - Open repositories in tabs; each tab keeps its own view, selection and history
   position
 - Folders that moved or were deleted are flagged, with Locate… and Remove
 
 **Resizable panels**
 - Drag any divider: the sidebar, file lists, the commit composer, the stash,
-  reflog, compare and file-browser lists, and the split between a commit's
-  details and its diff. Double-click a divider to reset it; sizes are saved
+  reflog, compare and file-browser lists, the split between a commit's
+  details and its diff, and the columns of the repository list. Double-click
+  a divider to reset it; sizes are saved
 
 **Pick up where you left off**
 - When you quit and start Arbor again, it reopens your tabs on the same tab,
