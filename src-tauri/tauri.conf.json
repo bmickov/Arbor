@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Arbor",
-  "version": "0.14.2",
+  "version": "0.14.3",
   "identifier": "app.arbor.git",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -42,12 +42,14 @@
       "deb": {
         "depends": [
           "git"
-        ]
+        ],
+        "desktopTemplate": "linux/Arbor.desktop"
       },
       "rpm": {
         "depends": [
           "git"
-        ]
+        ],
+        "desktopTemplate": "linux/Arbor.desktop"
       }
     },
     "longDescription": "Arbor is a Git client for Linux, the BSDs, macOS and Windows: drag-and-drop merging and rebasing, commit reordering, line-by-line staging, and an undo button that covers almost everything.",

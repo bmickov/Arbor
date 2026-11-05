@@ -2,6 +2,7 @@
 
 pub mod git;
 pub mod platform;
+pub mod desktop;
 
 use git::diff::DiffSettings;
 use git::patch::Selection;
@@ -649,8 +650,16 @@ fn open_terminal(path: String) -> R<()> {
     platform::open_terminal(&path)
 }
 
+/// Add, refresh or remove Arbor's own launcher and icon (Linux/BSD; see desktop.rs).
+#[tauri::command]
+async fn desktop_entry(enable: bool) -> Result<desktop::Integration, String> {
+    tauri::async_runtime::spawn_blocking(move || desktop::integrate(enable)).await.map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before any window: the desktop matches windows to launchers by this name.
+    desktop::set_names();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -687,7 +696,7 @@ pub fn run() {
             fetch, pull, push, push_tag, delete_remote_branch,
             stash_list, stash_save, stash_apply, stash_pop, stash_drop, stash_drop_many, stash_branch,
             undo, undo_list,
-            open_external, open_terminal, quit, startup_path, log_ui,
+            open_external, open_terminal, quit, startup_path, log_ui, desktop_entry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Arbor");

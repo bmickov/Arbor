@@ -110,6 +110,8 @@ export interface Settings {
   syntax: boolean;
   /** Tell me when background fetches find new commits. */
   notify: boolean;
+  /** Linux/BSD: keep Arbor's own launcher and icon in the applications menu (for AppImages). */
+  desktopEntry: boolean;
   /** Highlight the changed words within changed lines. */
   wordDiff: boolean;
   /** How changed images are compared: side, swipe, onion or difference. */
@@ -142,7 +144,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false,
   theme: "system", uiFont: "atkinson", uiSize: 13, codeFont: "commit", codeSize: 12, shortcuts: {},
-  restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10, syntax: true, wordDiff: true, notify: true, imageMode: "side", fileTree: false, issueLinks: [],
+  restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10, syntax: true, wordDiff: true, notify: true, desktopEntry: true, imageMode: "side", fileTree: false, issueLinks: [],
   diffTool: "", mergeTool: "", diffCommand: "", mergeCommand: "", pinned: {},
   commitTemplates: [], profiles: [],
 };

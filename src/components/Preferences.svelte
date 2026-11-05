@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type ToolInfo } from "../lib/api";
   import { webUrl } from "../lib/issues";
-  import { keyParts, keyText } from "../lib/platform";
+  import { IS_MAC, IS_WINDOWS, keyParts, keyText } from "../lib/platform";
   import { app, CODE_SIZES, UI_SIZES } from "../lib/state.svelte";
   import {
     bindings, COMMANDS, commandFor, comboFromEvent, FIXED, GROUPS, prettyKeys, recording, resetBindings, setBinding,
@@ -166,6 +166,22 @@
               </span>
             </label>
           </section>
+          {#if !IS_MAC && !IS_WINDOWS}
+            <section>
+              <h4>Desktop</h4>
+              <label class="toggle">
+                <input type="checkbox" checked={s.desktopEntry} onchange={() => { s.desktopEntry = !s.desktopEntry; save(); }} />
+                <span>
+                  <b>Add Arbor to the applications menu</b>
+                  <small>
+                    Gives Arbor its name and icon in the dock and task switcher when you run it as an AppImage,
+                    and lets you start it from the applications menu. Turning it off removes that entry.
+                    Installed packages (.deb, .rpm) have their own and aren't affected.
+                  </small>
+                </span>
+              </label>
+            </section>
+          {/if}
         {:else if app.prefs === "appearance"}
           <section>
             <h4>Theme</h4>

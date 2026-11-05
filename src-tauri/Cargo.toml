@@ -1,6 +1,6 @@
 [package]
 name = "arbor"
-version = "0.14.2"
+version = "0.14.3"
 description = "A friendly Git client for Linux, the BSDs, macOS and Windows"
 license = "GPL-3.0-or-later"
 authors = ["The Arbor authors"]
@@ -29,6 +29,11 @@ regex-lite = "0.1"
 open = "5"
 chrono = "0.4"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+# Linux/BSD: GTK's program name is what desktops match windows to launchers
+# by (see src/desktop.rs). Already used by Tauri; this is the same version.
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+gtk = "0.18"
 
 # macOS: build OpenSSL (used by libgit2 and libssh2) into the app. Otherwise it
 # would link against Homebrew's copy, which users don't have, and the Intel

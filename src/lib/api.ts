@@ -5,6 +5,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 export interface RepoInfo { path: string; name: string }
 export interface RecentRepo { path: string; name: string; opened: number }
+/** What desktop_entry did: see src-tauri/src/desktop.rs. */
+export type DesktopIntegration = "unsupported" | "packaged" | "development" | "installed" | "removed";
 export interface Group { id: string; name: string; collapsed: boolean }
 export interface Bookmark { path: string; name: string; group: string | null; opened: number }
 export interface Library { groups: Group[]; repos: Bookmark[] }
@@ -364,6 +366,7 @@ export const api = {
   undoList: (repo: string) => call<UndoEntry[]>("undo_list", { repo }),
 
   startupPath: () => call<string | null>("startup_path"),
+  desktopEntry: (enable: boolean) => call<DesktopIntegration>("desktop_entry", { enable }),
   /** Exit the app (call after saving the session). */
   quit: () => call<void>("quit"),
   openExternal: (path: string) => call<void>("open_external", { path }),

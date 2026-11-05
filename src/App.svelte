@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "./lib/api";
+  import { IS_MAC, IS_WINDOWS } from "./lib/platform";
   import { library } from "./lib/library.svelte";
   import { app } from "./lib/state.svelte";
   import { handleKey } from "./lib/shortcuts.svelte";
@@ -35,6 +36,14 @@
       const p = await api.startupPath().catch(() => null);
       await app.restoreTabs(p);
     })();
+  });
+
+  // Linux/BSD: make sure the dock and app menu know Arbor's name and icon
+  // (adds a launcher when run from an AppImage; see Preferences → General).
+  $effect(() => {
+    if (IS_MAC || IS_WINDOWS) return;
+    const on = app.settings.desktopEntry;
+    api.desktopEntry(on).catch((e) => console.warn(e));
   });
 
   // Fetch open repositories in the background ("fetch automatically" preference).
