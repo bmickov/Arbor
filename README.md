@@ -253,6 +253,12 @@ pkg install webkit2-gtk_41 git
 tar xzf Arbor_*_freebsd_amd64.tar.gz && cd arbor-* && doas ./install.sh
 ```
 
+The AppImage adds Arbor to your applications menu the first time it runs
+(a launcher in `~/.local/share/applications` and icons in
+`~/.local/share/icons`), so the dock and task switcher show its name and
+icon. It follows the AppImage if you move it or switch versions; turn it off
+in Preferences → General to remove it. The .deb and .rpm install their own.
+
 The builds aren't signed with a paid certificate, so the first launch asks
 you to confirm: on **macOS**, open System Settings → Privacy & Security and
 choose *Open Anyway*; on **Windows**, choose *More info → Run anyway*. Each
@@ -272,7 +278,8 @@ the BSDs, `~/Library/Application Support/arbor` on macOS, and
 
 Open with **Ctrl+,** or the sliders button.
 
-- **General:** pick up where you left off (on by default)
+- **General:** pick up where you left off (on by default); on Linux and the
+  BSDs, add Arbor to the applications menu (on by default, for AppImages)
 - **Theme:** System (follows your desktop), Arbor Light, Arbor Dark, or
   **Ubuntu Dark**, which matches Ubuntu's Yaru dark style with Ubuntu orange accents
 - **Interface text:** Atkinson Hyperlegible or your system font, 10–20 px

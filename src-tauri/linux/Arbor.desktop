@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name={{name}}
+GenericName=Git client
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}} %F
+Icon={{icon}}
+Terminal=false
+Categories={{categories}}
+Keywords=git;version control;vcs;
+StartupWMClass=Arbor
+StartupNotify=true
+{{#if mime_type}}
+MimeType={{mime_type}}
+{{/if}}
