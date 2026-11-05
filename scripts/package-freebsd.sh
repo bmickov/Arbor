@@ -74,7 +74,8 @@ Arbor ${version} for $(uname -s) ${arch}
 2. Install Arbor (as root):         ./install.sh
    or run it in place:               ./bin/arbor
 
-Arbor is released under the 0BSD license; see share/doc/arbor.
+Arbor is free software under the GNU General Public License, version 3 or
+later; see share/doc/arbor/LICENSE.
 EOF
 
 tar -C dist-bundles -czf "dist-bundles/Arbor_${version}_${os}_${arch}.tar.gz" "$name"

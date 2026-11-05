@@ -1,6 +1,7 @@
 # Third-party notices
 
-Arbor's own code is under the [0BSD license](LICENSE). The app is built with,
+Arbor's own code is under the [GNU General Public License, version 3 or
+later](LICENSE). The app is built with,
 and its installers include, the following third-party software, each under
 its own license.
 

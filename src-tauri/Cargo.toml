@@ -2,7 +2,7 @@
 name = "arbor"
 version = "0.14.0"
 description = "A friendly Git client for Linux, the BSDs, macOS and Windows"
-license = "0BSD"
+license = "GPL-3.0-or-later"
 authors = ["The Arbor authors"]
 edition = "2021"
 rust-version = "1.80"
