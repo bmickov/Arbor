@@ -119,6 +119,18 @@ pub fn unstage_all(repo_path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Remove the folders a deleted file leaves empty, up to the working tree,
+/// as `git clean` does. Stops at the first folder that still holds anything.
+fn remove_empty_parents(root: &std::path::Path, file: &std::path::Path) {
+    let mut dir = file.parent();
+    while let Some(d) = dir {
+        if d == root || !d.starts_with(root) || std::fs::remove_dir(d).is_err() {
+            break;
+        }
+        dir = d.parent();
+    }
+}
+
 /// Throw away unstaged changes to `paths`. Untracked files are deleted.
 /// The old contents are kept as blobs so the discard can be undone.
 pub fn discard_files(repo_path: &str, paths: &[String]) -> Result<()> {
@@ -139,6 +151,7 @@ pub fn discard_files(repo_path: &str, paths: &[String]) -> Result<()> {
             } else if full.symlink_metadata().is_ok() {
                 std::fs::remove_file(&full)?;
             }
+            remove_empty_parents(&root, &full);
         }
     }
     undo::record(&repo, label_for(paths, "Discard changes to"), Action::RestoreFiles { files: saved });

@@ -73,9 +73,12 @@
       app.refresh();
     };
     window.addEventListener("focus", onFocus);
+    // Every 4 seconds, or less often where a refresh is slow (huge working
+    // trees): never more than 1/20 of the time spent refreshing.
     const t = setInterval(() => {
-      if (document.hasFocus() && !app.busy && !dialog.spec && !menu.items.length) app.refresh();
-    }, 4000);
+      const due = Date.now() - app.refreshedAt >= Math.max(4000, app.refreshCost * 20) - 250;
+      if (due && document.hasFocus() && !app.busy && !dialog.spec && !menu.items.length) app.refresh();
+    }, 1000);
     return () => {
       window.removeEventListener("focus", onFocus);
       clearInterval(t);

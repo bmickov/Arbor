@@ -1928,3 +1928,157 @@ fn clear_messages_for_common_mistakes() {
     assert!(msg(git::branches::checkout_branch(&wt, "feature/a")).contains("already checked out in the worktree"));
     let _ = std::fs::remove_dir_all(&wt);
 }
+
+#[test]
+fn history_order_survives_clock_skew_and_same_second_commits() {
+    let r = Repo::new();
+    let at = |t: &str, msg: &str| {
+        r.write("f.txt", &format!("{msg}\n"));
+        r.git(&["add", "-A"]);
+        let ok = Command::new("git")
+            .args(["-c", "user.name=T", "-c", "user.email=t@e", "-c", "commit.gpgsign=false", "commit", "-q", "-m", msg])
+            .env("GIT_COMMITTER_DATE", t)
+            .env("GIT_AUTHOR_DATE", t)
+            .current_dir(&r.path)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+    };
+    at("2020-01-01T10:00:00", "one");
+    at("2019-01-01T10:00:00", "two (clock behind)");
+    at("2021-01-01T10:00:00", "three");
+    at("2021-01-01T10:00:00", "four (same second)");
+    at("2021-01-01T10:00:00", "five (same second)");
+    let subjects = |limit| git::log::log(&r.path, "head", limit).unwrap().rows.into_iter().map(|c| c.summary).collect::<Vec<_>>();
+    let all = vec!["five (same second)", "four (same second)", "three", "two (clock behind)", "one"];
+    assert_eq!(subjects(100), all);
+    // A page ending inside the same-second run takes the whole run.
+    let l = git::log::log(&r.path, "head", 1).unwrap();
+    assert_eq!(l.rows.iter().map(|c| c.summary.as_str()).collect::<Vec<_>>(), &all[..3]);
+    assert!(l.more);
+    // Every child comes before its parent at any page size.
+    for limit in 1..=5 {
+        let rows = git::log::log(&r.path, "all", limit).unwrap().rows;
+        for (i, row) in rows.iter().enumerate() {
+            for p in &row.parents {
+                if let Some(j) = rows.iter().position(|x| &x.oid == p) {
+                    assert!(j > i, "parent before child at limit {limit}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn blame_with_git_matches_libgit2() {
+    let r = Repo::new();
+    let text = |v: &[&str]| v.iter().map(|l| format!("{l}\n")).collect::<String>();
+    r.write("f.txt", &text(&["a", "b", "c", "d", "e", "f", "g", "h"]));
+    r.commit_all("one");
+    r.write("f.txt", &text(&["a", "B", "c", "d", "e", "f", "g", "h", "i"]));
+    r.commit_all("two");
+    r.write("f.txt", &text(&["a", "B", "c", "D", "e", "f", "g", "h", "i", "j"]));
+    r.commit_all("three");
+    let b = git::blame::blame(&r.path, "f.txt").unwrap();
+    let repo = git2::Repository::open(&r.path).unwrap();
+    let head = repo.head().unwrap().target().unwrap();
+    let lib = git::blame::blame_hunks_libgit2(&repo, head, "f.txt").unwrap();
+    let per_line = |hunks: &[git::blame::BlameHunk]| {
+        let mut v = vec![String::new(); 10];
+        for h in hunks {
+            for i in 0..h.count {
+                v[h.start - 1 + i] = h.summary.clone();
+            }
+        }
+        v
+    };
+    assert_eq!(per_line(&b.hunks), per_line(&lib));
+    assert_eq!(per_line(&b.hunks), vec!["one", "two", "one", "three", "one", "one", "one", "one", "two", "three"]);
+    assert_eq!(b.lines.len(), 10);
+    // Adjacent lines from one commit form one hunk.
+    assert_eq!(b.hunks.iter().filter(|h| h.summary == "one").map(|h| h.count).collect::<Vec<_>>(), vec![1, 1, 4]);
+}
+
+#[test]
+fn partial_stash_keeps_other_untracked_files_out_and_applies_back() {
+    let r = Repo::new();
+    r.write("x.txt", "x\n");
+    r.write("y.txt", "y\n");
+    r.commit_all("xy");
+    r.write("y.txt", "y changed\n");
+    r.write("z.txt", "untracked, not chosen\n");
+    r.write("new/w.txt", "untracked, chosen\n");
+    git::stash::save_paths(&r.path, Some("pick"), true, false, false, &["y.txt".into(), "new".into()]).unwrap();
+    // Only the chosen untracked file is in the stash; the other stays put.
+    assert_eq!(r.git(&["ls-tree", "-r", "--name-only", "stash@{0}^3"]).trim(), "new/w.txt");
+    assert_eq!(r.git(&["log", "-1", "--format=%gs", "-g", "refs/stash"]).trim(), "On main: pick");
+    assert_eq!(r.read("z.txt"), "untracked, not chosen\n");
+    assert!(!Path::new(&r.path).join("new/w.txt").exists());
+    git::stash::apply(&r.path, 0).unwrap();
+    assert_eq!(r.read("y.txt"), "y changed\n");
+    assert_eq!(r.read("new/w.txt"), "untracked, chosen\n");
+
+    // Nothing untracked chosen: the stash has no untracked part at all.
+    r.git(&["checkout", "-q", "--", "y.txt"]);
+    r.write("y.txt", "again\n");
+    git::stash::save_paths(&r.path, None, true, false, false, &["y.txt".into()]).unwrap();
+    assert_eq!(r.git(&["rev-list", "--parents", "-n1", "stash@{0}"]).split_whitespace().count(), 3);
+    git::stash::apply(&r.path, 0).unwrap();
+    assert_eq!(r.read("y.txt"), "again\n");
+}
+
+#[test]
+fn discarding_an_untracked_file_removes_the_folders_it_leaves_empty() {
+    let r = Repo::new();
+    r.write("a.txt", "a\n");
+    r.write("dir/keep.txt", "k\n");
+    r.commit_all("base");
+    r.write("dir/deep/er/new.txt", "n\n");
+    r.write("other/one/new.txt", "n\n");
+    git::patch::discard_files(&r.path, &["dir/deep/er/new.txt".into(), "other/one/new.txt".into()]).unwrap();
+    assert!(!Path::new(&r.path).join("dir/deep").exists());
+    assert!(Path::new(&r.path).join("dir/keep.txt").exists());
+    assert!(!Path::new(&r.path).join("other").exists());
+    // Undo brings the files back, folders and all.
+    git::undo::undo(&r.path).unwrap();
+    assert_eq!(r.read("dir/deep/er/new.txt"), "n\n");
+}
+
+#[test]
+fn checkout_during_a_conflicted_rebase_says_so() {
+    let r = Repo::new();
+    r.write("f.txt", "base\n");
+    r.commit_all("base");
+    r.git(&["checkout", "-q", "-b", "topic"]);
+    r.write("f.txt", "topic\n");
+    r.commit_all("topic");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("f.txt", "main\n");
+    r.commit_all("main");
+    r.git(&["branch", "other"]);
+    r.git(&["checkout", "-q", "topic"]);
+    let out = Command::new("git").args(["rebase", "main"]).current_dir(&r.path).output().unwrap();
+    assert!(!out.status.success());
+    let e = git::branches::checkout_branch(&r.path, "other").unwrap_err().to_string();
+    assert!(e.starts_with("A rebase is in progress"), "{e}");
+}
+
+#[test]
+fn checkout_during_a_paused_arbor_rebase_is_refused() {
+    let r = Repo::new();
+    r.write("f.txt", "base\n");
+    r.commit_all("base");
+    r.git(&["checkout", "-q", "-b", "topic"]);
+    r.write("f.txt", "topic\n");
+    r.commit_all("topic");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("f.txt", "main\n");
+    r.commit_all("main");
+    r.git(&["checkout", "-q", "topic"]);
+    let _ = git::rebase::rebase(&r.path, "main");
+    assert!(git::rebase::paused(&git2::Repository::open(&r.path).unwrap()).is_some());
+    let e = git::branches::checkout_branch(&r.path, "main").unwrap_err().to_string();
+    assert!(e.starts_with("A rebase is paused"), "{e}");
+    git::rebase::abort_rebase(&r.path).unwrap();
+}

@@ -672,6 +672,8 @@ async fn desktop_entry(enable: bool) -> Result<desktop::Integration, String> {
 pub fn run() {
     // Before any window: the desktop matches windows to launchers by this name.
     desktop::set_names();
+    // Before any thread: libgit2's cache settings are process-wide.
+    git::init();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
