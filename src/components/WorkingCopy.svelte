@@ -175,7 +175,7 @@
           {#if st.pausedRebase}
             {@const p = st.pausedRebase}
             <b>{p.label}: paused at {p.step} of {p.total}</b>
-            <span><span class="mono">{p.commit}</span> “{p.summary}” {st.conflicted.length ? `conflicts in ${st.conflicted.length} file${st.conflicted.length === 1 ? "" : "s"}. Resolve them, then Continue.` : "is resolved. Continue to commit it and replay the rest."}</span>
+            <span><span class="mono">{p.commit}</span> “{p.summary}” {st.conflicted.length ? `conflicts in ${st.conflicted.length} file${st.conflicted.length === 1 ? ". Resolve it" : "s. Resolve them"}, then Continue.` : "is resolved. Continue to commit it and replay the rest."}</span>
             <div class="rbtns">
               <button class="btn small primary" disabled={!!st.conflicted.length || !!app.busy} onclick={act.rebaseContinue} title={st.conflicted.length ? "Resolve the conflicts first" : "Commit this step and carry on"}>Continue</button>
               <button class="btn small" disabled={!!app.busy} onclick={act.rebaseSkip} title="Leave this commit out">Skip commit</button>

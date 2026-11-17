@@ -1874,3 +1874,57 @@ fn pushes_to_different_repositories_can_overlap() {
         h.join().unwrap().unwrap();
     }
 }
+
+#[test]
+fn a_new_repository_reads_cleanly_and_errors_read_well() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().to_string_lossy().to_string();
+    assert!(Command::new("git").args(["init", "-q", "-b", "main", &p]).status().unwrap().success());
+    // Views of a repository with no commits are empty, not errors.
+    assert!(git::review::branches_review(&p, None).unwrap().rows.is_empty());
+    assert!(git::tree::tree_at(&p, "HEAD").unwrap().is_empty());
+    assert!(git::insight::grep(&p, "HEAD", "x", false, false, 10).unwrap().matches.is_empty());
+    std::fs::write(d.path().join("a.txt"), "a\n").unwrap();
+    let e = git::stash::snapshot(&p, None).unwrap_err().to_string();
+    assert!(e.contains("first commit"), "{e}");
+    // libgit2's own errors lose their "; class=…; code=…" tail.
+    let e = git::stash::save(&p, None, true, false, false).unwrap_err().to_string();
+    assert!(!e.contains("class=") && !e.contains("code="), "{e}");
+    assert!(e.starts_with("This repository has no commits yet"), "{e}");
+    let e = git::log::commit_info(&p, "0123456789abcdef0123456789abcdef01234567").unwrap_err().to_string();
+    assert!(!e.contains("class="), "{e}");
+    assert!(e.chars().next().unwrap().is_uppercase(), "{e}");
+}
+
+#[test]
+fn clear_messages_for_common_mistakes() {
+    let r = Repo::new();
+    // An empty first commit is refused, like any commit with nothing staged.
+    r.write("a.txt", "a\n");
+    let e = git::commit::commit(&r.path, "x", false, false).unwrap_err().to_string();
+    assert!(e.starts_with("Nothing is staged"), "{e}");
+    r.commit_all("Start");
+    let msg = |res: Result<(), arbor_lib::git::Error>| res.unwrap_err().to_string();
+    git::branches::create_branch(&r.path, "feature/a", None, false).unwrap();
+    assert!(msg(git::branches::create_branch(&r.path, "feature", None, false)).contains("already a branch 'feature/a'"));
+    assert!(msg(git::branches::create_branch(&r.path, "feature/a/b", None, false)).contains("'feature/a' is already a branch"));
+    assert!(msg(git::branches::rename_branch(&r.path, "feature/a", "main")).contains("already exists"));
+    assert_eq!(msg(git::branches::create_tag(&r.path, "v 1", "HEAD", None)), "'v 1' isn't a valid tag name.");
+    git::branches::create_tag(&r.path, "v1", "HEAD", None).unwrap();
+    assert_eq!(msg(git::branches::create_tag(&r.path, "v1", "HEAD", None)), "A tag named 'v1' already exists.");
+    assert_eq!(msg(git::branches::checkout_branch(&r.path, "nope")), "There's no branch called 'nope'.");
+    assert!(git::merge::merge(&r.path, "nope", false).unwrap_err().to_string().starts_with("Couldn't find 'nope'"));
+    // A remote that's a missing folder says so (libgit2: "unsupported URL protocol").
+    git::branches::add_remote(&r.path, "origin", "/nonexistent/arbor-test.git").unwrap();
+    let e = git::remote::fetch(&r.path, None, false, None, None).unwrap_err().to_string();
+    assert!(e.starts_with("There's no repository at /nonexistent/arbor-test.git"), "{e}");
+    // A branch checked out in another worktree can't be deleted or checked out here.
+    let wt = format!("{}-wt", r.path);
+    git::worktree::add(&r.path, &wt, "side", true, None).unwrap();
+    assert!(msg(git::branches::delete_branch(&r.path, "side", true)).contains("checked out in the worktree"));
+    git::branches::checkout_branch(&r.path, "feature/a").unwrap();
+    assert!(msg(git::branches::checkout_branch(&r.path, "side")).contains("already checked out in the worktree"));
+    // …and from the worktree, the main checkout's branch is protected the same way.
+    assert!(msg(git::branches::checkout_branch(&wt, "feature/a")).contains("already checked out in the worktree"));
+    let _ = std::fs::remove_dir_all(&wt);
+}

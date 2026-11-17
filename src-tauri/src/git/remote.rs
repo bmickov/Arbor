@@ -118,8 +118,22 @@ pub fn callbacks(config: Config, creds: Option<Creds>, progress: Progress) -> Re
     cb
 }
 
+/// A remote that's a folder on this computer and isn't there. libgit2 calls
+/// that an "unsupported URL protocol", which sends people looking in the
+/// wrong place.
+pub fn check_local_url(url: &str, what: &str) -> Result<()> {
+    let path = url.strip_prefix("file://").unwrap_or(url);
+    let b = path.as_bytes();
+    let absolute = path.starts_with('/') || (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'));
+    if absolute && !std::path::Path::new(path).exists() {
+        return err(format!("There's no repository at {path}{what}. Check the URL."));
+    }
+    Ok(())
+}
+
 fn fetch_one(repo: &Repository, name: &str, prune: bool, creds: Option<Creds>, progress: Progress) -> Result<()> {
     let mut remote = repo.find_remote(name)?;
+    check_local_url(remote.url().unwrap_or(""), &format!(", where {name} points (Repository settings → Remotes)"))?;
     let mut fo = FetchOptions::new();
     fo.remote_callbacks(callbacks(repo.config()?, creds, progress));
     fo.download_tags(AutotagOption::Auto);
@@ -203,6 +217,8 @@ pub fn pull(repo_path: &str, rebase: bool, creds: Option<Creds>, progress: Progr
 /// to be updated by hand).
 fn push_remote<'r>(repo: &'r Repository, name: &str) -> Result<(git2::Remote<'r>, bool)> {
     let r = repo.find_remote(name)?;
+    let url = r.pushurl().ok().flatten().or(r.url().ok()).unwrap_or("").to_string();
+    check_local_url(&url, &format!(", where {name} pushes (Repository settings → Remotes)"))?;
     match r.pushurl().ok().flatten().map(str::to_string) {
         Some(push) if Some(push.as_str()) != r.url().ok() => Ok((repo.remote_anonymous(&push)?, true)),
         _ => Ok((r, false)),

@@ -15,8 +15,15 @@
     void app.path;
     app.loadSigning();
   });
+  // Follow the repository's setting when it changes, but don't undo a box
+  // you ticked yourself just because the settings were read again.
+  let signDefault: boolean | null = null;
   $effect(() => {
-    sign = app.signing?.enabled ?? false;
+    const on = app.signing?.enabled ?? false;
+    if (on !== signDefault) {
+      signDefault = on;
+      sign = on;
+    }
   });
   let saved: { subject: string; body: string } | null = null;
   let loadedFor = "";

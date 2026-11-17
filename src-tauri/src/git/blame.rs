@@ -30,7 +30,10 @@ pub struct Blame {
 pub fn blame(repo_path: &str, path: &str) -> Result<Blame> {
     let repo = open(repo_path)?;
     let head = repo.head()?.peel_to_commit()?;
-    let entry = head.tree()?.get_path(Path::new(path))?;
+    let entry = head
+        .tree()?
+        .get_path(Path::new(path))
+        .map_err(|_| super::Error::Msg(format!("{path} isn't in a commit yet, so there's no history to show for its lines.")))?;
     let blob = repo.find_blob(entry.id())?;
     if blob.is_binary() {
         return Ok(Blame { lines: vec![], hunks: vec![], binary: true });

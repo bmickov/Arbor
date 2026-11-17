@@ -156,6 +156,10 @@ pub fn add(repo_path: &str, path: &str, branch: &str, create: bool, start: Optio
 /// Delete a worktree's folder and git's record of it. Its branch stays.
 pub fn remove(repo_path: &str, name: &str, force: bool) -> Result<()> {
     let repo = open(repo_path)?;
+    let known = repo.worktrees()?.iter().flatten().flatten().any(|w| w == name);
+    if !known {
+        return err(format!("There's no worktree called '{name}' any more. Refresh to see the current list."));
+    }
     let wt = repo.find_worktree(name)?;
     if wt.path().exists() {
         if let Ok(r) = Repository::open(wt.path()) {

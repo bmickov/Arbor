@@ -168,7 +168,7 @@
         </span>
       </div>
     {:else}
-      <div class="none faint">{review ? "No branches match." : ""}</div>
+      <div class="none faint">{!review ? "" : review.rows.length ? "No branches match." : "No branches yet. Make a first commit to start one."}</div>
     {/each}
   </div>
 

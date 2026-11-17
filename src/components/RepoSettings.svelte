@@ -81,6 +81,8 @@
   async function setConfig(key: string, value: string | null) {
     try {
       await api.setRepoConfig(app.path, key, value);
+      // Signing settings feed the commit box.
+      if (/^(commit\.gpgsign|user\.signingkey|gpg\.)/i.test(key)) app.loadSigning();
       await loadConfig();
       if (key === newKey) newKey = newValue = "";
     } catch (e) {

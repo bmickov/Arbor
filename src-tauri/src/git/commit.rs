@@ -91,6 +91,9 @@ pub fn commit_signed(repo_path: &str, message: &str, amend: bool, skip_hooks: bo
             for h in merge_heads {
                 parents.push(repo.find_commit(h)?);
             }
+        } else if parents.is_empty() && tree.is_empty() {
+            // The first commit: refuse an empty one, as later commits do.
+            return err("Nothing is staged. Stage some changes, then commit.");
         } else if let Some(p) = parents.first() {
             if p.tree_id() == tree.id() {
                 return err("Nothing is staged. Stage some changes, then commit.");

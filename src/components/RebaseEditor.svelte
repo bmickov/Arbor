@@ -72,7 +72,7 @@
     if (r) onclose();
     if (r?.result === "conflicts") {
       app.view = "changes";
-      toasts.push("error", `Rewriting stopped on ${r.conflicts.length} conflicted file${r.conflicts.length === 1 ? "" : "s"}. Resolve them, then choose Continue.`);
+      toasts.push("error", `Rewriting stopped on ${r.conflicts.length} conflicted file${r.conflicts.length === 1 ? ". Resolve it" : "s. Resolve them"}, then choose Continue.`);
     }
   }
 

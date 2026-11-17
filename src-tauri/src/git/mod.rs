@@ -39,7 +39,7 @@ use serde::Serialize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("{0}")]
+    #[error("{}", git_message(.0))]
     Git(#[from] git2::Error),
     #[error("{0}")]
     Io(#[from] std::io::Error),
@@ -50,6 +50,42 @@ pub enum Error {
     /// The remote asked for a username and password the app doesn't have.
     #[error("AUTH_REQUIRED:{0}")]
     AuthRequired(String),
+}
+
+/// No commit yet: HEAD names a branch that doesn't exist. (libgit2's own
+/// `is_empty` only recognises this when the branch is called master.)
+pub fn unborn(repo: &Repository) -> bool {
+    matches!(repo.head(), Err(e) if e.code() == git2::ErrorCode::UnbornBranch || e.code() == git2::ErrorCode::NotFound)
+}
+
+/// A libgit2 error as people should read it: plain words for the common
+/// cases, otherwise its message without the "; class=…; code=…" that its
+/// Display adds, starting with a capital letter.
+pub fn git_message(e: &git2::Error) -> String {
+    use git2::ErrorCode as C;
+    let m = e.message().trim();
+    match e.code() {
+        C::UnbornBranch => return "This repository has no commits yet. Make the first commit, then try again.".into(),
+        C::Unmerged => return "Some files still have conflicts. Resolve them (or abort the merge) first.".into(),
+        C::Locked => {
+            return "Another Git program is working in this repository (a .git/…lock file exists). Try again in a moment; if no Git program is running, delete the lock file.".into()
+        }
+        _ => {}
+    }
+    // "revspec 'nope' not found" → "Couldn't find 'nope'."
+    if let Some(rest) = m.strip_prefix("revspec '") {
+        if let Some(what) = rest.strip_suffix("' not found") {
+            return format!("Couldn't find '{what}'. It may have been deleted or renamed; refresh and try again.");
+        }
+    }
+    if m.contains("cannot create a tree from a not fully merged index") {
+        return "Some files still have conflicts. Resolve them (or abort the merge) first.".into();
+    }
+    let mut c = m.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => format!("Git error ({:?})", e.code()),
+    }
 }
 
 impl Serialize for Error {

@@ -157,6 +157,60 @@ fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// A name a new (or renamed) local branch can take: valid, unused, and not
+/// clashing with the folder-like way git stores branch names ("feature"
+/// can't sit beside "feature/a"). `except` is a branch being renamed.
+fn check_new_branch(repo: &Repository, name: &str, except: Option<&str>) -> Result<()> {
+    validate_name(name)?;
+    let mut existing = vec![];
+    for b in repo.branches(Some(BranchType::Local))? {
+        if let Some(n) = b?.0.name().ok().flatten() {
+            if Some(n) != except {
+                existing.push(n.to_string());
+            }
+        }
+    }
+    if existing.iter().any(|n| n == name) {
+        return err(format!("A branch named '{name}' already exists."));
+    }
+    if let Some(n) = existing.iter().find(|n| n.starts_with(&format!("{name}/"))) {
+        return err(format!("There's already a branch '{n}', so '{name}' can't be a branch too: git stores branch names like folders. Try '{name}-2' or '{name}/main'."));
+    }
+    if let Some(n) = existing.iter().find(|n| name.starts_with(&format!("{n}/"))) {
+        return err(format!("'{n}' is already a branch, so '{name}' can't be one too: git stores branch names like folders. Try '{n}-{}'.", &name[n.len() + 1..]));
+    }
+    Ok(())
+}
+
+/// The worktree (other than this one) that has `name` checked out.
+fn checked_out_elsewhere(repo: &Repository, name: &str) -> Option<String> {
+    let want = format!("refs/heads/{name}");
+    let here = repo.workdir().and_then(|p| std::fs::canonicalize(p).ok());
+    let on = |r: &Repository| r.find_reference("HEAD").ok().and_then(|h| h.symbolic_target().ok().flatten().map(str::to_string));
+    let mut others: Vec<std::path::PathBuf> = vec![];
+    // From a linked worktree, the main checkout isn't in the worktree list.
+    if repo.is_worktree() {
+        if let Some(main) = repo.commondir().parent() {
+            others.push(main.to_path_buf());
+        }
+    }
+    for wt in repo.worktrees().ok()?.iter().flatten().flatten() {
+        if let Ok(w) = repo.find_worktree(wt) {
+            others.push(w.path().to_path_buf());
+        }
+    }
+    for path in others {
+        if std::fs::canonicalize(&path).ok() == here {
+            continue;
+        }
+        let Ok(r) = Repository::open(&path) else { continue };
+        if on(&r).as_deref() == Some(want.as_str()) {
+            return Some(path.display().to_string().trim_end_matches(['/', '\\']).to_string());
+        }
+    }
+    None
+}
+
 /// Where HEAD points now: "refs/heads/x", or a commit id when detached.
 fn head_target(repo: &Repository) -> String {
     if !repo.head_detached().unwrap_or(false) {
@@ -208,6 +262,12 @@ fn checkout_recorded(repo: &Repository, target: &str, label: String) -> Result<(
 
 pub fn checkout_branch(repo_path: &str, name: &str) -> Result<()> {
     let repo = open(repo_path)?;
+    if repo.find_branch(name, BranchType::Local).is_err() {
+        return err(format!("There's no branch called '{name}'."));
+    }
+    if let Some(at) = checked_out_elsewhere(&repo, name) {
+        return err(format!("'{name}' is already checked out in the worktree at {at}. Open that worktree instead, or switch it to another branch first."));
+    }
     checkout_recorded(&repo, &format!("refs/heads/{name}"), format!("Check out {name}"))
 }
 
@@ -236,10 +296,7 @@ pub fn checkout_remote(repo_path: &str, full_name: &str, local_name: Option<&str
 
 pub fn create_branch(repo_path: &str, name: &str, from: Option<&str>, checkout: bool) -> Result<()> {
     let repo = open(repo_path)?;
-    validate_name(name)?;
-    if repo.find_branch(name, BranchType::Local).is_ok() {
-        return err(format!("A branch named '{name}' already exists."));
-    }
+    check_new_branch(&repo, name, None)?;
     let start = match from {
         Some(f) => repo.revparse_single(f)?.peel_to_commit()?,
         None => repo
@@ -275,6 +332,9 @@ pub fn delete_branch(repo_path: &str, name: &str, force: bool) -> Result<()> {
     let mut b = repo.find_branch(name, BranchType::Local)?;
     if b.is_head() {
         return err(format!("You can't delete '{name}' while it's checked out."));
+    }
+    if let Some(at) = checked_out_elsewhere(&repo, name) {
+        return err(format!("'{name}' is checked out in the worktree at {at}. Switch that worktree to another branch, or remove it, first."));
     }
     let tip = b.get().target().unwrap();
     if !force && !merged_or_pushed(&repo, &b, tip) {
@@ -316,6 +376,9 @@ pub fn delete_branches(repo_path: &str, names: &[String], force: bool) -> Result
         if b.is_head() {
             return err(format!("You can't delete '{name}' while it's checked out."));
         }
+        if let Some(at) = checked_out_elsewhere(&repo, name) {
+            return err(format!("'{name}' is checked out in the worktree at {at}. Switch that worktree to another branch, or remove it, first."));
+        }
         let tip = b.get().target().unwrap();
         if !force && !merged_or_pushed(&repo, &b, tip) {
             unmerged.push(name.clone());
@@ -342,7 +405,9 @@ pub fn delete_branches(repo_path: &str, names: &[String], force: bool) -> Result
 
 pub fn rename_branch(repo_path: &str, from: &str, to: &str) -> Result<()> {
     let repo = open(repo_path)?;
-    validate_name(to)?;
+    if from != to {
+        check_new_branch(&repo, to, Some(from))?;
+    }
     let mut b = repo.find_branch(from, BranchType::Local)?;
     b.rename(to, false)?;
     undo::record(&repo, format!("Rename {from} to {to}"), Action::RenameBranch { from: from.into(), to: to.into() });
@@ -360,7 +425,13 @@ pub fn set_upstream(repo_path: &str, branch: &str, upstream: Option<&str>) -> Re
 
 pub fn create_tag(repo_path: &str, name: &str, target: &str, message: Option<&str>) -> Result<()> {
     let repo = open(repo_path)?;
-    let obj = repo.revparse_single(target)?;
+    if !git2::Reference::is_valid_name(&format!("refs/tags/{name}")) || name.trim() != name || name.is_empty() {
+        return err(format!("'{name}' isn't a valid tag name."));
+    }
+    if repo.find_reference(&format!("refs/tags/{name}")).is_ok() {
+        return err(format!("A tag named '{name}' already exists."));
+    }
+    let obj = repo.revparse_single(target).map_err(|_| Error::Msg(format!("Couldn't find '{target}' to tag.")))?;
     match message.filter(|m| !m.trim().is_empty()) {
         Some(m) => {
             let sig = super::signature(&repo)?;
