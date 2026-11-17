@@ -34,6 +34,9 @@ fn commit_at<'r>(repo: &'r git2::Repository, rev: &str) -> Result<git2::Commit<'
 /// Every file in the repository at `rev` (a commit, branch or tag), in tree order.
 pub fn tree_at(repo_path: &str, rev: &str) -> Result<Vec<TreeEntry>> {
     let repo = open(repo_path)?;
+    if super::unborn(&repo) {
+        return Ok(vec![]);
+    }
     let tree = commit_at(&repo, rev)?.tree()?;
     let odb = repo.odb()?;
     let mut out = vec![];

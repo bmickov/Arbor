@@ -56,6 +56,7 @@ pub fn clone_repo(url: &str, dest: &str, creds: Option<super::remote::Creds>, pr
     if Path::new(dest).exists() && std::fs::read_dir(dest)?.next().is_some() {
         return err(format!("{dest} already exists and isn't empty."));
     }
+    super::remote::check_local_url(url, "")?;
     let config = git2::Config::open_default()?;
     let mut fo = git2::FetchOptions::new();
     fo.remote_callbacks(super::remote::callbacks(config, creds, progress));

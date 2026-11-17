@@ -153,6 +153,10 @@ pub fn branches_review(repo_path: &str, base: Option<&str>) -> Result<Review> {
         Some(b) if !b.is_empty() => b.to_string(),
         _ => default_base(&repo).ok_or_else(|| Error::Msg("This repository has no branches yet.".into()))?,
     };
+    // A new repository: nothing to review yet (the base branch is unborn).
+    if repo.head().is_err() && repo.branches(None)?.next().is_none() {
+        return Ok(Review { base: base_name, rows: vec![] });
+    }
     let base_oid = super::branches::resolve(&repo, &base_name)?;
     let mut rows = vec![];
     for b in repo.branches(Some(BranchType::Local))? {

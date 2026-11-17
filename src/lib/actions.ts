@@ -27,7 +27,7 @@ function afterMerge(m: { result?: string; conflicts: string[] } | undefined, wha
     app.view = "changes";
     const n = m.conflicts.length;
     const then = what === "rebase" ? "choose Continue" : "commit";
-    toasts.push("error", `The ${what} stopped on ${n} conflicted file${n === 1 ? "" : "s"}. Resolve them, then ${then}.`);
+    toasts.push("error", `The ${what} stopped on ${n} conflicted file${n === 1 ? ". Resolve it" : "s. Resolve them"}, then ${then}.`);
   }
 }
 
@@ -342,8 +342,8 @@ export function branchMenu(e: MouseEvent, name: string) {
       { label: `Rebase ${head} onto ${name}`, action: () => rebaseOnto(head, name) },
       { separator: true },
     ] as MenuItem[]),
-    { label: "Push", action: () => push(name) },
-    { label: "Track remote branch…", action: () => setUpstream(name) },
+    { label: "Push", disabled: !app.refs?.remotes.length, hint: app.refs?.remotes.length ? undefined : "no remotes", action: () => push(name) },
+    { label: "Track remote branch…", disabled: !app.refs?.remotes.length, action: () => setUpstream(name) },
     { separator: true },
     { label: "New branch from here…", action: () => newBranch(name, name) },
     { label: "Check out in a new worktree…", disabled: name === head, action: () => addWorktree(name) },
@@ -1098,7 +1098,7 @@ export async function flowFinish(branch: string) {
   });
   if (out?.result === "conflicts") {
     app.view = "changes";
-    toasts.push("error", `Merging into ${out.mergingInto} stopped on ${out.conflicts.length} conflicted file${out.conflicts.length === 1 ? "" : "s"}. Resolve them and commit, then finish ${branch} again.`);
+    toasts.push("error", `Merging into ${out.mergingInto} stopped on ${out.conflicts.length} conflicted file${out.conflicts.length === 1 ? ". Resolve it" : "s. Resolve them"} and commit, then finish ${branch} again.`);
   }
 }
 

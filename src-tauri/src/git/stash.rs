@@ -392,6 +392,12 @@ fn restore_others(repo: &Repository, keep: Vec<Kept>) -> Result<()> {
 /// files, which libgit2 can't smudge back).
 pub fn snapshot(repo_path: &str, name: Option<&str>) -> Result<String> {
     let repo = open(repo_path)?;
+    if super::unborn(&repo) {
+        return err("Snapshots need a first commit to compare your changes with. Make the first commit, then try again.");
+    }
+    if repo.index()?.has_conflicts() {
+        return err("Some files still have conflicts. Resolve them (or abort the merge) first.");
+    }
     let sig = signature(&repo)?;
     let head = repo.head()?.peel_to_commit()?;
     let branch = super::head_branch(&repo).unwrap_or_else(|| "(no branch)".into());

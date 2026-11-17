@@ -70,7 +70,7 @@ pub struct GrepResult {
 /// `case`; a regular expression when `regex`). Binary and huge files are skipped.
 pub fn grep(repo_path: &str, rev: &str, query: &str, case: bool, regex: bool, limit: usize) -> Result<GrepResult> {
     let repo = open(repo_path)?;
-    if query.is_empty() {
+    if query.is_empty() || super::unborn(&repo) {
         return Ok(GrepResult { matches: vec![], files: 0, more: false });
     }
     let pattern = if regex { query.to_string() } else { regex_escape(query) };

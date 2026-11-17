@@ -9,6 +9,12 @@
   import Icon from "./Icon.svelte";
 
   const st = $derived(app.status);
+  // Buttons that can only fail are disabled, with the reason as their tooltip.
+  const noRemote = $derived(!!app.refs && app.refs.remotes.length === 0);
+  const unborn = $derived(!!st && !st.head);
+  const midOperation = $derived(!!st && st.state !== "clean");
+  const NO_REMOTE = "This repository has no remotes yet. Add one with + next to Remotes in the sidebar.";
+  const NO_COMMIT = "Make a first commit first.";
 
   function repoMenu(e: MouseEvent) {
     const recent = [...library.repos]
@@ -85,22 +91,22 @@
   </div>
 
   <div class="center">
-    <button class="tool" onclick={act.fetchAll} disabled={!!app.busy} title={`Fetch from all remotes${fetchedAgo}`}>
+    <button class="tool" onclick={act.fetchAll} disabled={!!app.busy || noRemote} title={noRemote ? NO_REMOTE : `Fetch from all remotes${fetchedAgo}`}>
       <Icon name="fetch" /><span>Fetch</span>
     </button>
     <button class="tool" onclick={act.pull} disabled={!!app.busy || !st?.upstream} title={st?.upstream ? `Pull from ${st.upstream}` : "This branch doesn't track a remote branch"}>
       <Icon name="pull" /><span>Pull</span>
       {#if st?.behind}<b class="count">{st.behind}</b>{/if}
     </button>
-    <button class="tool" onclick={() => act.push()} disabled={!!app.busy || !st?.branch} title={st?.upstream ? `Push to ${st.upstream}` : "Push and track a new remote branch"}>
+    <button class="tool" onclick={() => act.push()} disabled={!!app.busy || !st?.branch || noRemote || unborn} title={noRemote ? NO_REMOTE : unborn ? NO_COMMIT : st?.upstream ? `Push to ${st.upstream}` : "Push and track a new remote branch"}>
       <Icon name="push" /><span>Push</span>
       {#if st?.ahead}<b class="count">{st.ahead}</b>{/if}
     </button>
-    <button class="tool" onclick={act.sync} disabled={!!app.busy || !st?.branch} title={keyText(st?.upstream ? `Pull from ${st.upstream}, then push (Ctrl+Shift+Y)` : "Push and track a new remote branch (Ctrl+Shift+Y)")}>
+    <button class="tool" onclick={act.sync} disabled={!!app.busy || !st?.branch || noRemote || unborn} title={noRemote ? NO_REMOTE : unborn ? NO_COMMIT : keyText(st?.upstream ? `Pull from ${st.upstream}, then push (Ctrl+Shift+Y)` : "Push and track a new remote branch (Ctrl+Shift+Y)")}>
       <Icon name="sync" /><span>Sync</span>
     </button>
     <span class="gap"></span>
-    <button class="tool" onclick={() => act.stashChanges()} disabled={!!app.busy} title="Stash your changes (right-click to save a snapshot instead)"
+    <button class="tool" onclick={() => act.stashChanges()} disabled={!!app.busy || unborn || midOperation} title={unborn ? NO_COMMIT : midOperation ? "Finish or abort the merge, rebase or cherry-pick in progress first." : "Stash your changes (right-click to save a snapshot instead)"}
       oncontextmenu={(e) => menu.fromEvent(e, [
         { label: "Stash changes…", hint: keyText("Ctrl+Shift+S"), action: () => act.stashChanges() },
         { label: "Save a snapshot…", hint: "keeps your changes", action: () => act.snapshot() },

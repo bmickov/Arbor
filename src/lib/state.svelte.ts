@@ -637,6 +637,8 @@ class App {
     }
     this.refreshing = true;
     const p = this.path;
+    // A refresh you ask for also picks up signing settings changed elsewhere.
+    if (withLog) this.loadSigning();
     try {
       const [status, refs, stashes, undo] = await Promise.all([
         api.status(p), api.refs(p), api.stashes(p), api.undoList(p),
