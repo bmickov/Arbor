@@ -74,6 +74,7 @@
     menu.fromEvent(e, [
       { label: "Apply and remove", action: () => act.applyStash(index, true) },
       { label: "Apply, keep in list", action: () => act.applyStash(index, false) },
+      { label: "Go back to this point…", action: () => act.goBackToStash(oid, app.stashes.find((s) => s.oid === oid)?.message ?? "this stash") },
       { label: "New branch from stash…", action: () => act.stashToBranch(index) },
       { separator: true },
       { label: "Delete…", danger: true, action: () => act.dropStash(index) },

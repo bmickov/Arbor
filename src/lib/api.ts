@@ -285,6 +285,12 @@ export const api = {
   rebaseContinue: (repo: string) => call<RebaseOutcome>("rebase_continue", { repo }),
   rebaseSkip: (repo: string) => call<RebaseOutcome>("rebase_skip", { repo }),
   rebaseAbort: (repo: string) => call<void>("rebase_abort", { repo }),
+  /** Fold the staged changes into an earlier commit on this branch; the working tree isn't touched. */
+  foldInto: (repo: string, oid: string) => call<RebaseOutcome>("fold_into", { repo, oid }),
+  /** Save every current change as a stash without changing the working copy; returns its label. */
+  stashSnapshot: (repo: string, name: string | null) => call<string>("stash_snapshot", { repo, name }),
+  /** Snapshot the current changes, clear the working copy and restore the stash `oid`; returns the new snapshot's label. */
+  stashRestoreSnapshot: (repo: string, oid: string) => call<string | null>("stash_restore_snapshot", { repo, oid }),
   rebaseBranch: (repo: string, branch: string, onto: string) => call<RebaseOutcome>("rebase_branch", { repo, branch, onto }),
   interactiveRebase: (repo: string, base: string | null, steps: Step[], label: string) =>
     call<RebaseOutcome>("interactive_rebase", { repo, base, steps, label }),

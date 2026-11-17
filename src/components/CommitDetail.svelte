@@ -78,6 +78,7 @@
     const short = info?.short ?? oid.slice(0, 7);
     // Stashes are commits too, but "restore" there means applying the stash.
     const isStash = !!info && info.parents.length === 3;
+    const link = isStash ? null : act.hostLink(oid, f?.status === "deleted" ? undefined : path);
     menu.fromEvent(e, [
       { label: "File history & blame", action: () => (app.fileHistoryPath = path) },
       { label: "Open current version", action: () => api.openExternal(`${app.path}/${path}`) },
@@ -87,6 +88,7 @@
       { label: "Restore the version before this commit", disabled: isStash || !info?.parents.length || f?.status === "added", action: () => act.restoreFile(`${oid}^`, f?.oldPath ?? path, `as it was before ${short}`) },
       { separator: true },
       { label: "Copy path", action: () => navigator.clipboard.writeText(path) },
+      ...(link && f?.status !== "deleted" ? [{ label: link.label, hint: link.pushed ? undefined : "not pushed yet", disabled: !link.pushed, action: link.open }] : []),
     ], basename(path));
   }
 

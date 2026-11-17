@@ -54,6 +54,7 @@ pub struct FileDiff {
 /// - `origins`: one character per line (' ', '+' or '-')
 /// - `text`: the line contents joined with '\n'
 /// - `noNl`: indexes of lines without a trailing newline
+///
 /// Line numbers aren't sent; the UI counts them up from `oldStart`/`newStart`.
 impl Serialize for Hunk {
     fn serialize<S: serde::Serializer>(&self, ser: S) -> std::result::Result<S::Ok, S::Error> {

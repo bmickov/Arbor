@@ -28,6 +28,7 @@
       { label: "Open terminal here", action: () => api.openTerminal(app.path) },
       { label: "Add remote…", action: act.addRemote },
       { label: "Repository settings…", action: () => (app.repoSettings = true) },
+      ...act.repoHostItems(),
       { separator: true },
       { label: "Apply patch…", action: act.applyPatch },
       { label: "Save changes as patch…", action: act.saveChangesPatch },
@@ -99,7 +100,11 @@
       <Icon name="sync" /><span>Sync</span>
     </button>
     <span class="gap"></span>
-    <button class="tool" onclick={() => act.stashChanges()} disabled={!!app.busy} title="Stash your changes">
+    <button class="tool" onclick={() => act.stashChanges()} disabled={!!app.busy} title="Stash your changes (right-click to save a snapshot instead)"
+      oncontextmenu={(e) => menu.fromEvent(e, [
+        { label: "Stash changes…", hint: keyText("Ctrl+Shift+S"), action: () => act.stashChanges() },
+        { label: "Save a snapshot…", hint: "keeps your changes", action: () => act.snapshot() },
+      ])}>
       <Icon name="stash" /><span>Stash</span>
     </button>
     <button class="tool" onclick={(e) => act.flowMenu(e)} disabled={!!app.busy} title="Git-flow: start and finish features, releases and hotfixes">

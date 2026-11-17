@@ -128,6 +128,9 @@ contains none of their code or artwork.
   the whole history, not just the loaded commits
 - Right-click a commit to check out, branch, tag, cherry-pick, revert, reset,
   edit its message, squash or fixup into its parent, or remove it
+- **Fold staged changes into an earlier commit**: right-click any commit on
+  your branch → "Fold staged changes into this commit…". The commits after it
+  are replayed on top, and your unstaged changes and new files aren't touched
 - **Drag a commit up or down to reorder it**
 - "Rewrite from here…" opens an interactive rebase editor: reorder by drag,
   then keep, edit message, squash, fixup or remove each commit
@@ -143,6 +146,14 @@ contains none of their code or artwork.
   says so first, listing the files, so you can cancel or go ahead
 - Fetch (with prune), pull (merge or rebase), push with rejection handling
 - **Sync**: pull, then push, in one click
+- **Pull requests**: "Create pull request…" on any branch opens the page that
+  starts one on GitHub, GitLab (merge requests), Bitbucket, Codeberg, Gitea,
+  Forgejo or Azure DevOps, aimed at main (or the branch it's stacked on),
+  pushing it first if needed. Publishing a new branch offers it too
+- **Open on GitHub** (or GitLab, Bitbucket…): the repository, a branch, a
+  commit, or a file as it was in a commit; the repository menu also links to
+  its pull requests
+- Remotes with a separate push URL (`remote.<name>.pushurl`) push there
 - **Fetch automatically** in the background (every 10 minutes by default), so
   the counts of commits to pull stay current, with a desktop notification when
   new commits arrive for a branch (turn it off in Preferences → Diffs & Git)
@@ -207,6 +218,10 @@ contains none of their code or artwork.
 **Stashes**
 - Stash with a message, optionally including new files or keeping staged changes
 - Apply, apply-and-remove, delete, or turn a stash into a branch
+- **Snapshots** (right-click Stash, or the command palette): save every
+  current change, new files included, as a stash while your working copy
+  stays exactly as it is. "Go back to this point…" on any stash makes the
+  working copy what it holds, saving where you are now as a snapshot first
 - Select several stashes (Ctrl+click, Shift+click, Ctrl+A) and delete them
   together with the Delete key or the Delete button. Deleting always asks
   first, and one Undo restores them all

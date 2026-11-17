@@ -519,6 +519,18 @@ async fn rebase_skip(repo: String) -> R<git::rebase::RebaseOutcome> {
     blocking(move || git::rebase::skip_rebase(&repo)).await
 }
 #[tauri::command]
+async fn fold_into(repo: String, oid: String) -> R<git::rebase::RebaseOutcome> {
+    blocking(move || git::rebase::fold_into(&repo, &oid)).await
+}
+#[tauri::command]
+async fn stash_snapshot(repo: String, name: Option<String>) -> R<String> {
+    blocking(move || git::stash::snapshot(&repo, name.as_deref())).await
+}
+#[tauri::command]
+async fn stash_restore_snapshot(repo: String, oid: String) -> R<Option<String>> {
+    blocking(move || git::stash::restore_snapshot(&repo, &oid)).await
+}
+#[tauri::command]
 async fn rebase_abort(repo: String) -> R<()> {
     blocking(move || git::rebase::abort_rebase(&repo)).await
 }
@@ -684,7 +696,7 @@ pub fn run() {
             library_get, library_save, library_add_many, scan_folder, repo_summaries,
             get_status, diff_unstaged, diff_staged, file_at,
             stage_files, unstage_files, stage_all, unstage_all, discard_files,
-            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, rebase_continue, rebase_skip, rebase_abort, search_log, predict_merge, grep_tree, remotes_info, edit_remote, read_ignore, write_ignore, repo_config, set_repo_config, lfs_info, lfs_checkout, lfs_pull, lfs_track, lfs_locks, lfs_lock, tools_list, diff_tool, merge_tool, flow_config, flow_suggest, flow_init, flow_start, flow_finish, stack_list, stack_set_parent, stack_restack, stack_descendants, bisect_start, bisect_mark, bisect_reset, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
+            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, rebase_continue, rebase_skip, rebase_abort, fold_into, stash_snapshot, stash_restore_snapshot, search_log, predict_merge, grep_tree, remotes_info, edit_remote, read_ignore, write_ignore, repo_config, set_repo_config, lfs_info, lfs_checkout, lfs_pull, lfs_track, lfs_locks, lfs_lock, tools_list, diff_tool, merge_tool, flow_config, flow_suggest, flow_init, flow_start, flow_finish, stack_list, stack_set_parent, stack_restack, stack_descendants, bisect_start, bisect_mark, bisect_reset, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
             commit, head_message, cherry_pick, revert_commit, reset_to,
             get_log, commit_info, tracked_files, reflog, branches_review, compare_branches, compare_file_diff,
             tree_at, file_content, export_zip, ignore_pattern, untrack_files, restore_file,
