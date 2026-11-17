@@ -52,6 +52,20 @@ pub enum Error {
     AuthRequired(String),
 }
 
+/// Process-wide libgit2 settings. Call once, before any thread starts.
+///
+/// libgit2 only caches trees and commits up to 4 KB by default, so a folder
+/// with a hundred files (a tree of a few KB) is unpacked again on every visit;
+/// walking history re-reads the same big trees thousands of times. Caching
+/// them makes history, file history, blame and search several times faster.
+pub fn init() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| unsafe {
+        let _ = git2::opts::set_cache_object_limit(git2::ObjectType::Tree, 4 << 20);
+        let _ = git2::opts::set_cache_object_limit(git2::ObjectType::Commit, 64 << 10);
+    });
+}
+
 /// No commit yet: HEAD names a branch that doesn't exist. (libgit2's own
 /// `is_empty` only recognises this when the branch is called master.)
 pub fn unborn(repo: &Repository) -> bool {

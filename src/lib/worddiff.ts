@@ -30,9 +30,23 @@ function merge(ranges: Range[], s: string): Range[] {
  */
 export function wordRanges(a: string, b: string): { a: Range[]; b: Range[] } | null {
   if (a === b) return null;
+  // Minified or generated lines: don't even split them up.
+  if (a.length > MAX_TOKENS * 16 || b.length > MAX_TOKENS * 16) return null;
   const ta = tokens(a), tb = tokens(b);
-  if (ta.length > MAX_TOKENS || tb.length > MAX_TOKENS) return null;
-  // Longest common subsequence of tokens.
+  // The common case is a word or two changed mid-line: the same tokens at
+  // both ends are matched directly, and only the middle goes to the LCS.
+  let pre = 0;
+  while (pre < ta.length && pre < tb.length && ta[pre].t === tb[pre].t) pre++;
+  let suf = 0;
+  while (suf < ta.length - pre && suf < tb.length - pre && ta[ta.length - 1 - suf].t === tb[tb.length - 1 - suf].t) suf++;
+  const sameEnds = pre + suf;
+  const ca = ta.slice(pre, ta.length - suf), cb = tb.slice(pre, tb.length - suf);
+  if (ca.length > MAX_TOKENS || cb.length > MAX_TOKENS) return null;
+  return lcsRanges(a, b, ca, cb, sameEnds);
+}
+
+function lcsRanges(a: string, b: string, ta: { t: string; at: number }[], tb: { t: string; at: number }[], sameEnds: number): { a: Range[]; b: Range[] } | null {
+  // Longest common subsequence of the differing middle.
   const n = ta.length, m = tb.length;
   const dp = new Uint16Array((n + 1) * (m + 1));
   const at = (i: number, j: number) => i * (m + 1) + j;
@@ -65,7 +79,7 @@ export function wordRanges(a: string, b: string): { a: Range[]; b: Range[] } | n
   }
   // Mostly rewritten lines: highlighting nearly everything is just noise.
   const changed = (r: Range[]) => r.reduce((s, [x, y]) => s + y - x, 0);
-  const common = dp[0];
+  const common = dp[0] + sameEnds;
   if (common === 0 || (changed(ma) > a.trim().length * 0.7 && changed(mb) > b.trim().length * 0.7)) return null;
   return { a: merge(ma, a), b: merge(mb, b) };
 }

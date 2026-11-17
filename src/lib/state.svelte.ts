@@ -269,6 +269,13 @@ class App {
 
   private refreshing = false;
   private lastSig = "";
+  /** How long the last refresh took (ms) and when it finished: background
+   *  refreshes space themselves out on repositories where they're slow. */
+  refreshCost = 0;
+  refreshedAt = 0;
+  /** The last background refresh error shown, so a lasting problem (a
+   *  deleted folder…) is reported once, not every few seconds. */
+  private refreshError = "";
   /** Set when the window regains focus: file contents may differ even if status doesn't. */
   workdirMayHaveChanged = false;
   private queued = false;
@@ -637,6 +644,7 @@ class App {
     }
     this.refreshing = true;
     const p = this.path;
+    const started = performance.now();
     // A refresh you ask for also picks up signing settings changed elsewhere.
     if (withLog) this.loadSigning();
     try {
@@ -659,10 +667,15 @@ class App {
         if (withLog || this.view === "history" || this.log.length > 0) await this.loadLog();
       }
       this.version++;
+      this.refreshError = "";
     } catch (e) {
-      toasts.push("error", String(e));
+      const msg = String(e);
+      if (withLog || msg !== this.refreshError) toasts.push("error", msg);
+      this.refreshError = msg;
     } finally {
       this.refreshing = false;
+      this.refreshCost = performance.now() - started;
+      this.refreshedAt = Date.now();
       if (this.queued) {
         this.queued = false;
         this.refresh(withLog);

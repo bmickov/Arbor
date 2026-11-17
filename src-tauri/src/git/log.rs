@@ -147,6 +147,17 @@ impl Lanes {
         }
         for (i, p) in parents.iter().enumerate() {
             match self.find(*p) {
+                // The first parent is already awaited by a lane to the right:
+                // carry on straight down here and let that lane bend in when
+                // the parent comes (git's "|/"), rather than bending this
+                // commit's line out to the right.
+                Some(k) if i == 0 && k > col => {
+                    if col >= self.lanes.len() {
+                        self.lanes.resize(col + 1, None);
+                    }
+                    self.lanes[col] = Some((*p, color));
+                    segs.push([col as u16, col as u16, 2, color]);
+                }
                 Some(k) => {
                     // Joining a lane that already exists: the curve belongs
                     // to this commit's branch, so it keeps this commit's colour.
@@ -175,39 +186,141 @@ impl Lanes {
     }
 }
 
-/// `scope`: "all" for every branch, "head" for the current branch, or a ref name.
-pub fn log(repo_path: &str, scope: &str, limit: usize) -> Result<Log> {
-    let repo = open(repo_path)?;
-    let mut walk = repo.revwalk()?;
-    walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    match scope {
-        "all" => {
-            let _ = walk.push_head();
-            walk.push_glob("refs/heads")?;
-            walk.push_glob("refs/remotes")?;
-            walk.push_glob("refs/tags")?;
-        }
-        "head" => {
-            if walk.push_head().is_err() {
-                return Ok(Log { rows: vec![], more: false });
-            }
-        }
-        other => {
-            let id = super::branches::resolve(&repo, other)?;
-            walk.push(id)?;
+/// A lazy walk of the commits reachable from some tips, newest commit date
+/// first. libgit2's own revwalk reads the entire history before returning
+/// anything as soon as any sort order is asked for (even date order), which
+/// costs a quarter of a second per 40,000 commits.
+pub struct DateWalk<'r> {
+    repo: &'r Repository,
+    heap: std::collections::BinaryHeap<(i64, std::cmp::Reverse<u64>, Oid)>,
+    seen: std::collections::HashSet<Oid>,
+    seq: u64,
+}
+
+impl<'r> DateWalk<'r> {
+    pub fn new(repo: &'r Repository) -> Self {
+        DateWalk { repo, heap: Default::default(), seen: Default::default(), seq: 0 }
+    }
+
+    /// Start from a commit (or anything that peels to one; others are ignored).
+    pub fn push(&mut self, id: Oid) {
+        let Ok(c) = self.repo.find_object(id, None).and_then(|o| o.peel_to_commit()) else { return };
+        if self.seen.insert(c.id()) {
+            self.seq += 1;
+            self.heap.push((c.time().seconds(), std::cmp::Reverse(self.seq), c.id()));
         }
     }
-    let labels = ref_labels(&repo)?;
-    let mut lanes = Lanes { lanes: vec![], next_color: 0 };
-    let mut rows = Vec::new();
+
+    /// Start from HEAD and every branch, remote branch and tag.
+    pub fn push_all(&mut self) -> Result<()> {
+        if let Ok(h) = self.repo.head() {
+            if let Some(t) = h.target() {
+                self.push(t);
+            }
+        }
+        for r in self.repo.references()?.flatten() {
+            let name = r.name().unwrap_or("");
+            if name.starts_with("refs/heads/") || name.starts_with("refs/remotes/") || name.starts_with("refs/tags/") {
+                if let Some(t) = r.resolve().ok().and_then(|r| r.target()) {
+                    self.push(t);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'r> Iterator for DateWalk<'r> {
+    type Item = Result<git2::Commit<'r>>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let (_, _, id) = self.heap.pop()?;
+        let c = match self.repo.find_commit(id) {
+            Ok(c) => c,
+            Err(e) => return Some(Err(e.into())),
+        };
+        for p in c.parent_ids() {
+            if self.seen.insert(p) {
+                if let Ok(pc) = self.repo.find_commit(p) {
+                    self.seq += 1;
+                    self.heap.push((pc.time().seconds(), std::cmp::Reverse(self.seq), p));
+                }
+            }
+        }
+        Some(Ok(c))
+    }
+}
+
+/// The first `limit` commits of a date-ordered walk (a few more when several
+/// share the last one's time), put in topological order: children before
+/// parents, newest first among those ready. The bool says whether there were
+/// more.
+///
+/// libgit2's TOPOLOGICAL sort walks the entire history before returning the
+/// first commit, so a page of 2,000 commits cost as much as all of them (and
+/// seconds on a big repository). A date-ordered walk is lazy; sorting just
+/// the page fixes the rare commit whose date is older than its parent's.
+fn topo_page<'r>(walk: DateWalk<'r>, limit: usize) -> Result<(Vec<git2::Commit<'r>>, bool)> {
+    let limit = limit.max(1);
+    let mut page: Vec<git2::Commit<'r>> = Vec::with_capacity(limit.min(1 << 16) + 1);
     let mut more = false;
-    for id in walk {
-        let id = id?;
-        if rows.len() >= limit {
+    for c in walk {
+        let c = c?;
+        // Past the limit, keep going only through commits with the same time
+        // as the last one: same-second commits have no date order, and
+        // stopping among them could leave a child out while its parent is in.
+        if page.len() >= limit && page.last().is_some_and(|l| l.time().seconds() != c.time().seconds()) {
             more = true;
             break;
         }
-        let c = repo.find_commit(id)?;
+        page.push(c);
+    }
+    // Kahn's algorithm within the page, newest commit first among the ready.
+    let index: HashMap<Oid, usize> = page.iter().enumerate().map(|(i, c)| (c.id(), i)).collect();
+    let mut children = vec![0usize; page.len()];
+    for c in &page {
+        for p in c.parent_ids() {
+            if let Some(&j) = index.get(&p) {
+                children[j] += 1;
+            }
+        }
+    }
+    let key = |i: usize| (page[i].time().seconds(), std::cmp::Reverse(i));
+    let mut ready: std::collections::BinaryHeap<(i64, std::cmp::Reverse<usize>)> = (0..page.len()).filter(|&i| children[i] == 0).map(key).collect();
+    let mut order = Vec::with_capacity(page.len());
+    while let Some((_, std::cmp::Reverse(i))) = ready.pop() {
+        order.push(i);
+        for p in page[i].parent_ids() {
+            if let Some(&j) = index.get(&p) {
+                children[j] -= 1;
+                if children[j] == 0 {
+                    ready.push(key(j));
+                }
+            }
+        }
+    }
+    let mut slots: Vec<Option<git2::Commit<'r>>> = page.into_iter().map(Some).collect();
+    let sorted: Vec<git2::Commit<'r>> = order.into_iter().filter_map(|i| slots[i].take()).collect();
+    Ok((sorted, more))
+}
+
+/// `scope`: "all" for every branch, "head" for the current branch, or a ref name.
+pub fn log(repo_path: &str, scope: &str, limit: usize) -> Result<Log> {
+    let repo = open(repo_path)?;
+    let mut walk = DateWalk::new(&repo);
+    match scope {
+        "all" => walk.push_all()?,
+        "head" => match repo.head().ok().and_then(|h| h.target()) {
+            Some(t) => walk.push(t),
+            None => return Ok(Log { rows: vec![], more: false }),
+        },
+        other => walk.push(super::branches::resolve(&repo, other)?),
+    }
+    let labels = ref_labels(&repo)?;
+    let mut lanes = Lanes { lanes: vec![], next_color: 0 };
+    let (page, more) = topo_page(walk, limit)?;
+    let mut rows = Vec::with_capacity(page.len());
+    for c in page {
+        let id = c.id();
         let parents: Vec<Oid> = c.parent_ids().collect();
         let graph = lanes.row(id, &parents);
         let author = c.author();
@@ -293,6 +406,9 @@ pub struct FileHistoryEntry {
 pub fn file_history(repo_path: &str, path: &str, limit: usize) -> Result<Vec<FileHistoryEntry>> {
     let repo = open(repo_path)?;
     let mut walk = repo.revwalk()?;
+    // Topological: commits made in the same second (a rebase makes many)
+    // have no date order. Finding every change to a file walks the whole
+    // history anyway, so the full walk this needs costs little extra.
     walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
     if walk.push_head().is_err() {
         return Ok(vec![]);
@@ -304,14 +420,15 @@ pub fn file_history(repo_path: &str, path: &str, limit: usize) -> Result<Vec<Fil
         let id = id?;
         let c = repo.find_commit(id)?;
         let tree = c.tree()?;
-        let Ok(entry) = tree.get_path(Path::new(&current)) else { continue };
         let parent_tree = if c.parent_count() > 0 { Some(c.parent(0)?.tree()?) } else { None };
-        let parent_entry = parent_tree.as_ref().and_then(|t| t.get_path(Path::new(&current)).ok());
-        let changed = match &parent_entry {
-            Some(pe) => pe.id() != entry.id(),
-            None => true,
+        let (entry, parent_entry) = match &parent_tree {
+            Some(pt) => match path_ids(&repo, &tree, pt, &current)? {
+                PathIds::Same => continue,
+                PathIds::Differ(new, old) => (new, old),
+            },
+            None => (tree.get_path(Path::new(&current)).ok().map(|e| e.id()), None),
         };
-        if !changed {
+        if entry.is_none() {
             continue;
         }
         let author = c.author();
@@ -353,6 +470,41 @@ pub fn file_history(repo_path: &str, path: &str, limit: usize) -> Result<Vec<Fil
         }
     }
     Ok(out)
+}
+
+enum PathIds {
+    /// The path is the same in both trees (or missing from both).
+    Same,
+    /// It differs: its id in the first tree and in the second.
+    Differ(Option<Oid>, Option<Oid>),
+}
+
+/// Compare `path` in two trees from the top down, stopping at the first
+/// folder that's identical in both. Most commits leave most folders alone,
+/// so this rarely has to look at the file itself.
+fn path_ids(repo: &Repository, a: &git2::Tree, b: &git2::Tree, path: &str) -> Result<PathIds> {
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let (mut ta, mut tb) = (a.clone(), b.clone());
+    for (i, part) in parts.iter().enumerate() {
+        let ea = ta.get_name(part).map(|e| (e.id(), e.kind()));
+        let eb = tb.get_name(part).map(|e| (e.id(), e.kind()));
+        match (ea, eb) {
+            (None, None) => return Ok(PathIds::Same),
+            (Some((x, _)), Some((y, _))) if x == y => return Ok(PathIds::Same),
+            _ if i + 1 == parts.len() => return Ok(PathIds::Differ(ea.map(|e| e.0), eb.map(|e| e.0))),
+            (Some((x, Some(git2::ObjectType::Tree))), Some((y, Some(git2::ObjectType::Tree)))) => {
+                ta = repo.find_tree(x)?;
+                tb = repo.find_tree(y)?;
+            }
+            // A folder on one side only (or not a folder): look the rest up directly.
+            _ => {
+                let full = |t: &git2::Tree| t.get_path(Path::new(path)).ok().map(|e| e.id());
+                let (x, y) = (full(a), full(b));
+                return Ok(if x == y { PathIds::Same } else { PathIds::Differ(x, y) });
+            }
+        }
+    }
+    Ok(PathIds::Same)
 }
 
 // ---- Searching the whole history ----
@@ -463,6 +615,13 @@ pub fn search(repo_path: &str, scope: &str, f: &LogFilter, limit: usize) -> Resu
         if path.is_some() || contains.is_some() {
             let tree = c.tree()?;
             let parent = c.parent(0).ok().map(|p| p.tree()).transpose()?;
+            // A plain path (no wildcards; a file or a folder) is ruled out
+            // cheaply first: an unchanged folder has the same id.
+            if let (Some(p), Some(pt)) = (&path, &parent) {
+                if !p.contains(['*', '?', '[']) && matches!(path_ids(&repo, &tree, pt, p)?, PathIds::Same) {
+                    continue;
+                }
+            }
             let mut opts = git2::DiffOptions::new();
             if let Some(p) = &path {
                 opts.pathspec(p);

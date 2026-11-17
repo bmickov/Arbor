@@ -50,17 +50,21 @@ pub fn reflog(repo_path: &str, refname: &str, limit: usize) -> Result<Vec<Reflog
     // commits have been seen (usually quickly, as they're recent).
     let mut unseen: HashSet<Oid> = out.iter().filter_map(|e| Oid::from_str(&e.oid).ok()).collect();
     if !unseen.is_empty() {
-        let mut walk = repo.revwalk()?;
-        walk.set_sorting(Sort::TIME)?;
+        // Newest first, lazily: libgit2's sorted revwalk reads everything up
+        // front, while the reflog's commits are almost always recent.
+        let mut walk = super::log::DateWalk::new(&repo);
         for r in repo.references()?.flatten() {
             if let Some(t) = r.resolve().ok().and_then(|r| r.target()) {
-                // Tags can point at non-commits; ignore those.
-                let _ = walk.push(t);
+                walk.push(t);
             }
         }
-        for id in walk.flatten() {
-            unseen.remove(&id);
-            if unseen.is_empty() {
+        // Once the walk is well past the oldest unaccounted entry (a week of
+        // slack for clocks that disagree), whatever's left is lost: a commit
+        // turns up no later than its own date.
+        let oldest = unseen.iter().filter_map(|o| repo.find_commit(*o).ok()).map(|c| c.time().seconds()).min().unwrap_or(i64::MIN);
+        for c in walk.flatten() {
+            unseen.remove(&c.id());
+            if unseen.is_empty() || c.time().seconds() < oldest.saturating_sub(7 * 86400) {
                 break;
             }
         }
@@ -131,8 +135,10 @@ pub fn default_base(repo: &Repository) -> Option<String> {
 /// Is everything on `tip` already in `base`? "merged" when `tip` is an
 /// ancestor; "squashed" when merging it into `base` would change nothing
 /// (its changes arrived another way: squash merge, rebase, cherry-picks).
-fn merge_state(repo: &Repository, base: Oid, tip: Oid) -> Result<&'static str> {
-    if base == tip || repo.graph_descendant_of(base, tip)? {
+/// merged | squashed | unmerged. `ahead` is how many commits the branch has
+/// that the base doesn't: none means it's merged.
+fn merge_state(repo: &Repository, base: Oid, tip: Oid, ahead: usize) -> Result<&'static str> {
+    if base == tip || ahead == 0 {
         return Ok("merged");
     }
     let Ok(mb) = repo.merge_base(base, tip) else { return Ok("unmerged") };
@@ -147,6 +153,43 @@ fn merge_state(repo: &Repository, base: Oid, tip: Oid) -> Result<&'static str> {
     Ok(if result == ours.id() { "squashed" } else { "unmerged" })
 }
 
+/// What's needed about a branch before the (slow) graph work.
+struct BranchTip {
+    name: String,
+    tip: Oid,
+    is_head: bool,
+    upstream: Option<String>,
+    upstream_tip: Option<Oid>,
+}
+
+fn review_row(repo: &Repository, base_name: &str, base_oid: Oid, b: BranchTip) -> Result<ReviewRow> {
+    let c = repo.find_commit(b.tip)?;
+    let (ahead, behind) = repo.graph_ahead_behind(b.tip, base_oid)?;
+    let (to_push, to_pull) = match b.upstream_tip {
+        Some(u) => repo.graph_ahead_behind(b.tip, u)?,
+        None => (0, 0),
+    };
+    Ok(ReviewRow {
+        is_head: b.is_head,
+        is_base: b.name == base_name,
+        merged: merge_state(repo, base_oid, b.tip, ahead)?,
+        ahead,
+        behind,
+        upstream_gone: b.upstream.is_some() && b.upstream_tip.is_none(),
+        upstream: b.upstream,
+        to_push,
+        to_pull,
+        time: c.time().seconds(),
+        author: author_name(&c),
+        summary: summary(&c),
+        name: b.name,
+    })
+}
+
+fn author_name(c: &git2::Commit) -> String {
+    c.author().name().unwrap_or("").to_string()
+}
+
 pub fn branches_review(repo_path: &str, base: Option<&str>) -> Result<Review> {
     let repo = open(repo_path)?;
     let base_name = match base {
@@ -158,39 +201,48 @@ pub fn branches_review(repo_path: &str, base: Option<&str>) -> Result<Review> {
         return Ok(Review { base: base_name, rows: vec![] });
     }
     let base_oid = super::branches::resolve(&repo, &base_name)?;
-    let mut rows = vec![];
+    let mut tips = vec![];
     for b in repo.branches(Some(BranchType::Local))? {
         let (b, _) = b?;
         let Some(name) = b.name().ok().flatten().map(|s| s.to_string()) else { continue };
         let Some(tip) = b.get().target() else { continue };
-        let c = repo.find_commit(tip)?;
-        let (ahead, behind) = repo.graph_ahead_behind(tip, base_oid)?;
-        let upstream_name = repo
+        let upstream = repo
             .branch_upstream_name(&format!("refs/heads/{name}"))
             .ok()
             .and_then(|s| s.as_str().ok().map(|s| s.trim_start_matches("refs/remotes/").to_string()));
-        let up = b.upstream().ok().and_then(|u| u.get().target());
-        let (to_push, to_pull) = match up {
-            Some(u) => repo.graph_ahead_behind(tip, u)?,
-            None => (0, 0),
-        };
-        rows.push(ReviewRow {
-            is_head: b.is_head(),
-            is_base: name == base_name,
-            merged: merge_state(&repo, base_oid, tip)?,
-            ahead,
-            behind,
-            upstream_gone: upstream_name.is_some() && up.is_none(),
-            upstream: upstream_name,
-            to_push,
-            to_pull,
-            time: c.time().seconds(),
-            author: c.author().name().unwrap_or("").to_string(),
-            summary: summary(&c),
-            name,
-        });
+        let upstream_tip = b.upstream().ok().and_then(|u| u.get().target());
+        tips.push(BranchTip { name, tip, is_head: b.is_head(), upstream, upstream_tip });
     }
-    rows.sort_by_key(|r| std::cmp::Reverse(r.time));
+    // The graph walks dominate (milliseconds per branch on a big history), so
+    // spread the branches over the cores, each thread with its own handle on
+    // the repository (libgit2 handles aren't shared between threads).
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, 8).min(tips.len().div_ceil(16).max(1));
+    let mut rows = if threads <= 1 {
+        tips.into_iter().map(|b| review_row(&repo, &base_name, base_oid, b)).collect::<Result<Vec<_>>>()?
+    } else {
+        let mut chunks: Vec<Vec<BranchTip>> = (0..threads).map(|_| vec![]).collect();
+        for (i, b) in tips.into_iter().enumerate() {
+            chunks[i % threads].push(b);
+        }
+        let base_name = &base_name;
+        std::thread::scope(|s| {
+            let handles: Vec<_> = chunks
+                .into_iter()
+                .map(|chunk| {
+                    s.spawn(move || -> Result<Vec<ReviewRow>> {
+                        let repo = open(repo_path)?;
+                        chunk.into_iter().map(|b| review_row(&repo, base_name, base_oid, b)).collect()
+                    })
+                })
+                .collect();
+            let mut all = vec![];
+            for h in handles {
+                all.extend(h.join().map_err(|_| Error::Msg("Reviewing branches failed.".into()))??);
+            }
+            Ok::<_, Error>(all)
+        })?
+    };
+    rows.sort_by(|a, b| b.time.cmp(&a.time).then_with(|| a.name.cmp(&b.name)));
     Ok(Review { base: base_name, rows })
 }
 

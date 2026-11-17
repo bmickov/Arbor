@@ -230,17 +230,33 @@ pub fn checkout_target(repo: &Repository, target: &str) -> Result<()> {
     if target.starts_with("refs/") {
         let r = repo.find_reference(target)?;
         let commit = r.peel_to_commit()?;
-        repo.checkout_tree(commit.as_object(), Some(&mut co)).map_err(checkout_err)?;
+        repo.checkout_tree(commit.as_object(), Some(&mut co)).map_err(|e| checkout_err(repo, e))?;
         repo.set_head(target)?;
     } else {
         let commit = repo.find_commit(oid(target)?)?;
-        repo.checkout_tree(commit.as_object(), Some(&mut co)).map_err(checkout_err)?;
+        repo.checkout_tree(commit.as_object(), Some(&mut co)).map_err(|e| checkout_err(repo, e))?;
         repo.set_head_detached(commit.id())?;
     }
     Ok(())
 }
 
-fn checkout_err(e: git2::Error) -> Error {
+fn checkout_err(repo: &Repository, e: git2::Error) -> Error {
+    use git2::RepositoryState as S;
+    let operation = match repo.state() {
+        S::Merge => Some("A merge"),
+        S::Revert | S::RevertSequence => Some("A revert"),
+        S::CherryPick | S::CherryPickSequence => Some("A cherry-pick"),
+        S::Rebase | S::RebaseInteractive | S::RebaseMerge => Some("A rebase"),
+        S::ApplyMailbox | S::ApplyMailboxOrRebase => Some("Applying patches"),
+        S::Bisect | S::Clean => None,
+    };
+    let conflicted = repo.index().map(|i| i.has_conflicts()).unwrap_or(false);
+    if let (Some(what), true) = (operation, conflicted || e.code() == git2::ErrorCode::Conflict) {
+        return Error::Msg(format!("{what} is in progress. Finish it (or abort it) before switching to another branch or commit."));
+    }
+    if conflicted {
+        return Error::Msg("Some files still have conflicts. Resolve them, or discard those changes, before switching.".into());
+    }
     if e.code() == git2::ErrorCode::Conflict {
         Error::Msg(format!(
             "Your local changes would be overwritten. Commit or stash them first.\n({})",
@@ -251,7 +267,16 @@ fn checkout_err(e: git2::Error) -> Error {
     }
 }
 
+/// Switching away in the middle of Arbor's own rebase would strand it.
+fn ensure_no_paused_rebase(repo: &Repository) -> Result<()> {
+    if super::rebase::paused(repo).is_some() {
+        return err("A rebase is paused. Continue or abort it before switching to another branch or commit.");
+    }
+    Ok(())
+}
+
 fn checkout_recorded(repo: &Repository, target: &str, label: String) -> Result<()> {
+    ensure_no_paused_rebase(repo)?;
     let previous = head_target(repo);
     checkout_target(repo, target)?;
     if let Some(now) = head_oid(repo) {
@@ -280,6 +305,7 @@ pub fn checkout_commit(repo_path: &str, id: &str) -> Result<()> {
 /// Check out a remote branch, creating a local tracking branch when needed.
 pub fn checkout_remote(repo_path: &str, full_name: &str, local_name: Option<&str>) -> Result<String> {
     let repo = open(repo_path)?;
+    ensure_no_paused_rebase(&repo)?;
     let rb = repo.find_branch(full_name, BranchType::Remote)?;
     let target = rb.get().target().ok_or_else(|| Error::Msg("Remote branch has no commit.".into()))?;
     let default_name = full_name.split_once('/').map(|(_, n)| n).unwrap_or(full_name);

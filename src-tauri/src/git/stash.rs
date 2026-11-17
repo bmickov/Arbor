@@ -105,6 +105,8 @@ pub fn save_paths(repo_path: &str, message: Option<&str>, include_untracked: boo
         flags |= StashFlags::KEEP_INDEX;
     }
     let msg = message.filter(|m| !m.trim().is_empty());
+    let expanded = expand_folders(&repo, paths)?;
+    let paths = expanded.as_slice();
     // libgit2 stashes only the given paths but resets every file in the
     // working tree, so keep the other changes aside and put them back.
     let keep = if paths.is_empty() { vec![] } else { snapshot_others(&repo, paths)? };
@@ -118,40 +120,16 @@ pub fn save_paths(repo_path: &str, message: Option<&str>, include_untracked: boo
         }
         repo.stash_save_ext(Some(&mut opts))
     };
-    let saved = match (saved, msg, paths.is_empty()) {
-        // git2 can't pass a message along with paths, so give the stash
-        // commit and its list entry the message afterwards, as git would.
-        (Ok(id), Some(m), false) => {
-            let branch = super::head_branch(&repo).unwrap_or_else(|| "(no branch)".into());
-            let text = format!("On {branch}: {m}");
-            let c = repo.find_commit(id)?;
-            let parents: Vec<git2::Commit> = c.parents().collect();
-            let prefs: Vec<&git2::Commit> = parents.iter().collect();
-            let named = repo.commit(None, &c.author(), &c.committer(), &text, &c.tree()?, &prefs)?;
-            let mut reflog = repo.reflog("refs/stash")?;
-            reflog.remove(0, false)?;
-            reflog.append(named, &sig, Some(&text))?;
-            reflog.write()?;
-            repo.reference("refs/stash", named, true, &text)?;
-            // Setting the ref may log it again; keep one entry.
-            let mut reflog = repo.reflog("refs/stash")?;
-            if reflog.len() >= 2 && reflog.get(0).map(|e| e.id_new()) == Some(named) && reflog.get(1).map(|e| e.id_new()) == Some(named) {
-                reflog.remove(0, false)?;
-                reflog.write()?;
-            }
-            Ok(named)
-        }
-        (other, _, _) => other,
+    let saved = match saved {
+        Ok(id) if !paths.is_empty() => finish_partial(&repo, &sig, id, msg, paths),
+        other => other.map_err(Error::from),
     };
     if !keep.is_empty() {
         restore_others(&repo, keep)?;
     }
-    let id = saved.map_err(|e| {
-        if e.code() == git2::ErrorCode::NotFound {
-            Error::Msg("There are no local changes to stash.".into())
-        } else {
-            e.into()
-        }
+    let id = saved.map_err(|e| match e {
+        Error::Git(g) if g.code() == git2::ErrorCode::NotFound => Error::Msg("There are no local changes to stash.".into()),
+        e => e,
     })?;
     let label = match (msg, paths.len()) {
         (Some(m), _) => format!("Stash \"{m}\""),
@@ -163,6 +141,79 @@ pub fn save_paths(repo_path: &str, message: Option<&str>, include_untracked: boo
         undo::record(&repo, label, Action::PopStash { expect: id.to_string() });
     }
     Ok(())
+}
+
+/// Tidy a stash made from chosen paths, as `git stash push -- paths` would
+/// leave it: git2 can't pass a message along with paths, and libgit2 puts
+/// every untracked file in the stash, not only the chosen ones, so applying
+/// it later would collide with the untracked files left in place.
+fn finish_partial(repo: &Repository, sig: &git2::Signature, id: Oid, msg: Option<&str>, paths: &[String]) -> Result<Oid> {
+    let c = repo.find_commit(id)?;
+    let mut parents: Vec<git2::Commit> = c.parents().collect();
+    let mut changed = false;
+    let mut tree = c.tree()?;
+    if parents.len() > 2 {
+        let untracked = parents[2].clone();
+        let chosen = |p: &str| paths.iter().any(|s| p == s || p.starts_with(&format!("{}/", s.trim_end_matches('/'))));
+        let mut idx = git2::Index::new()?;
+        idx.read_tree(&untracked.tree()?)?;
+        let all: Vec<String> = idx.iter().map(|e| String::from_utf8_lossy(&e.path).into_owned()).collect();
+        // libgit2 also puts chosen untracked files in the working-tree
+        // commit, where git keeps only tracked ones; applying such a stash
+        // would then find them in the way.
+        let mut work = git2::Index::new()?;
+        work.read_tree(&tree)?;
+        let mut stray = false;
+        for p in &all {
+            if work.get_path(std::path::Path::new(p), 0).is_some() {
+                work.remove_path(std::path::Path::new(p))?;
+                stray = true;
+            }
+        }
+        if stray {
+            changed = true;
+            tree = repo.find_tree(work.write_tree_to(repo)?)?;
+        }
+        let drop: Vec<&String> = all.iter().filter(|p| !chosen(p)).collect();
+        if !drop.is_empty() {
+            changed = true;
+            if drop.len() == all.len() {
+                parents.truncate(2);
+            } else {
+                for p in &drop {
+                    idx.remove_path(std::path::Path::new(p.as_str()))?;
+                }
+                let t = repo.find_tree(idx.write_tree_to(repo)?)?;
+                let u = repo.commit(None, &untracked.author(), &untracked.committer(), untracked.message_raw().unwrap_or(""), &t, &[])?;
+                parents[2] = repo.find_commit(u)?;
+            }
+        }
+    }
+    let text = match msg {
+        Some(m) => {
+            changed = true;
+            let branch = super::head_branch(repo).unwrap_or_else(|| "(no branch)".into());
+            format!("On {branch}: {m}")
+        }
+        None => c.message_raw().unwrap_or("").to_string(),
+    };
+    if !changed {
+        return Ok(id);
+    }
+    let prefs: Vec<&git2::Commit> = parents.iter().collect();
+    let named = repo.commit(None, &c.author(), &c.committer(), &text, &tree, &prefs)?;
+    let mut reflog = repo.reflog("refs/stash")?;
+    reflog.remove(0, false)?;
+    reflog.append(named, sig, Some(&text))?;
+    reflog.write()?;
+    repo.reference("refs/stash", named, true, &text)?;
+    // Setting the ref may log it again; keep one entry.
+    let mut reflog = repo.reflog("refs/stash")?;
+    if reflog.len() >= 2 && reflog.get(0).map(|e| e.id_new()) == Some(named) && reflog.get(1).map(|e| e.id_new()) == Some(named) {
+        reflog.remove(0, false)?;
+        reflog.write()?;
+    }
+    Ok(named)
 }
 
 fn apply_opts() -> StashApplyOptions<'static> {
@@ -333,6 +384,30 @@ struct Kept {
     path: String,
     bytes: Option<Vec<u8>>,
     entry: Option<git2::IndexEntry>,
+}
+
+/// libgit2 can't stash a folder by name; name the changed files in it instead.
+fn expand_folders(repo: &Repository, paths: &[String]) -> Result<Vec<String>> {
+    let Some(root) = repo.workdir() else { return Ok(paths.to_vec()) };
+    if !paths.iter().any(|p| root.join(p).is_dir()) {
+        return Ok(paths.to_vec());
+    }
+    let mut o = git2::StatusOptions::new();
+    o.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false).exclude_submodules(true);
+    let changed: Vec<String> = repo.statuses(Some(&mut o))?.iter().filter_map(|e| e.path().ok().map(String::from)).collect();
+    let mut out = vec![];
+    for p in paths {
+        if root.join(p).is_dir() {
+            let prefix = format!("{}/", p.trim_end_matches('/'));
+            out.extend(changed.iter().filter(|c| c.starts_with(&prefix)).cloned());
+        } else {
+            out.push(p.clone());
+        }
+    }
+    if out.is_empty() {
+        return Err(Error::Msg("There are no local changes to stash.".into()));
+    }
+    Ok(out)
 }
 
 fn snapshot_others(repo: &Repository, paths: &[String]) -> Result<Vec<Kept>> {
