@@ -15,7 +15,7 @@ fn hooks_dir(repo: &Repository) -> PathBuf {
     repo.path().join("hooks")
 }
 
-fn executable(p: &PathBuf) -> bool {
+fn executable(p: &std::path::Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

@@ -89,7 +89,7 @@ pub fn refs(repo_path: &str) -> Result<Refs> {
             time: c.time().seconds(),
         });
     }
-    local.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    local.sort_by_key(|a| a.name.to_lowercase());
 
     let mut remotes = vec![];
     for name in repo.remotes()?.iter().flatten().flatten() {
@@ -108,7 +108,7 @@ pub fn refs(repo_path: &str) -> Result<Refs> {
         }
     }
     for r in remotes.iter_mut() {
-        r.branches.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        r.branches.sort_by_key(|a| a.name.to_lowercase());
     }
 
     let mut tags = vec![];

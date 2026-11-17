@@ -473,3 +473,89 @@ pub fn interactive(repo_path: &str, base: Option<&str>, steps: &[Step], label: &
     let onto_label = base_id.map(short).unwrap_or_else(|| "the start".into());
     start(&repo, label.to_string(), onto_label, onto, steps.to_vec(), &format!("rebase -i: {label}"))
 }
+
+/// Fold the staged changes into `target`, an earlier commit on the current
+/// branch (Tower's "fixup"), and replay the commits after it.
+///
+/// Everything happens in memory: the branch moves and the staged changes are
+/// now part of `target`, but the working tree is never touched, so unstaged
+/// changes and untracked files stay exactly as they were. Refuses (changing
+/// nothing) when later commits would conflict with the folded changes.
+pub fn fold_into(repo_path: &str, target: &str) -> Result<RebaseOutcome> {
+    let repo = open(repo_path)?;
+    if repo.state() != git2::RepositoryState::Clean {
+        return err("Finish or abort the operation in progress first.");
+    }
+    require_not_paused(&repo)?;
+    let head = repo.head()?.peel_to_commit()?;
+    let target = repo.find_commit(oid(target)?)?;
+    if target.id() != head.id() && !repo.graph_descendant_of(head.id(), target.id())? {
+        return err("That commit isn't on the current branch.");
+    }
+    let mut index = repo.index()?;
+    if index.has_conflicts() {
+        return err("Resolve the conflicts first.");
+    }
+    let staged = index.write_tree()?;
+    if staged == head.tree_id() {
+        return err("Nothing is staged. Stage the changes you want to fold in first.");
+    }
+    let label = format!("Fold staged changes into “{}”", super::summary(&target));
+    let sig = signature(&repo)?;
+
+    // The staged changes as a commit on top of HEAD, then: target, that
+    // commit as a fixup of it, and the rest of the branch after target.
+    let fix = repo.commit(None, &sig, &sig, &format!("fixup! {}", super::summary(&target)), &repo.find_tree(staged)?, &[&head])?;
+    let mut walk = repo.revwalk()?;
+    walk.push(head.id())?;
+    for p in target.parent_ids() {
+        walk.hide(p)?;
+    }
+    walk.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
+    let mut steps = vec![];
+    for o in walk {
+        let o = o?;
+        let c = repo.find_commit(o)?;
+        if c.parent_count() > 1 {
+            return err(format!("{} is a merge commit; folding changes in across merges isn't supported.", short(o)));
+        }
+        steps.push(Step { oid: o.to_string(), action: "pick".into(), message: None });
+        if o == target.id() {
+            steps.push(Step { oid: fix.to_string(), action: "fixup".into(), message: None });
+        }
+    }
+    let onto = match target.parent_count() {
+        0 => None,
+        _ => Some(target.parent(0)?),
+    };
+    let new = match replay(&repo, onto, &steps, false)? {
+        Replayed::Done(new) => new,
+        Replayed::Conflict { at, .. } => {
+            let c = repo.find_commit(oid(&steps[at].oid)?)?;
+            return err(format!(
+                "The staged changes can't be folded into “{}”: they conflict with “{}”, a later commit. Nothing was changed.",
+                super::summary(&target),
+                super::summary(&c),
+            ));
+        }
+    };
+    // The branch ends where it would have anyway: HEAD plus the staged changes.
+    if repo.find_commit(new)?.tree_id() != staged {
+        return err("Folding the changes in would also change later commits' results. Nothing was changed.");
+    }
+    let reflog = format!("fold staged changes into {}", short(target.id()));
+    match head_branch(&repo) {
+        Some(b) => {
+            repo.reference(&format!("refs/heads/{b}"), new, true, &reflog)?;
+        }
+        None => repo.set_head_detached(new)?,
+    }
+    // The index already holds exactly the new HEAD's tree; just record it.
+    index.write()?;
+    undo::record(
+        &repo,
+        label,
+        Action::ResetHead { oid: Some(head.id().to_string()), mode: "soft".into(), expect: new.to_string(), branch: head_branch(&repo) },
+    );
+    Ok(RebaseOutcome { result: "rebased", head: new.to_string(), conflicts: vec![] })
+}

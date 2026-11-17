@@ -186,7 +186,7 @@ pub fn branches_review(repo_path: &str, base: Option<&str>) -> Result<Review> {
             name,
         });
     }
-    rows.sort_by(|a, b| b.time.cmp(&a.time));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.time));
     Ok(Review { base: base_name, rows })
 }
 

@@ -1700,3 +1700,177 @@ fn merge_prediction_grep_and_repo_settings() {
     git::insight::set_config(&r.path, "pull.rebase", None).unwrap();
     assert!(git::insight::set_config(&r.path, "nodot", Some("x")).is_err());
 }
+
+#[test]
+fn fold_staged_changes_into_an_earlier_commit() {
+    let r = Repo::new();
+    r.write("a.txt", "one\n");
+    r.commit_all("Add a");
+    let target = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.write("b.txt", "bee\n");
+    r.commit_all("Add b");
+    // Staged: a fix to a.txt. Unstaged: a change to b.txt. Untracked: c.txt.
+    r.write("a.txt", "one\nfixed\n");
+    r.git(&["add", "a.txt"]);
+    r.write("b.txt", "bee\nwip\n");
+    r.write("c.txt", "new\n");
+    let before = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+
+    let out = git::rebase::fold_into(&r.path, &target).unwrap();
+    assert_eq!(out.result, "rebased");
+    assert_eq!(r.subjects(), vec!["Add b", "Add a"]);
+    // The fix is in the first commit now, nothing is staged any more…
+    assert_eq!(r.git(&["show", "HEAD~1:a.txt"]), "one\nfixed\n");
+    assert_eq!(r.git(&["diff", "--cached", "--name-only"]), "");
+    // …and the working tree is untouched.
+    assert_eq!(r.read("b.txt"), "bee\nwip\n");
+    assert_eq!(r.read("c.txt"), "new\n");
+    assert_eq!(r.git(&["status", "--porcelain"]), " M b.txt\n?? c.txt\n");
+
+    // Undo puts the branch back with the fix staged again.
+    git::undo::undo(&r.path).unwrap();
+    assert_eq!(r.git(&["rev-parse", "HEAD"]).trim(), before);
+    assert_eq!(r.git(&["diff", "--cached", "--name-only"]), "a.txt\n");
+    assert_eq!(r.read("b.txt"), "bee\nwip\n");
+}
+
+#[test]
+fn fold_refuses_when_later_commits_conflict() {
+    let r = Repo::new();
+    r.write("a.txt", "one\n");
+    r.commit_all("Add a");
+    let target = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.write("a.txt", "two\n");
+    r.commit_all("Change a");
+    r.write("a.txt", "three\n");
+    r.git(&["add", "a.txt"]);
+    let before = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    let e = git::rebase::fold_into(&r.path, &target).unwrap_err().to_string();
+    assert!(e.contains("conflict"), "{e}");
+    assert_eq!(r.git(&["rev-parse", "HEAD"]).trim(), before);
+    assert_eq!(r.git(&["diff", "--cached", "--name-only"]), "a.txt\n");
+    // Nothing staged: refused too.
+    r.git(&["reset", "-q"]);
+    assert!(git::rebase::fold_into(&r.path, &target).is_err());
+}
+
+#[test]
+fn snapshot_keeps_the_working_copy_as_it_is() {
+    let r = Repo::new();
+    r.write("a.txt", "one\n");
+    r.write("b.txt", "bee\n");
+    r.commit_all("Start");
+    r.write("a.txt", "one\nstaged\n");
+    r.git(&["add", "a.txt"]);
+    r.write("a.txt", "one\nstaged\nunstaged\n");
+    std::fs::remove_file(Path::new(&r.path).join("b.txt")).unwrap();
+    r.write("dir/new.txt", "untracked\n");
+    let status = r.git(&["status", "--porcelain"]);
+    let index_mtime = std::fs::metadata(Path::new(&r.path).join(".git/index")).unwrap().modified().unwrap();
+
+    let label = git::stash::snapshot(&r.path, Some("before the refactor")).unwrap();
+    assert_eq!(label, "Snapshot: before the refactor");
+    // Nothing changed on disk or in the index (checked before `git status`,
+    // which refreshes the index itself).
+    assert_eq!(std::fs::metadata(Path::new(&r.path).join(".git/index")).unwrap().modified().unwrap(), index_mtime);
+    assert_eq!(r.git(&["status", "--porcelain"]), status);
+    assert_eq!(r.read("a.txt"), "one\nstaged\nunstaged\n");
+    // git sees a normal stash with all three kinds of change.
+    assert_eq!(r.git(&["stash", "list", "--format=%gs"]), "On main: Snapshot: before the refactor\n");
+    assert_eq!(r.git(&["show", "stash@{0}:a.txt"]), "one\nstaged\nunstaged\n");
+    assert_eq!(r.git(&["show", "stash@{0}^2:a.txt"]), "one\nstaged\n");
+    assert_eq!(r.git(&["show", "stash@{0}^3:dir/new.txt"]), "untracked\n");
+    assert!(r.git(&["ls-tree", "--name-only", "stash@{0}"]).lines().all(|l| l != "b.txt"));
+
+    // Restoring it later brings everything back.
+    r.git(&["reset", "-q", "--hard"]);
+    r.git(&["clean", "-qfd"]);
+    r.git(&["stash", "apply", "--index", "-q"]);
+    assert_eq!(r.git(&["status", "--porcelain"]), status);
+
+    // A second one stacks on top; with no changes it refuses.
+    assert!(git::stash::snapshot(&r.path, None).unwrap().starts_with("Snapshot 20"));
+    assert_eq!(r.git(&["stash", "list"]).lines().count(), 2);
+    r.git(&["reset", "-q", "--hard"]);
+    r.git(&["clean", "-qfd"]);
+    assert!(git::stash::snapshot(&r.path, None).is_err());
+}
+
+#[test]
+fn go_back_to_a_snapshot_keeps_the_current_state_too() {
+    let r = Repo::new();
+    r.write("a.txt", "one\n");
+    r.commit_all("Start");
+    r.write("a.txt", "one\nfirst try\n");
+    r.git(&["add", "a.txt"]);
+    r.write("try.txt", "first\n");
+    git::stash::snapshot(&r.path, Some("first try")).unwrap();
+    let first = r.git(&["rev-parse", "stash@{0}"]).trim().to_string();
+    // Carry on in another direction.
+    r.git(&["reset", "-q", "--hard"]);
+    r.git(&["clean", "-qfd"]);
+    r.write("a.txt", "one\nsecond try\n");
+    r.write("other.txt", "second\n");
+
+    let saved = git::stash::restore_snapshot(&r.path, &first).unwrap();
+    assert_eq!(saved.as_deref(), Some("Snapshot: before going back to “first try”"));
+    // Back at the first try, staged change staged again…
+    assert_eq!(r.read("a.txt"), "one\nfirst try\n");
+    assert_eq!(r.read("try.txt"), "first\n");
+    assert!(!Path::new(&r.path).join("other.txt").exists());
+    assert_eq!(r.git(&["diff", "--cached", "--name-only"]), "a.txt\n");
+    // …and the second try is kept as the newest snapshot.
+    assert_eq!(r.git(&["show", "stash@{0}:a.txt"]), "one\nsecond try\n");
+    assert_eq!(r.git(&["show", "stash@{0}^3:other.txt"]), "second\n");
+    assert_eq!(r.git(&["stash", "list"]).lines().count(), 2);
+}
+
+#[test]
+fn push_goes_to_the_push_url() {
+    let r = Repo::new();
+    let d = tempfile::tempdir().unwrap();
+    let fetch = d.path().join("fetch.git");
+    let push = d.path().join("push.git");
+    for b in [&fetch, &push] {
+        assert!(Command::new("git").args(["init", "-q", "--bare"]).arg(b).status().unwrap().success());
+    }
+    r.write("a.txt", "one\n");
+    r.commit_all("Start");
+    r.git(&["remote", "add", "origin", fetch.to_str().unwrap()]);
+    r.git(&["config", "remote.origin.pushurl", push.to_str().unwrap()]);
+    let dest = git::remote::push(&r.path, Some("main"), Some("origin"), false, false, true, None, None).unwrap();
+    assert_eq!(dest, "origin/main");
+    let has = |p: &Path| Command::new("git").arg("--git-dir").arg(p).args(["rev-parse", "--verify", "-q", "refs/heads/main"]).status().unwrap().success();
+    assert!(has(&push), "pushed to the push URL");
+    assert!(!has(&fetch), "not to the fetch URL");
+    // The remote-tracking branch and upstream are set as after any push.
+    assert_eq!(r.git(&["rev-parse", "origin/main"]), r.git(&["rev-parse", "main"]));
+    assert_eq!(r.git(&["rev-parse", "--abbrev-ref", "main@{upstream}"]).trim(), "origin/main");
+    // Deleting a branch on the remote goes there too.
+    r.git(&["branch", "gone"]);
+    git::remote::push(&r.path, Some("gone"), Some("origin"), false, false, true, None, None).unwrap();
+    git::remote::delete_remote_branch(&r.path, "origin/gone", None, None).unwrap();
+    assert!(r.git(&["branch", "-r"]).lines().all(|l| l.trim() != "origin/gone"));
+}
+
+#[test]
+fn pushes_to_different_repositories_can_overlap() {
+    // Several pushes at once in different repositories all go through (the
+    // one-push-at-a-time guard is per repository).
+    let handles: Vec<_> = (0..4)
+        .map(|i| {
+            std::thread::spawn(move || {
+                let r = Repo::new();
+                let bare = tempfile::tempdir().unwrap();
+                Command::new("git").args(["init", "-q", "--bare"]).arg(bare.path()).status().unwrap();
+                r.write("f.txt", &format!("{i}\n"));
+                r.commit_all("one");
+                r.git(&["remote", "add", "origin", bare.path().to_str().unwrap()]);
+                git::remote::push(&r.path, Some("main"), Some("origin"), false, false, true, None, None).map(|_| ())
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap().unwrap();
+    }
+}

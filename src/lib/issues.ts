@@ -2,19 +2,13 @@
 // the GitHub/GitLab issue. Rules come from Preferences → Commits, plus an
 // automatic one for #123 when origin is on GitHub, GitLab or Codeberg.
 
+import { webUrl } from "./hosting";
 import { app } from "./state.svelte";
+
+export { webUrl };
 
 export interface IssueRule { pattern: string; url: string }
 export type Piece = { text: string; href?: string };
-
-/** The web address of a hosted remote: git@github.com:o/r.git → https://github.com/o/r */
-export function webUrl(remote: string): string | null {
-  const m =
-    remote.match(/^git@([^:]+):(.+?)(?:\.git)?\/?$/) ??
-    remote.match(/^ssh:\/\/(?:[^@]+@)?([^/:]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/) ??
-    remote.match(/^https?:\/\/(?:[^@/]+@)?([^/]+)\/(.+?)(?:\.git)?\/?$/);
-  return m ? `https://${m[1]}/${m[2]}` : null;
-}
 
 function autoRule(): IssueRule | null {
   const origin = app.refs?.remotes.find((r) => r.name === "origin") ?? app.refs?.remotes[0];

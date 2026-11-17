@@ -5,6 +5,7 @@ import { open as pickFile, save as pickSaveFile } from "@tauri-apps/plugin-dialo
 import { api, type CommitRow, type MergeOutcome, type RebaseAction, type Step } from "./api";
 import type { Payload } from "./drag.svelte";
 import { relTime } from "./format";
+import { branchUrl, commitUrl, fileUrl, hostOf, newPullRequestUrl, pullRequestsUrl, type Host } from "./hosting";
 import { keyText } from "./platform";
 import { app } from "./state.svelte";
 import { dialog, menu, toasts, type MenuItem } from "./ui.svelte";
@@ -32,6 +33,7 @@ function afterMerge(m: { result?: string; conflicts: string[] } | undefined, wha
 
 /** Cherry-pick a commit onto the current branch; a conflict stops it to be resolved. */
 export async function cherryPick(oid: string) {
+  if (onHead(oid)) return toasts.push("info", `That commit is already on ${app.headBranch ?? "the current branch"}.`);
   const r = await app.act("Cherry-picking", () => api.cherryPick(P(), oid), { success: (r) => (r.conflicts.length ? null : `Cherry-picked as ${r.short}.`) });
   afterMerge(r, "cherry-pick");
 }
@@ -81,12 +83,19 @@ export async function pull(): Promise<boolean> {
 }
 
 /** Push; resolves to true when the branch ended up on the remote. */
-export async function push(branch?: string, remote?: string): Promise<boolean> {
+export async function push(branch?: string, remote?: string, forPullRequest = false): Promise<boolean> {
   const target = branch ?? app.headBranch ?? undefined;
+  // Publishing a branch for the first time: offer to open a pull request.
+  const first = !!target && !app.refs?.local.find((b) => b.name === target)?.upstream;
+  const host = first && !forPullRequest ? hostFor(remote ?? remoteOf(target)) : null;
   try {
     await app.run("Pushing", (c) => api.push(P(), { branch: target, remote }, c), {
       quiet: true,
-      success: (dest) => `Pushed to ${dest}.`,
+      success: (dest) => {
+        if (!host || !target) return `Pushed to ${dest}.`;
+        toasts.push("success", `Published ${target} to ${dest.split("/")[0]}.`, { label: `Create ${host.pr}`, run: () => createPullRequest(target) }, 10000);
+        return null;
+      },
     });
     return true;
   } catch (e) {
@@ -322,12 +331,17 @@ function stackItems(name: string): MenuItem[] {
 export function branchMenu(e: MouseEvent, name: string) {
   const head = app.headBranch;
   const b = app.refs?.local.find((x) => x.name === name);
+  const current = name === head;
+  // The current branch can't be merged into, rebased onto or compared with
+  // itself: leave those out rather than show "Merge main into main".
   const items: MenuItem[] = [
-    { label: `Check out ${name}`, disabled: name === head, action: () => checkout(name) },
+    { label: current ? `${name} is checked out` : `Check out ${name}`, disabled: current, action: () => checkout(name) },
     { separator: true },
-    { label: `Merge ${name} into ${head}`, disabled: !head || name === head, action: () => mergeInto(name, head!) },
-    { label: `Rebase ${head} onto ${name}`, disabled: !head || name === head, action: () => rebaseOnto(head!, name) },
-    { separator: true },
+    ...(current || !head ? [] : [
+      { label: `Merge ${name} into ${head}`, action: () => mergeInto(name, head) },
+      { label: `Rebase ${head} onto ${name}`, action: () => rebaseOnto(head, name) },
+      { separator: true },
+    ] as MenuItem[]),
     { label: "Push", action: () => push(name) },
     { label: "Track remote branch…", action: () => setUpstream(name) },
     { separator: true },
@@ -337,13 +351,14 @@ export function branchMenu(e: MouseEvent, name: string) {
     ...stackItems(name),
     { label: "Rename…", action: () => renameBranch(name) },
     { label: "Show history", action: () => showHistory(name) },
-    { label: `Compare with ${head ?? "HEAD"}`, disabled: name === head, action: () => compareWith(name) },
+    ...(current ? [] : [{ label: `Compare with ${head ?? "HEAD"}`, action: () => compareWith(name) }]),
     { label: "Browse files", action: () => browseAt(name, name) },
     { label: "Export as ZIP…", action: () => exportZip(name, name) },
+    ...branchHostItems(name),
     { separator: true },
     { label: "Delete…", danger: true, disabled: name === head, action: () => deleteBranch(name) },
   ];
-  if (b?.upstreamGone) items.splice(7, 0, { label: "Upstream was deleted on the remote", disabled: true });
+  if (b?.upstreamGone) items.splice(items.findIndex((i) => "label" in i && i.label === "Track remote branch…") + 1, 0, { label: "Upstream was deleted on the remote", disabled: true });
   menu.fromEvent(e, items, name);
 }
 
@@ -359,6 +374,8 @@ export function remoteBranchMenu(e: MouseEvent, fullName: string) {
     { label: "Show history", action: () => showHistory(fullName) },
     { label: `Compare with ${head ?? "HEAD"}`, action: () => compareWith(fullName) },
     { label: "Browse files", action: () => browseAt(fullName, fullName) },
+    ...branchHostItems(fullName),
+    { separator: true },
     { label: "Delete on remote…", danger: true, action: () => deleteRemoteBranch(fullName) },
   ], fullName);
 }
@@ -367,6 +384,97 @@ export function showHistory(scope: string) {
   app.scope = scope;
   app.view = "history";
   app.loadLog();
+}
+
+// ----------------------------------------------- hosting: links and PRs
+
+/** The remote a branch lives on: its upstream's, else origin, else the first. */
+function remoteOf(branch?: string | null): string | null {
+  const remotes = app.refs?.remotes ?? [];
+  const local = branch ? app.refs?.local.find((b) => b.name === branch) : null;
+  const up = local?.upstream?.split("/")[0];
+  const byPrefix = branch ? remotes.find((r) => branch.startsWith(`${r.name}/`))?.name : null;
+  return byPrefix ?? (up && remotes.some((r) => r.name === up) ? up : null) ?? remotes.find((r) => r.name === "origin")?.name ?? remotes[0]?.name ?? null;
+}
+
+/** The hosting service for a remote (GitHub, GitLab…), if it's one we know. */
+export function hostFor(remote?: string | null): Host | null {
+  const r = app.refs?.remotes.find((x) => x.name === (remote ?? remoteOf(null)));
+  return r ? hostOf(r.url) : null;
+}
+
+function openLink(url: string) {
+  api.openExternal(url).catch((e) => toasts.push("error", String(e)));
+}
+
+/** The branch a pull request from `branch` should target on `remote`. */
+function prBase(branch: string, remote: string): string | null {
+  const parent = stacks.find((s) => s.branch === branch)?.parent;
+  const onRemote = new Set((app.refs?.remotes.find((r) => r.name === remote)?.branches ?? []).map((b) => b.name));
+  if (parent) {
+    const p = parent.startsWith(`${remote}/`) ? parent.slice(remote.length + 1) : parent;
+    if (onRemote.has(p)) return p;
+  }
+  return ["main", "master", "trunk", "develop"].find((b) => b !== branch && onRemote.has(b)) ?? null;
+}
+
+/** Open the page that starts a pull request for a local or remote branch, pushing it first if it isn't on the remote. */
+export async function createPullRequest(branch: string) {
+  const remote = remoteOf(branch);
+  const host = hostFor(remote);
+  if (!remote || !host) return toasts.push("info", "This repository isn't on GitHub, GitLab, Bitbucket, Codeberg, Gitea or Azure DevOps.");
+  let name = branch.startsWith(`${remote}/`) ? branch.slice(remote.length + 1) : branch;
+  const local = app.refs?.local.find((b) => b.name === branch);
+  if (local) {
+    const up = local.upstream;
+    if (up) name = up.slice(up.indexOf("/") + 1);
+    // Not on the remote yet, or has commits that aren't: push first.
+    if (!up || local.ahead > 0) {
+      const ok = await dialog.confirm(
+        `Push ${branch} first?`,
+        up ? `${local.ahead} commit${local.ahead === 1 ? " isn't" : "s aren't"} on ${remote} yet. The ${host.pr} would leave ${local.ahead === 1 ? "it" : "them"} out.` : `${branch} isn't on ${remote} yet, so it has to be pushed before you can open a ${host.pr}.`,
+        "Push",
+      );
+      if (!ok) return;
+      if (!(await push(branch, remote, true))) return;
+    }
+  }
+  openLink(newPullRequestUrl(host, name, prBase(name, remote)));
+}
+
+/** "Open on GitHub"-style items for a branch's menu (local or remote). */
+function branchHostItems(branch: string): MenuItem[] {
+  const remote = remoteOf(branch);
+  const host = hostFor(remote);
+  if (!host || !remote) return [];
+  const local = app.refs?.local.find((b) => b.name === branch);
+  const name = local ? local.upstream?.slice(local.upstream.indexOf("/") + 1) : branch.slice(remote.length + 1);
+  return [
+    { separator: true },
+    { label: `Create ${host.pr}…`, hint: host.name, action: () => createPullRequest(branch) },
+    { label: `Open on ${host.name}`, disabled: !name, hint: name ? undefined : "not pushed", action: () => openLink(branchUrl(host, name!)) },
+  ];
+}
+
+/** Items for the repository menu. */
+export function repoHostItems(): MenuItem[] {
+  const host = hostFor(null);
+  if (!host) return [];
+  return [
+    { label: `Open on ${host.name}`, action: () => openLink(host.web) },
+    { label: host.kind === "gitlab" ? "Merge requests" : "Pull requests", hint: host.name, action: () => openLink(pullRequestsUrl(host)) },
+  ];
+}
+
+/** Open a commit, or a file at a commit, on the hosting site. Null when there's nowhere to open it. */
+export function hostLink(oid: string, path?: string, line?: number): { label: string; open: () => void; pushed: boolean } | null {
+  const host = hostFor(null);
+  if (!host) return null;
+  return {
+    label: `Open on ${host.name}`,
+    pushed: onAnyRemote(oid) ?? true,
+    open: () => openLink(path ? fileUrl(host, oid, path, line) : commitUrl(host, oid)),
+  };
 }
 
 // ------------------------------------------------- compare, browse, export
@@ -484,15 +592,11 @@ export function rewritable(): CommitRow[] {
   return out.reverse();
 }
 
-/** Commits already pushed to the upstream (rewriting them needs a force push). */
-export function pushedSet(): Set<string> {
-  const up = app.status?.upstream;
+/** Every loaded commit reachable from `starts` (themselves included). */
+function reachableFrom(starts: string[]): Set<string> {
   const set = new Set<string>();
-  if (!up) return set;
-  const start = app.log.find((r) => r.refs.some((l) => l.kind === "remote" && l.name === up));
-  if (!start) return set;
   const byId = new Map(app.log.map((r) => [r.oid, r]));
-  const stack = [start.oid];
+  const stack = [...starts];
   while (stack.length) {
     const id = stack.pop()!;
     if (set.has(id)) continue;
@@ -501,6 +605,26 @@ export function pushedSet(): Set<string> {
     if (r) stack.push(...r.parents);
   }
   return set;
+}
+
+/** Commits already pushed to the upstream (rewriting them needs a force push). */
+export function pushedSet(): Set<string> {
+  const up = app.status?.upstream;
+  if (!up) return new Set();
+  const start = app.log.find((r) => r.refs.some((l) => l.kind === "remote" && l.name === up));
+  return start ? reachableFrom([start.oid]) : new Set();
+}
+
+/** Whether a commit is on some remote branch, or null when the loaded history can't tell. */
+function onAnyRemote(oid: string): boolean | null {
+  const starts = app.log.filter((r) => r.refs.some((l) => l.kind === "remote")).map((r) => r.oid);
+  return starts.length ? reachableFrom(starts).has(oid) : null;
+}
+
+/** Whether a commit is already part of the checked-out branch (null: can't tell). */
+function onHead(oid: string): boolean | null {
+  const head = app.status?.head;
+  return head && app.log.some((r) => r.oid === head) ? reachableFrom([head]).has(oid) : null;
 }
 
 async function confirmRewritePushed(oids: string[]): Promise<boolean> {
@@ -573,6 +697,57 @@ export async function moveCommit(oid: string, afterOid: string | null) {
   await rewrite(`Move “${moved.summary}”`, () => order.map((o) => ({ oid: o, action: "pick" as RebaseAction })), touched, "Commit moved.");
 }
 
+/** Fold the staged changes into an earlier commit of this branch (Tower's fixup). */
+export async function foldInto(c: CommitRow) {
+  const staged = app.status?.staged.length ?? 0;
+  if (!staged) return toasts.push("info", "Stage the changes you want to fold into this commit first.");
+  const list = rewritable();
+  const i = list.findIndex((x) => x.oid === c.oid);
+  const after = i >= 0 ? list.length - 1 - i : 0;
+  const ok = await dialog.confirm(
+    `Fold staged changes into “${c.summary}”?`,
+    `The ${staged === 1 ? "staged file's changes become" : `changes in ${staged} staged files become`} part of that commit` +
+      (after ? `, and the ${after === 1 ? "commit" : `${after} commits`} after it ${after === 1 ? "is" : "are"} replayed on top.` : ".") +
+      " Unstaged changes and new files stay as they are. Undo puts everything back.",
+    "Fold in",
+  );
+  if (!ok) return;
+  if (!(await confirmRewritePushed(i >= 0 ? list.slice(i).map((x) => x.oid) : [c.oid]))) return;
+  await app.act(`Folding changes into “${c.summary}”`, () => api.foldInto(P(), c.oid), { success: `Folded into “${c.summary}”.` });
+}
+
+/** Save every current change as a stash, leaving the working copy as it is. */
+export async function snapshot() {
+  const s = app.status;
+  if (s && !s.staged.length && !s.unstaged.length) return toasts.push("info", "There are no changes to snapshot.");
+  const r = await dialog.show({
+    title: "Save a snapshot",
+    body: "Keeps a copy of all your current changes, including new files, in the stash list. Your working copy stays exactly as it is, so you can carry on and come back to this point later.",
+    fields: [{ key: "name", label: "Name (optional)", placeholder: "Before trying the other approach" }],
+    confirm: "Save snapshot",
+  });
+  if (r.button !== "confirm") return;
+  await app.act("Saving snapshot", () => api.stashSnapshot(P(), String(r.values.name ?? "").trim() || null), {
+    success: (label) => `${label} saved. Find it under Stashes.`,
+  });
+}
+
+/** Make the working copy what a stash (usually a snapshot) holds, keeping today's state as a new snapshot. */
+export async function goBackToStash(oid: string, message: string) {
+  const s = app.status;
+  const dirty = !!s && (s.staged.length > 0 || s.unstaged.length > 0);
+  const ok = await dialog.confirm(
+    "Go back to this point?",
+    `Your working copy becomes what “${message}” holds, with its staged changes staged again.` +
+      (dirty ? " Your current changes are saved as a new snapshot first, so you can come back to them." : ""),
+    "Go back",
+  );
+  if (!ok) return;
+  await app.act("Going back", () => api.stashRestoreSnapshot(P(), oid), {
+    success: (saved) => (saved ? `Restored. Your previous changes are in “${saved}”.` : "Restored."),
+  });
+}
+
 export async function resetTo(c: Pick<CommitRow, "oid" | "short">) {
   const r = await dialog.show({
     title: `Reset ${app.headBranch ?? "HEAD"} to ${c.short}`,
@@ -594,12 +769,13 @@ export function commitMenu(e: MouseEvent, c: CommitRow, openRebase: (from: Commi
   const list = rewritable();
   const canRewrite = list.some((x) => x.oid === c.oid);
   const isFirst = list[0]?.oid === c.oid;
+  const link = hostLink(c.oid);
   menu.fromEvent(e, [
     { label: "Check out this commit", action: () => app.act("Checking out", () => api.checkoutCommit(P(), c.oid), { success: `Checked out ${c.short} (detached).` }) },
     { label: "New branch here…", action: () => newBranch(c.oid, c.short) },
     { label: "New tag here…", action: () => newTag(c.oid, c.short) },
     { separator: true },
-    { label: `Cherry-pick into ${head ?? "HEAD"}`, disabled: c.oid === app.status?.head, action: () => cherryPick(c.oid) },
+    { label: `Cherry-pick into ${head ?? "HEAD"}`, disabled: !!onHead(c.oid), hint: onHead(c.oid) ? "already on it" : undefined, action: () => cherryPick(c.oid) },
     { label: "Revert commit", action: () => revertCommit(c.oid) },
     { label: "Find the bad commit after this…", hint: "bisect", disabled: !!app.status?.bisect || c.oid === app.status?.head, action: () => bisectStart(c) },
     { label: `Reset ${head ?? "HEAD"} to here…`, action: () => resetTo(c) },
@@ -607,6 +783,7 @@ export function commitMenu(e: MouseEvent, c: CommitRow, openRebase: (from: Commi
     { label: "Edit message…", disabled: !canRewrite, action: () => reword(c) },
     { label: "Squash into parent", disabled: !canRewrite || isFirst, action: () => combineWithParent(c, "squash") },
     { label: "Fixup into parent", hint: "drops this message", disabled: !canRewrite || isFirst, action: () => combineWithParent(c, "fixup") },
+    { label: "Fold staged changes into this commit…", hint: app.status?.staged.length ? undefined : "nothing staged", disabled: !canRewrite || !app.status?.staged.length, action: () => foldInto(c) },
     { label: "Remove commit…", danger: true, disabled: !canRewrite, action: () => dropCommit(c) },
     { label: "Rewrite from here…", disabled: !canRewrite, action: () => openRebase(c) },
     { separator: true },
@@ -614,6 +791,7 @@ export function commitMenu(e: MouseEvent, c: CommitRow, openRebase: (from: Commi
     { label: "Export as ZIP…", action: () => exportZip(c.oid, c.short) },
     { label: "Save as patch…", disabled: c.parents.length > 1, action: () => saveCommitPatch(c) },
     { label: "Copy commit ID", action: () => navigator.clipboard.writeText(c.oid).then(() => toasts.push("info", "Copied commit ID.")) },
+    ...(link ? [{ label: link.label, hint: link.pushed ? undefined : "not pushed yet", disabled: !link.pushed, action: link.open }] : []),
   ], `${c.short} ${c.summary}`);
 }
 

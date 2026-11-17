@@ -28,9 +28,18 @@ pub fn native_path(path: &str) -> PathBuf {
     }
 }
 
-/// Open a file or folder with the desktop's default application.
+/// A web or mail link rather than a file path.
+fn is_link(s: &str) -> bool {
+    let scheme = s.split_once(':').map(|(a, _)| a).unwrap_or("");
+    (s.contains("://") && scheme.len() > 1 && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))) || s.starts_with("mailto:")
+}
+
+/// Open a file or folder with the desktop's default application, or a link
+/// in the browser. Links are passed on as they are: turning their slashes
+/// into Windows path separators would break them.
 pub fn open_path(path: &str) -> Result<(), String> {
-    open::that_detached(native_path(path)).map_err(|e| format!("Couldn't open {path}: {e}"))
+    let result = if is_link(path) { open::that_detached(path) } else { open::that_detached(native_path(path)) };
+    result.map_err(|e| format!("Couldn't open {path}: {e}"))
 }
 
 /// Open a terminal window in `dir`.
@@ -159,6 +168,15 @@ mod tests {
         } else {
             assert_eq!(p, PathBuf::from("C:/Users/me/code/repo"));
         }
+    }
+
+    #[test]
+    fn links_are_not_paths() {
+        assert!(is_link("https://github.com/o/r/pull/new/x"));
+        assert!(is_link("mailto:someone@example.com"));
+        assert!(!is_link("C:/Users/me/repo"));
+        assert!(!is_link("/home/me/repo"));
+        assert!(!is_link("C://odd"));
     }
 
     #[test]

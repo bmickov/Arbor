@@ -4,7 +4,6 @@ use super::undo;
 use super::{advance_head, err, head_branch, open, Error, Result};
 use git2::{AutotagOption, BranchType, CertificateCheckStatus, Config, Cred, CredentialType, FetchOptions, FetchPrune, PushOptions, RemoteCallbacks, Repository};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[derive(Deserialize, Clone, Debug)]
@@ -104,13 +103,13 @@ pub fn callbacks(config: Config, creds: Option<Creds>, progress: Progress) -> Re
         });
         let p2 = p.clone();
         cb.push_transfer_progress(move |cur, total, _| {
-            if total > 0 {
-                p2(format!("Uploading objects {}%", cur * 100 / total));
+            if let Some(pct) = (cur * 100).checked_div(total) {
+                p2(format!("Uploading objects {pct}%"));
             }
         });
         cb.sideband_progress(move |data| {
             let line = String::from_utf8_lossy(data);
-            if let Some(l) = line.split(['\r', '\n']).filter(|l| !l.trim().is_empty()).last() {
+            if let Some(l) = line.split(['\r', '\n']).rfind(|l| !l.trim().is_empty()) {
                 p(l.trim().to_string());
             }
             true
@@ -197,8 +196,41 @@ pub fn pull(repo_path: &str, rebase: bool, creds: Option<Creds>, progress: Progr
     }
 }
 
+/// The remote to push through. libgit2 pushes to a remote's fetch URL even
+/// when it has a separate push URL (remote.<name>.pushurl), unlike git, so
+/// for those we push through an anonymous remote made from the push URL.
+/// The bool says whether that happened (remote-tracking branches then have
+/// to be updated by hand).
+fn push_remote<'r>(repo: &'r Repository, name: &str) -> Result<(git2::Remote<'r>, bool)> {
+    let r = repo.find_remote(name)?;
+    match r.pushurl().ok().flatten().map(str::to_string) {
+        Some(push) if Some(push.as_str()) != r.url().ok() => Ok((repo.remote_anonymous(&push)?, true)),
+        _ => Ok((r, false)),
+    }
+}
+
+/// After pushing through an anonymous remote: move `refs/remotes/<remote>/…`
+/// the way a normal push would have.
+fn update_tracking(repo: &Repository, remote: &str, specs: &[String]) -> Result<()> {
+    for spec in specs {
+        let spec = spec.trim_start_matches('+');
+        let Some((src, dst)) = spec.split_once(':') else { continue };
+        let Some(name) = dst.strip_prefix("refs/heads/") else { continue };
+        let tracking = format!("refs/remotes/{remote}/{name}");
+        if src.is_empty() {
+            if let Ok(mut r) = repo.find_reference(&tracking) {
+                r.delete()?;
+            }
+        } else {
+            let target = repo.revparse_single(src)?.peel_to_commit()?.id();
+            repo.reference(&tracking, target, true, &format!("update by push to {remote}"))?;
+        }
+    }
+    Ok(())
+}
+
 fn push_refspecs(repo: &Repository, remote: &str, specs: &[String], creds: Option<Creds>, progress: Progress) -> Result<()> {
-    let mut r = repo.find_remote(remote)?;
+    let (mut r, anonymous) = push_remote(repo, remote)?;
     let rejected: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
     let rej = rejected.clone();
     let mut cb = callbacks(repo.config()?, creds, progress);
@@ -222,20 +254,45 @@ fn push_refspecs(repo: &Repository, remote: &str, specs: &[String], creds: Optio
     if !rej.is_empty() {
         return err(format!("REJECTED:The remote refused the push:\n{}", rej.join("\n")));
     }
+    if anonymous {
+        update_tracking(repo, remote, specs)?;
+    }
     Ok(())
 }
 
-static PUSHING: AtomicBool = AtomicBool::new(false);
+/// Repositories with a push under way: one push at a time per repository
+/// (two tabs can still push to different repositories at once).
+static PUSHING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Holds a repository's place in PUSHING until dropped, even on an early return.
+struct PushGuard(String);
+impl PushGuard {
+    fn take(repo_path: &str) -> Option<PushGuard> {
+        let key = std::fs::canonicalize(repo_path).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| repo_path.to_string());
+        let mut busy = PUSHING.lock().unwrap_or_else(|e| e.into_inner());
+        if busy.contains(&key) {
+            return None;
+        }
+        busy.push(key.clone());
+        Some(PushGuard(key))
+    }
+}
+impl Drop for PushGuard {
+    fn drop(&mut self) {
+        PUSHING.lock().unwrap_or_else(|e| e.into_inner()).retain(|k| k != &self.0);
+    }
+}
 
 /// Where `refname` points on the remote right now (None: it doesn't exist there).
 fn remote_tip(repo: &Repository, remote: &str, refname: &str, creds: Option<Creds>, progress: Progress) -> Result<Option<git2::Oid>> {
-    let mut r = repo.find_remote(remote)?;
+    let (mut r, _) = push_remote(repo, remote)?;
     let cb = callbacks(repo.config()?, creds, progress);
     let conn = r.connect_auth(git2::Direction::Push, Some(cb), None).map_err(map_auth)?;
     let tip = conn.list()?.iter().find(|h| h.name() == refname).map(|h| h.oid());
     Ok(tip)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn push(
     repo_path: &str,
     branch: Option<&str>,
@@ -246,10 +303,10 @@ pub fn push(
     creds: Option<Creds>,
     progress: Progress,
 ) -> Result<String> {
-    if PUSHING.swap(true, Ordering::SeqCst) {
-        return err("A push is already running.");
-    }
-    let res = (|| {
+    let Some(_guard) = PushGuard::take(repo_path) else {
+        return err("A push is already running in this repository.");
+    };
+    (|| {
         let repo = open(repo_path)?;
         let branch = match branch {
             Some(b) => b.to_string(),
@@ -295,9 +352,7 @@ pub fn push(
             let _ = b.set_upstream(Some(&format!("{remote}/{short_dest}")));
         }
         Ok(format!("{remote}/{}", dest_ref.trim_start_matches("refs/heads/")))
-    })();
-    PUSHING.store(false, Ordering::SeqCst);
-    res
+    })()
 }
 
 pub fn push_tag(repo_path: &str, tag: &str, remote: &str, creds: Option<Creds>, progress: Progress) -> Result<()> {

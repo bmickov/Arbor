@@ -1,7 +1,7 @@
 //! Stashes: save, apply, pop, drop — all undoable.
 
 use super::undo::{self, Action};
-use super::{err, is_clean, open, signature, Error, Result};
+use super::{err, is_clean, open, short, signature, Error, Result};
 use git2::{Oid, Repository, StashApplyOptions, StashFlags};
 use serde::Serialize;
 
@@ -382,4 +382,129 @@ fn restore_others(repo: &Repository, keep: Vec<Kept>) -> Result<()> {
     }
     index.write()?;
     Ok(())
+}
+
+/// Save a snapshot: every current change (staged, unstaged and untracked)
+/// stored as a stash, while the working tree and index stay exactly as they
+/// are. Nothing is written to them: the stash commits are built the way
+/// `git stash` builds them (index, untracked files, working tree) from
+/// scratch indexes, so files are never rewritten (which matters for Git LFS
+/// files, which libgit2 can't smudge back).
+pub fn snapshot(repo_path: &str, name: Option<&str>) -> Result<String> {
+    let repo = open(repo_path)?;
+    let sig = signature(&repo)?;
+    let head = repo.head()?.peel_to_commit()?;
+    let branch = super::head_branch(&repo).unwrap_or_else(|| "(no branch)".into());
+
+    // Index: what's staged now.
+    let index_tree = repo.index()?.write_tree()?;
+
+    // Untracked (not ignored) files, from the real index's point of view.
+    let mut so = git2::StatusOptions::new();
+    so.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false);
+    let statuses = repo.statuses(Some(&mut so))?;
+    let path_of = |s: &git2::StatusEntry| s.path().ok().map(str::to_string);
+    let untracked: Vec<String> = statuses.iter().filter(|s| s.status().contains(git2::Status::WT_NEW)).filter_map(|s| path_of(&s)).collect();
+    // Tracked files changed in the working tree: only these are read again,
+    // so unchanged files (Git LFS ones especially) aren't re-hashed.
+    let changed = git2::Status::WT_MODIFIED | git2::Status::WT_DELETED | git2::Status::WT_TYPECHANGE | git2::Status::WT_RENAMED;
+    let changed: std::collections::HashSet<String> = statuses.iter().filter(|s| s.status().intersects(changed)).filter_map(|s| path_of(&s)).collect();
+
+    // Build the other two trees through a second handle on the repository
+    // with a throwaway index, so the real index is never touched.
+    let dir = tempfile::tempdir()?;
+    let scratch = |file: &str, start: Option<git2::Oid>, add: &dyn Fn(&mut git2::Index) -> std::result::Result<(), git2::Error>| -> Result<git2::Oid> {
+        let other = open(repo_path)?;
+        let mut idx = git2::Index::open(&dir.path().join(file))?;
+        if let Some(t) = start {
+            idx.read_tree(&other.find_tree(t)?)?;
+        }
+        other.set_index(&mut idx)?;
+        let mut idx = other.index()?;
+        add(&mut idx)?;
+        Ok(idx.write_tree_to(&other)?)
+    };
+    // Working tree: the index plus every tracked file as it is on disk.
+    let work_tree = scratch("work", Some(index_tree), &|idx| {
+        let mut only_changed = |p: &std::path::Path, _: &[u8]| if changed.contains(&p.to_string_lossy().replace('\\', "/")) { 0 } else { 1 };
+        idx.update_all(["*"].iter(), Some(&mut only_changed))
+    })?;
+    let untracked_tree = if untracked.is_empty() {
+        None
+    } else {
+        Some(scratch("untracked", None, &|idx| {
+            for p in &untracked {
+                idx.add_path(std::path::Path::new(p))?;
+            }
+            Ok(())
+        })?)
+    };
+
+    if index_tree == head.tree_id() && work_tree == head.tree_id() && untracked_tree.is_none() {
+        return err("There are no changes to snapshot.");
+    }
+
+    let when = chrono::Local::now().format("%Y-%m-%d %H:%M");
+    let name = name.map(str::trim).filter(|n| !n.is_empty());
+    let label = match name {
+        Some(n) => format!("Snapshot: {n}"),
+        None => format!("Snapshot {when}"),
+    };
+    let head_line = format!("{} {}", short(head.id()), super::summary(&head));
+    let i = repo.commit(None, &sig, &sig, &format!("index on {branch}: {head_line}\n"), &repo.find_tree(index_tree)?, &[&head])?;
+    let i = repo.find_commit(i)?;
+    let u = match untracked_tree {
+        Some(t) => Some(repo.find_commit(repo.commit(None, &sig, &sig, &format!("untracked files on {branch}: {head_line}\n"), &repo.find_tree(t)?, &[])?)?),
+        None => None,
+    };
+    let mut parents = vec![&head, &i];
+    if let Some(u) = &u {
+        parents.push(u);
+    }
+    let message = format!("On {branch}: {label}");
+    let w = repo.commit(None, &sig, &sig, &format!("{message}\n"), &repo.find_tree(work_tree)?, &parents)?;
+
+    // refs/stash and its reflog, which is the stash list. Setting the ref
+    // only logs it when a reflog already exists, so add the entry if needed.
+    repo.reference("refs/stash", w, true, &message)?;
+    let mut reflog = repo.reflog("refs/stash")?;
+    if reflog.get(0).map(|e| e.id_new()) != Some(w) {
+        reflog.append(w, &sig, Some(&message))?;
+        reflog.write()?;
+    }
+    Ok(label)
+}
+
+/// Go back to a stash (typically a snapshot): save what's there now as a new
+/// snapshot first, so nothing is lost, then clear the working copy and
+/// restore the stash's changes, staged ones staged again. Returns the label
+/// of the snapshot taken of the current state, if there was anything to keep.
+pub fn restore_snapshot(repo_path: &str, stash_oid: &str) -> Result<Option<String>> {
+    let target = super::oid(stash_oid)?;
+    let label = {
+        let repo = open(repo_path)?;
+        let summary = super::summary(&repo.find_commit(target)?);
+        // "On main: Snapshot: first try" → "first try"
+        let rest = summary.split_once(": ").map(|(_, n)| n).unwrap_or(&summary);
+        let name = rest.strip_prefix("Snapshot: ").unwrap_or(rest).trim().to_string();
+        match snapshot(repo_path, Some(&format!("before going back to “{name}”"))) {
+            Ok(l) => Some(l),
+            Err(Error::Msg(m)) if m.starts_with("There are no changes") => None,
+            Err(e) => return Err(e),
+        }
+    };
+    let mut repo = open(repo_path)?;
+    let mut index = None;
+    repo.stash_foreach(|i, _, id| {
+        if *id == target {
+            index = Some(i);
+            false
+        } else {
+            true
+        }
+    })?;
+    let index = index.ok_or_else(|| Error::Msg("That stash no longer exists.".into()))?;
+    undo::reset_worktree_hard(&repo)?;
+    apply_stash(&mut repo, index).map_err(map_apply)?;
+    Ok(label)
 }

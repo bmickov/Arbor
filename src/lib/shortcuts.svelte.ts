@@ -115,6 +115,7 @@ export const COMMANDS: Command[] = [
   { id: "stage.all", label: "Stage all changes", group: "Working copy", keys: ["Ctrl+Shift+A"], repo: true, run: () => app.act("Staging", () => api.stageAll(app.path)) },
   { id: "unstage.all", label: "Unstage all changes", group: "Working copy", keys: ["Ctrl+Shift+U"], repo: true, run: () => app.act("Unstaging", () => api.unstageAll(app.path)) },
   { id: "stash", label: "Stash changes…", group: "Working copy", keys: ["Ctrl+Shift+S"], repo: true, run: () => act.stashChanges() },
+  { id: "stash.snapshot", label: "Save a snapshot of your changes…", group: "Working copy", keys: [], repo: true, run: () => act.snapshot() },
   { id: "stash.pop", label: "Apply and remove latest stash", group: "Working copy", keys: ["Ctrl+Alt+S"], repo: true, run: () => {
     if (app.stashes.length) act.applyStash(app.stashes[0].index, true);
   } },
