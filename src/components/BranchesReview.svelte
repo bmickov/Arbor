@@ -68,6 +68,7 @@
   });
 
   const allPicked = $derived(rows.filter(deletable).length > 0 && rows.filter(deletable).every((r) => picked.has(r.name)));
+  const somePicked = $derived(!allPicked && rows.some((r) => picked.has(r.name)));
   function toggleAll() {
     if (allPicked) picked.clear();
     else for (const r of rows) if (deletable(r)) picked.add(r.name);
@@ -125,7 +126,7 @@
 
   <div class="table" role="table" aria-label="Branches">
     <div class="row head" role="row">
-      <span role="columnheader"><input type="checkbox" checked={allPicked} onchange={toggleAll} aria-label="Select all" /></span>
+      <span role="columnheader"><input type="checkbox" checked={allPicked} indeterminate={somePicked} onchange={toggleAll} aria-label="Select all" /></span>
       <span role="columnheader">Branch</span>
       <span role="columnheader">Merged into {review?.base ?? "base"}</span>
       <span role="columnheader" title="Commits only on this branch / only on the base">vs {review?.base ?? "base"}</span>
@@ -159,7 +160,7 @@
         </span>
         <span role="cell" class="up">
           {#if r.upstreamGone}<span class="gone" title="{r.upstream} was deleted on the remote">gone</span>
-          {:else if r.upstream}<span class="faint">{r.upstream}</span>{#if r.toPush} <span title="To push">↑{r.toPush}</span>{/if}{#if r.toPull} <span title="To pull">↓{r.toPull}</span>{/if}
+          {:else if r.upstream}<span class="faint">{r.upstream}</span>{#if r.toPush}<span class="sync" title="To push">↑{r.toPush}</span>{/if}{#if r.toPull}<span class="sync" title="To pull">↓{r.toPull}</span>{/if}
           {:else}<span class="faint">not pushed</span>{/if}
         </span>
         <span role="cell" class="last" title="{r.summary}\n{r.author}, {fullDate(r.time)}">
@@ -222,4 +223,5 @@
   .bar.hint { font-weight: 400; }
   .spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
   @keyframes spin { to { rotate: 1turn; } }
+  .up .sync { margin-left: 6px; }
 </style>
