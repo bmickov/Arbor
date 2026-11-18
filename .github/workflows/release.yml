@@ -54,9 +54,14 @@ jobs:
       ref: ${{ needs.version.outputs.tag }}
     secrets: inherit
 
+  # Publishes whatever was built, even when some platforms failed or timed
+  # out, so one slow or broken runner doesn't hold back everyone else. The
+  # notes list only the files that are there. Run this workflow again by hand
+  # for the same tag later to add the missing ones (files are replaced).
   publish:
     name: Publish release
     needs: [version, build]
+    if: ${{ !cancelled() && needs.version.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -68,27 +73,57 @@ jobs:
       - name: Write checksums and release notes
         env:
           VERSION: ${{ needs.version.outputs.version }}
+          BUILD_RESULT: ${{ needs.build.result }}
         run: |
+          mkdir -p release
           cd release
+          if [ -z "$(ls)" ]; then
+            echo "::error::No platform built successfully, so there's nothing to publish."
+            exit 1
+          fi
+          ls -l
           sha256sum -- * > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          cat > ../notes.md <<EOF
-          ## Downloads
 
-          | System | File |
-          | --- | --- |
-          | **Windows** 10 and 11 (x64) | \`Arbor_${VERSION}_x64-setup.exe\` (installer), or the \`.msi\` |
-          | **macOS** 10.15 or later (Apple silicon and Intel) | \`Arbor_${VERSION}_universal.dmg\` |
-          | **Debian, Ubuntu, Mint, Pop!_OS** | \`Arbor_${VERSION}_amd64.deb\` or \`_arm64.deb\` |
-          | **Fedora, openSUSE, RHEL** | \`Arbor-${VERSION}-1.x86_64.rpm\` or \`.aarch64.rpm\` |
-          | **Any Linux** | \`Arbor_${VERSION}_amd64.AppImage\` or \`_aarch64.AppImage\` |
-          | **FreeBSD** 14+ (x64) | \`Arbor_${VERSION}_freebsd_amd64.tar.gz\` |
-
-          The builds aren't signed with a paid certificate yet, so the first launch asks for confirmation:
-          on **macOS**, open System Settings → Privacy & Security and choose *Open Anyway*;
-          on **Windows**, choose *More info → Run anyway*. On **FreeBSD**, run \`pkg install webkit2-gtk_41 git\`,
-          then \`./install.sh\` from the unpacked folder. \`SHA256SUMS.txt\` lists every file's checksum.
-          EOF
+          has() { ls $1 > /dev/null 2>&1; }
+          missing=""
+          {
+            echo "## Downloads"
+            echo
+            echo "| System | File |"
+            echo "| --- | --- |"
+            if has '*_x64-setup.exe'; then
+              echo "| **Windows** 10 and 11 (x64) | \`Arbor_${VERSION}_x64-setup.exe\` (installer), or the \`.msi\` |"
+            else missing="$missing Windows,"; fi
+            if has '*.dmg'; then
+              echo "| **macOS** 10.15 or later (Apple silicon and Intel) | \`Arbor_${VERSION}_universal.dmg\` |"
+            else missing="$missing macOS,"; fi
+            if has '*.deb'; then
+              echo "| **Debian, Ubuntu, Mint, Pop!_OS** | $(ls *.deb | sed 's/.*/\`&\`/' | paste -sd ' ' | sed 's/ / or /g') |"
+            fi
+            if has '*.rpm'; then
+              echo "| **Fedora, openSUSE, RHEL** | $(ls *.rpm | sed 's/.*/\`&\`/' | paste -sd ' ' | sed 's/ / or /g') |"
+            fi
+            if has '*.AppImage'; then
+              echo "| **Any Linux** | $(ls *.AppImage | sed 's/.*/\`&\`/' | paste -sd ' ' | sed 's/ / or /g') |"
+            else missing="$missing Linux,"; fi
+            if has '*freebsd*.tar.gz'; then
+              echo "| **FreeBSD** 14+ (x64) | \`$(ls *freebsd*.tar.gz)\` |"
+            else missing="$missing FreeBSD,"; fi
+            echo
+            if [ -n "$missing" ]; then
+              echo "> **Coming later:**${missing%,}. The build didn't finish in time; the files will be added to this release."
+              echo
+            fi
+            echo "The builds aren't signed with a paid certificate yet, so the first launch asks for confirmation:"
+            echo "on **macOS**, open System Settings → Privacy & Security and choose *Open Anyway*;"
+            echo "on **Windows**, choose *More info → Run anyway*. On **FreeBSD**, run \`pkg install webkit2-gtk_41 git\`,"
+            echo "then \`./install.sh\` from the unpacked folder. \`SHA256SUMS.txt\` lists every file's checksum."
+          } > ../notes.md
+          cat ../notes.md
+          if [ -n "$missing" ]; then
+            echo "::warning::Publishing without:${missing%,} (build result: $BUILD_RESULT)."
+          fi
 
       - name: Create or update the GitHub release
         env:
@@ -99,6 +134,7 @@ jobs:
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" release/* --clobber
+            gh release edit "$TAG" --notes-file notes.md
           else
             pre=""
             case "$VERSION" in *-*) pre="--prerelease" ;; esac
