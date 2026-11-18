@@ -551,9 +551,10 @@ from the workflows in `.github/workflows`:
   git tag v0.16.0 && git push origin main v0.16.0
   ```
 
-  Tags with a suffix (`v0.16.0-beta.1`) are published as pre-releases. To
-  rebuild an existing tag, run the Release workflow by hand from the Actions
-  tab and enter the tag.
+  Tags with a suffix (`v0.16.0-beta.1`) are published as pre-releases. If
+  a platform's build fails or times out, the release is published with the
+  others and its notes say what's missing; to add it later, run the Release
+  workflow by hand from the Actions tab and enter the same tag.
 - **Code signing** is optional. macOS builds are ad-hoc signed; to sign and
   notarize with an Apple Developer ID, add the repository secrets listed in
   `build.yml`.
