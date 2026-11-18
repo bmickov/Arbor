@@ -11,9 +11,12 @@ on:
     paths-ignore: ["**.md", "docs/**", "design/**", "LICENSE"]
   workflow_dispatch:
 
+# A newer push to a pull request replaces its older run. On main every
+# commit gets a full build: cancelling there stopped the slowest jobs (the
+# macOS builds) whenever another commit came in.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
