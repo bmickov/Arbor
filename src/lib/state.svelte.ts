@@ -57,7 +57,13 @@ interface TabData {
   lastSig: string;
 }
 
-type TabState = TabUI & Partial<TabData>;
+/** Holds a background tab's data. A class instance, so Svelte's deep
+ * reactivity leaves it (and thousands of rows inside) unproxied. */
+class Loaded {
+  constructor(readonly d: TabData) {}
+}
+
+type TabState = TabUI & { data?: Loaded };
 
 export interface Tab {
   path: string;
@@ -179,15 +185,16 @@ export function applyAppearance(s: Settings) {
 }
 
 class App {
-  repo = $state<RepoInfo | null>(null);
-  status = $state<WorkingStatus | null>(null);
-  refs = $state<Refs | null>(null);
-  stashes = $state<StashEntry[]>([]);
+  // Replaced whole, never changed in place: no deep proxies needed.
+  repo = $state.raw<RepoInfo | null>(null);
+  status = $state.raw<WorkingStatus | null>(null);
+  refs = $state.raw<Refs | null>(null);
+  stashes = $state.raw<StashEntry[]>([]);
   undoTop = $state<UndoEntry | null>(null);
 
   view = $state<View>("changes");
   scope = $state("all");
-  log = $state<CommitRow[]>([]);
+  log = $state.raw<CommitRow[]>([]);
   logMore = $state(false);
   logLimit = $state(2000);
   logLoading = $state(false);
@@ -372,26 +379,29 @@ class App {
     if (!this.repo) return null;
     return {
       ...this.uiSnapshot(),
-      repo: this.repo, status: this.status, refs: this.refs, stashes: this.stashes, undoTop: this.undoTop,
-      log: this.log, logMore: this.logMore, lastSig: this.lastSig,
+      data: new Loaded({
+        repo: this.repo, status: this.status, refs: this.refs, stashes: this.stashes, undoTop: this.undoTop,
+        log: this.log, logMore: this.logMore, lastSig: this.lastSig,
+      }),
     };
   }
 
   private restore(t: TabState | null, info: RepoInfo) {
-    this.repo = t?.repo ?? info;
-    this.status = t?.status ?? null;
-    this.refs = t?.refs ?? null;
-    this.stashes = t?.stashes ?? [];
-    this.undoTop = t?.undoTop ?? null;
+    const d = t?.data?.d;
+    this.repo = d?.repo ?? info;
+    this.status = d?.status ?? null;
+    this.refs = d?.refs ?? null;
+    this.stashes = d?.stashes ?? [];
+    this.undoTop = d?.undoTop ?? null;
     this.view = t?.view ?? "changes";
     this.scope = t?.scope ?? "all";
-    this.log = t?.log ?? [];
-    this.logMore = t?.logMore ?? false;
+    this.log = d?.log ?? [];
+    this.logMore = d?.logMore ?? false;
     this.logLimit = t?.logLimit ?? 2000;
     this.selectedCommit = t?.selectedCommit ?? null;
     this.selectedStash = t?.selectedStash ?? null;
     this.selectedFile = t?.selectedFile ?? null;
-    this.lastSig = t?.lastSig ?? "";
+    this.lastSig = d?.lastSig ?? "";
     this.historyQuery = t?.historyQuery ?? "";
     this.historyScroll = t?.historyScroll ?? 0;
     this.fileHistoryPath = t?.fileHistoryPath ?? null;

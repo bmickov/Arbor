@@ -178,11 +178,12 @@ pub fn apply_patch(repo_path: &str, file: &str) -> Result<Applied> {
     let bytes = std::fs::read(file)?;
     let diff = Diff::from_buffer(&bytes).map_err(|e| Error::Msg(format!("That file isn't a patch Arbor can read: {}", e.message())))?;
     let mut paths: Vec<String> = vec![];
+    let mut seen = std::collections::HashSet::new();
     for d in diff.deltas() {
         for f in [d.old_file(), d.new_file()] {
             if let Some(p) = f.path() {
                 let p = p.to_string_lossy().to_string();
-                if !paths.contains(&p) {
+                if seen.insert(p.clone()) {
                     paths.push(p);
                 }
             }

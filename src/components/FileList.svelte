@@ -6,6 +6,8 @@
   import { app } from "../lib/state.svelte";
   import Icon from "./Icon.svelte";
   import { SvelteSet } from "svelte/reactivity";
+  import { tick } from "svelte";
+  import { nearEnd, Progressive } from "../lib/progressive.svelte";
 
   let {
     files,
@@ -38,6 +40,10 @@
   const tree = $derived(app.settings.fileTree);
   const rows = $derived(tree ? treeRows(files, (f) => f.path, collapsed) : files.map((f) => ({ kind: "file" as const, item: f, name: basename(f.path), depth: 0 })));
   const visible = $derived(rows.filter((r) => r.kind === "file").map((r) => (r as { item: FileEntry }).item));
+  // Thousands of changed files: render them a slice at a time.
+  const prog = new Progressive(300);
+  const shown = $derived(rows.length > prog.limit ? rows.slice(0, prog.limit) : rows);
+  let list: HTMLElement;
 
   function key(e: KeyboardEvent, f: FileEntry) {
     const i = visible.indexOf(f);
@@ -47,8 +53,8 @@
       const next = visible[i + step];
       if (next) {
         onselect(next.path, e);
-        const all = (e.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLElement>(".file");
-        all?.[i + step]?.focus();
+        prog.reveal(rows.findIndex((r) => r.kind === "file" && r.item === next));
+        tick().then(() => list?.querySelector<HTMLElement>(`.file[data-path="${CSS.escape(next.path)}"]`)?.focus());
       }
     } else if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
@@ -57,9 +63,9 @@
   }
 </script>
 
-<div class="files"
+<div class="files" bind:this={list}
   use:dropTarget={{ accepts: (p) => p.kind === "files" && p.from !== area, drop: (p) => p.kind === "files" && ondropfiles(p.paths) }}>
-  {#each rows as row (row.kind === "dir" ? `d:${row.path}` : row.item.path)}
+  {#each shown as row (row.kind === "dir" ? `d:${row.path}` : row.item.path)}
     {#if row.kind === "dir"}
       <div class="folder" style:padding-left="{8 + row.depth * 14}px" role="treeitem" aria-expanded={row.open} aria-selected="false" tabindex="-1"
         onclick={() => (collapsed.has(row.path) ? collapsed.delete(row.path) : collapsed.add(row.path))}
@@ -75,7 +81,7 @@
       </div>
     {:else}
     {@const f = row.item}
-    <div class="file" class:sel={selected.has(f.path)} role="option" aria-selected={selected.has(f.path)} tabindex="0"
+    <div class="file" class:sel={selected.has(f.path)} data-path={f.path} role="option" aria-selected={selected.has(f.path)} tabindex="0"
       style:padding-left={tree ? `${8 + row.depth * 14 + 14}px` : null}
       title={f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}
       onclick={(e) => onselect(f.path, e)}
@@ -93,6 +99,9 @@
   {:else}
     <div class="none faint">{area === "staged" ? "Drag files here, or press + on a change, to stage it" : "Nothing to stage"}</div>
   {/each}
+  {#if shown.length < rows.length}
+    <div class="more faint" use:nearEnd={prog.more}>{rows.length - shown.length} more…</div>
+  {/if}
 </div>
 
 <style>
@@ -122,7 +131,7 @@
   }
   .file:hover .toggle, .file.sel .toggle, .file:focus-within .toggle { opacity: 1; }
   .toggle:hover { background: var(--accent); color: var(--accent-ink); }
-  .none { padding: 6px 8px; font-size: calc(var(--fs) * 12); }
+  .none, .more { padding: 6px 8px; font-size: calc(var(--fs) * 12); }
   .folder { display: flex; align-items: center; gap: 6px; height: 24px; padding-right: 4px; border-radius: 5px; color: var(--ink-2); cursor: default; }
   .folder:hover { background: var(--surface-2); }
   .folder:hover .toggle { opacity: 1; }

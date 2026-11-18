@@ -258,7 +258,15 @@ fn push_refspecs(repo: &Repository, remote: &str, specs: &[String], creds: Optio
     });
     let mut po = PushOptions::new();
     po.remote_callbacks(cb);
-    r.push(specs, Some(&mut po)).map_err(|e| {
+    let pushed = r.push(specs, Some(&mut po));
+    // libgit2 can't push to a repository with a working tree on this
+    // computer; git can (when that repository allows it).
+    if let Err(e) = &pushed {
+        if e.message().contains("non-bare") {
+            return push_with_git(repo, remote, specs);
+        }
+    }
+    pushed.map_err(|e| {
         let m = e.message().to_lowercase();
         if e.code() == git2::ErrorCode::NotFastForward || m.contains("non-fast") || m.contains("fastforward") || m.contains("fast-forward") || m.contains("not present locally") {
             Error::Msg(format!("REJECTED:The remote has commits you don't have. Pull first, or force push. ({})", e.message()))
@@ -274,6 +282,33 @@ fn push_refspecs(repo: &Repository, remote: &str, specs: &[String], creds: Optio
         update_tracking(repo, remote, specs)?;
     }
     Ok(())
+}
+
+/// Push with the git program (for what libgit2 can't do), which also
+/// updates the remote-tracking branches.
+fn push_with_git(repo: &Repository, remote: &str, specs: &[String]) -> Result<()> {
+    let dir = repo.workdir().unwrap_or(repo.path());
+    let out = crate::platform::quiet_command("git")
+        .current_dir(dir)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(std::process::Stdio::null())
+        .arg("push")
+        .arg(remote)
+        .args(specs)
+        .output()
+        .map_err(|_| Error::Msg("Arbor can't push to a repository that has a working tree (a non-bare repository) on this computer, and git isn't installed to do it instead.".into()))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let text = String::from_utf8_lossy(&out.stderr);
+    let text = text.lines().map(|l| l.trim_start_matches("remote: ").trim_start_matches("error: ").trim()).filter(|l| !l.is_empty() && !l.starts_with("To ") && !l.starts_with("hint:")).collect::<Vec<_>>().join("\n");
+    if text.contains("non-fast-forward") || text.contains("fetch first") {
+        return err(format!("REJECTED:The remote has commits you don't have. Pull first, or force push. ({text})"));
+    }
+    if text.contains("checked out") || text.contains("denyCurrentBranch") {
+        return err(format!("That branch is checked out in the remote repository, which refuses pushes to it. Push to another branch, or make the remote a bare repository.\n({text})"));
+    }
+    err(format!("The push failed:\n{text}"))
 }
 
 /// Repositories with a push under way: one push at a time per repository
@@ -373,6 +408,9 @@ pub fn push(
 
 pub fn push_tag(repo_path: &str, tag: &str, remote: &str, creds: Option<Creds>, progress: Progress) -> Result<()> {
     let repo = open(repo_path)?;
+    if repo.find_reference(&format!("refs/tags/{tag}")).is_err() {
+        return err(format!("There's no tag called '{tag}'."));
+    }
     push_refspecs(&repo, remote, &[format!("refs/tags/{tag}:refs/tags/{tag}")], creds, progress)
 }
 

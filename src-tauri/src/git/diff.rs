@@ -19,6 +19,24 @@ pub struct Line {
     pub nl: bool,
     pub old_no: Option<u32>,
     pub new_no: Option<u32>,
+    /// The line ended in "\r" (CRLF), which `content` leaves out.
+    #[serde(skip, default)]
+    pub cr: bool,
+    /// The exact bytes, for a line that isn't valid UTF-8 (where `content`
+    /// has replacement characters), so patches built from it stay exact.
+    #[serde(skip, default)]
+    pub raw: Option<Vec<u8>>,
+}
+
+impl Line {
+    /// The line as it is in the file, without its "\n".
+    pub fn bytes(&self) -> Vec<u8> {
+        let mut b = self.raw.clone().unwrap_or_else(|| self.content.as_bytes().to_vec());
+        if self.cr {
+            b.push(b'\r');
+        }
+        b
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -175,11 +193,20 @@ pub fn file_diff(diff: &Diff, idx: usize, with_lines: bool, max_lines: Option<us
             let origin = line.origin();
             match origin {
                 ' ' | '+' | '-' => {
-                    let raw = String::from_utf8_lossy(line.content());
-                    let nl = raw.ends_with('\n');
-                    // Strip the line ending. Any other '\n' can't occur inside a line.
-                    let content = raw.trim_end_matches('\n').trim_end_matches('\r').to_string();
-                    lines.push(Line { origin, content, nl, old_no: line.old_lineno(), new_no: line.new_lineno() });
+                    let mut bytes = line.content();
+                    let nl = bytes.last() == Some(&b'\n');
+                    if nl {
+                        bytes = &bytes[..bytes.len() - 1];
+                    }
+                    let cr = bytes.last() == Some(&b'\r');
+                    if cr {
+                        bytes = &bytes[..bytes.len() - 1];
+                    }
+                    let (content, raw) = match std::str::from_utf8(bytes) {
+                        Ok(t) => (t.to_string(), None),
+                        Err(_) => (String::from_utf8_lossy(bytes).into_owned(), Some(bytes.to_vec())),
+                    };
+                    lines.push(Line { origin, content, nl, old_no: line.old_lineno(), new_no: line.new_lineno(), cr, raw });
                 }
                 // "\ No newline at end of file" markers: already captured by `nl`.
                 _ => {}
@@ -271,13 +298,13 @@ fn commit_diffs<'a>(repo: &'a Repository, id: &str, s: DiffSettings) -> Result<V
 pub fn commit_files(repo_path: &str, id: &str) -> Result<Vec<FileDiff>> {
     let repo = open(repo_path)?;
     let mut out = vec![];
+    let mut seen = std::collections::HashSet::new();
     for d in commit_diffs(&repo, id, DiffSettings::default())? {
         for i in 0..d.deltas().len() {
             let f = file_diff(&d, i, false, None)?;
-            if out.iter().any(|x: &FileDiff| x.path == f.path) {
-                continue;
+            if seen.insert(f.path.clone()) {
+                out.push(f);
             }
-            out.push(f);
         }
     }
     Ok(out)

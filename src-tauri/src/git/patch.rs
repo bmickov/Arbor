@@ -4,6 +4,8 @@
 //! lines and apply it with libgit2 — to the index for stage/unstage, to the
 //! working tree for discard.
 
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use super::diff::{self, DiffSettings, FileDiff, Hunk};
 use super::undo::{self, Action};
 use super::{err, open, Error, Result};
@@ -34,9 +36,10 @@ pub fn stage_files(repo_path: &str, paths: &[String]) -> Result<()> {
     let root = repo.workdir().unwrap().to_path_buf();
     // LFS files go through `git add`, which stores them as LFS pointers.
     let lfs = super::lfs::lfs_paths(&repo, paths);
+    let lfs_set: HashSet<&String> = lfs.iter().collect();
     let mut index = repo.index()?;
     for p in paths {
-        if lfs.contains(p) && root.join(p).exists() {
+        if lfs_set.contains(p) && root.join(p).exists() {
             continue;
         }
         let full = root.join(p);
@@ -131,6 +134,50 @@ fn remove_empty_parents(root: &std::path::Path, file: &std::path::Path) {
     }
 }
 
+/// Put a tracked file back as the index has it.
+fn restore_from_index(repo: &Repository, root: &std::path::Path, path: &str, entry: &git2::IndexEntry) -> Result<()> {
+    let full = root.join(path);
+    let link = entry.mode == 0o120000;
+    // libgit2 won't turn a symlink back into a file (or the reverse) in place.
+    if let Ok(m) = full.symlink_metadata() {
+        if m.file_type().is_symlink() != link || m.is_dir() {
+            if m.is_dir() {
+                std::fs::remove_dir_all(&full)?;
+            } else {
+                std::fs::remove_file(&full)?;
+            }
+        }
+    }
+    let mut co = CheckoutBuilder::new();
+    co.force().path(path).disable_pathspec_match(true);
+    repo.checkout_index(None, Some(&mut co))?;
+    // libgit2's checkout skips some names (a backslash in a path, for one);
+    // write those out ourselves.
+    let current = repo.status_file(std::path::Path::new(path)).map(|s| !s.intersects(git2::Status::WT_MODIFIED | git2::Status::WT_DELETED | git2::Status::WT_TYPECHANGE)).unwrap_or(false);
+    if !current {
+        let blob = repo.find_blob(entry.id)?;
+        let _ = std::fs::remove_file(&full);
+        if let Some(d) = full.parent() {
+            std::fs::create_dir_all(d)?;
+        }
+        if link {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(blob.content()), &full)?;
+            #[cfg(not(unix))]
+            std::fs::write(&full, blob.content())?;
+        } else {
+            std::fs::write(&full, blob.content())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = if entry.mode == 0o100755 { 0o755 } else { 0o644 };
+                std::fs::set_permissions(&full, std::fs::Permissions::from_mode(mode))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Throw away unstaged changes to `paths`. Untracked files are deleted.
 /// The old contents are kept as blobs so the discard can be undone.
 pub fn discard_files(repo_path: &str, paths: &[String]) -> Result<()> {
@@ -139,11 +186,8 @@ pub fn discard_files(repo_path: &str, paths: &[String]) -> Result<()> {
     let root = repo.workdir().unwrap().to_path_buf();
     let index = repo.index()?;
     for p in paths {
-        let tracked = index.get_path(std::path::Path::new(p), 0).is_some();
-        if tracked {
-            let mut co = CheckoutBuilder::new();
-            co.force().path(p).disable_pathspec_match(true);
-            repo.checkout_index(None, Some(&mut co))?;
+        if let Some(entry) = index.get_path(std::path::Path::new(p), 0) {
+            restore_from_index(&repo, &root, p, &entry)?;
         } else {
             let full = root.join(p);
             if full.is_dir() {
@@ -183,18 +227,18 @@ fn selects_everything(fd: &FileDiff, sel: &HashMap<usize, HashSet<usize>>) -> bo
     })
 }
 
-fn push_line(out: &mut String, origin: char, content: &str, nl: bool) {
-    out.push(origin);
-    out.push_str(content);
-    out.push('\n');
-    if !nl {
-        out.push_str("\\ No newline at end of file\n");
+fn push_line(out: &mut Vec<u8>, origin: char, line: &diff::Line) {
+    out.push(origin as u8);
+    out.extend_from_slice(&line.bytes());
+    out.push(b'\n');
+    if !line.nl {
+        out.extend_from_slice(b"\\ No newline at end of file\n");
     }
 }
 
 /// Build the body (hunks only) of a patch for the selected lines.
-fn build_hunks(hunks: &[Hunk], sel: &HashMap<usize, HashSet<usize>>, dir: Direction) -> Option<String> {
-    let mut out = String::new();
+fn build_hunks(hunks: &[Hunk], sel: &HashMap<usize, HashSet<usize>>, dir: Direction) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
     let mut delta: i64 = 0;
     let mut any = false;
     for (hi, h) in hunks.iter().enumerate() {
@@ -202,7 +246,7 @@ fn build_hunks(hunks: &[Hunk], sel: &HashMap<usize, HashSet<usize>>, dir: Direct
         if !h.lines.iter().enumerate().any(|(li, l)| l.origin != ' ' && chosen.contains(&li)) {
             continue;
         }
-        let mut body = String::new();
+        let mut body = Vec::new();
         let (mut pre, mut post) = (0i64, 0i64);
         for (li, l) in h.lines.iter().enumerate() {
             let picked = chosen.contains(&li);
@@ -227,7 +271,7 @@ fn build_hunks(hunks: &[Hunk], sel: &HashMap<usize, HashSet<usize>>, dir: Direct
                     '-' => pre += 1,
                     _ => post += 1,
                 }
-                push_line(&mut body, o, &l.content, l.nl);
+                push_line(&mut body, o, l);
             }
         }
         // Where the preimage starts (1-based) in the file the patch applies to.
@@ -240,16 +284,16 @@ fn build_hunks(hunks: &[Hunk], sel: &HashMap<usize, HashSet<usize>>, dir: Direct
         // so new_start must be exact.
         let new_start = first + delta;
         let old_hdr = if pre == 0 { first - 1 } else { first };
-        out.push_str(&format!("@@ -{},{} +{},{} @@\n", old_hdr.max(0), pre, new_start.max(1), post));
-        out.push_str(&body);
+        out.extend_from_slice(format!("@@ -{},{} +{},{} @@\n", old_hdr.max(0), pre, new_start.max(1), post).as_bytes());
+        out.extend_from_slice(&body);
         delta += post - pre;
         any = true;
     }
     any.then_some(out)
 }
 
-fn apply_patch(repo: &Repository, text: &str, loc: ApplyLocation) -> Result<()> {
-    let diff = Diff::from_buffer(text.as_bytes())?;
+fn apply_patch(repo: &Repository, text: &[u8], loc: ApplyLocation) -> Result<()> {
+    let diff = Diff::from_buffer(text)?;
     repo.apply(&diff, loc, None).map_err(|e| {
         Error::Msg(format!(
             "Couldn't apply that selection ({}). Try selecting the whole hunk.",
@@ -258,12 +302,18 @@ fn apply_patch(repo: &Repository, text: &str, loc: ApplyLocation) -> Result<()> 
     })
 }
 
-fn file_header(path: &str, new_file: bool) -> String {
-    if new_file {
-        format!("diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n")
-    } else {
-        format!("diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n")
-    }
+/// `mode`: Some for a new file (its mode), None for an existing one.
+fn file_header(path: &str, new_file: Option<u32>, body: Vec<u8>) -> Vec<u8> {
+    let head = match new_file {
+        Some(mode) => {
+            let mode = if mode == 0o100755 { "100755" } else { "100644" };
+            format!("diff --git a/{path} b/{path}\nnew file mode {mode}\n--- /dev/null\n+++ b/{path}\n")
+        }
+        None => format!("diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"),
+    };
+    let mut out = head.into_bytes();
+    out.extend(body);
+    out
 }
 
 pub fn stage_lines(repo_path: &str, path: &str, sel: &[Selection], s: DiffSettings) -> Result<()> {
@@ -278,7 +328,7 @@ pub fn stage_lines(repo_path: &str, path: &str, sel: &[Selection], s: DiffSettin
     }
     let Some(body) = build_hunks(&fd.hunks, &map, Direction::Forward) else { return Ok(()) };
     let untracked = fd.status == "untracked" || fd.status == "added";
-    let text = file_header(path, untracked) + &body;
+    let text = file_header(path, untracked.then_some(fd.new_mode), body);
     let before = undo::index_tree(&repo);
     apply_patch(&repo, &text, ApplyLocation::Index)?;
     if let Some(t) = before {
@@ -302,7 +352,7 @@ pub fn unstage_lines(repo_path: &str, path: &str, old_path: Option<&str>, sel: &
         return unstage_files(repo_path, &paths);
     }
     let Some(body) = build_hunks(&fd.hunks, &map, Direction::Reverse) else { return Ok(()) };
-    let text = file_header(path, false) + &body;
+    let text = file_header(path, None, body);
     let before = undo::index_tree(&repo);
     apply_patch(&repo, &text, ApplyLocation::Index)?;
     if let Some(t) = before {
@@ -322,7 +372,7 @@ pub fn discard_lines(repo_path: &str, path: &str, sel: &[Selection], s: DiffSett
         return discard_files(repo_path, &[path.to_string()]);
     }
     let Some(body) = build_hunks(&fd.hunks, &map, Direction::Reverse) else { return Ok(()) };
-    let text = file_header(path, false) + &body;
+    let text = file_header(path, None, body);
     let saved = undo::save_files(&repo, &[path.to_string()])?;
     apply_patch(&repo, &text, ApplyLocation::WorkDir)?;
     undo::record(&repo, format!("Discard lines in {path}"), Action::RestoreFiles { files: saved });

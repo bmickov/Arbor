@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { nearEnd, Progressive } from "../lib/progressive.svelte";
   // Compare two branches (or tags, or remote branches): the commits each has
   // that the other doesn't, and the files the target would bring to the base.
   import { api, type Comparison, type FileDiff, type MergePrediction } from "../lib/api";
@@ -75,6 +76,11 @@
     tags: (app.refs?.tags ?? []).map((t) => t.name),
   });
   const canMerge = $derived(!!cmp && base === app.headBranch && cmp.ahead.length > 0);
+  const filesProg = new Progressive(300);
+  $effect(() => {
+    void cmp;
+    filesProg.reset();
+  });
 </script>
 
 {#snippet refSelect(value: string, which: "base" | "target", label: string)}
@@ -147,7 +153,7 @@
             {#if cmp.behindTotal > cmp.behind.length}<div class="none faint">…and {cmp.behindTotal - cmp.behind.length} more</div>{/if}
           {/if}
         {:else if cmp}
-          {#each cmp.files as f (f.path)}
+          {#each cmp.files.length > filesProg.limit ? cmp.files.slice(0, filesProg.limit) : cmp.files as f (f.path)}
             <button class="item file" class:sel={pick?.kind === "file" && pick.path === f.path} onclick={() => (pick = { kind: "file", path: f.path })}>
               <span class="st st-{f.status}">{STATUS_GLYPH[f.status] ?? "M"}</span>
               <span class="fname">{basename(f.path)} <span class="faint">{dirname(f.path)}</span></span>
@@ -156,6 +162,7 @@
           {:else}
             <div class="none faint">No file changes.</div>
           {/each}
+          {#if cmp.files.length > filesProg.limit}<div class="none faint" use:nearEnd={filesProg.more}>{cmp.files.length - filesProg.limit} more…</div>{/if}
         {/if}
       </div>
     </div>

@@ -339,7 +339,15 @@ pub fn verify(repo_path: &str, id: &str) -> Result<Option<Verification>> {
             let key = text.split_whitespace().find(|w| w.starts_with("SHA256:")).map(str::to_string);
             let (state, detail) = if !out.status.success() {
                 let why = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
-                ("bad", format!("The signature doesn't match this commit. {why}").trim().to_string())
+                // ssh-keygen says so when the signature doesn't match; any
+                // other failure (a signing-only program, a broken setup)
+                // means it couldn't be checked, not that it's forged.
+                let lower = text.to_lowercase();
+                if lower.contains("incorrect signature") || lower.contains("verification failed") || lower.contains("could not verify") {
+                    ("bad", format!("The signature doesn't match this commit. {why}").trim().to_string())
+                } else {
+                    ("error", format!("Couldn't check the signature with {prog}. {why}").trim().to_string())
+                }
             } else if principal.is_some() {
                 ("good", "Valid signature from a key in your allowed signers file.".into())
             } else if allowed.is_some() {

@@ -97,40 +97,25 @@ pub fn save(repo_path: &str, message: Option<&str>, include_untracked: bool, kee
 pub fn save_paths(repo_path: &str, message: Option<&str>, include_untracked: bool, keep_index: bool, quiet: bool, paths: &[String]) -> Result<()> {
     let mut repo = open(repo_path)?;
     let sig = signature(&repo)?;
-    let mut flags = StashFlags::DEFAULT;
-    if include_untracked {
-        flags |= StashFlags::INCLUDE_UNTRACKED;
-    }
-    if keep_index {
-        flags |= StashFlags::KEEP_INDEX;
-    }
     let msg = message.filter(|m| !m.trim().is_empty());
-    let expanded = expand_folders(&repo, paths)?;
-    let paths = expanded.as_slice();
-    // libgit2 stashes only the given paths but resets every file in the
-    // working tree, so keep the other changes aside and put them back.
-    let keep = if paths.is_empty() { vec![] } else { snapshot_others(&repo, paths)? };
-    let saved = if paths.is_empty() {
-        repo.stash_save2(&sig, msg, Some(flags))
-    } else {
-        let mut opts = git2::StashSaveOptions::new(sig.clone());
-        opts.flags(Some(flags));
-        for p in paths {
-            opts.pathspec(p.as_str());
+    let id = if paths.is_empty() {
+        let mut flags = StashFlags::DEFAULT;
+        if include_untracked {
+            flags |= StashFlags::INCLUDE_UNTRACKED;
         }
-        repo.stash_save_ext(Some(&mut opts))
+        if keep_index {
+            flags |= StashFlags::KEEP_INDEX;
+        }
+        repo.stash_save2(&sig, msg, Some(flags)).map_err(|e| {
+            if e.code() == git2::ErrorCode::NotFound {
+                Error::Msg("There are no local changes to stash.".into())
+            } else {
+                e.into()
+            }
+        })?
+    } else {
+        save_partial(&repo, repo_path, &sig, msg, include_untracked, keep_index, paths)?
     };
-    let saved = match saved {
-        Ok(id) if !paths.is_empty() => finish_partial(&repo, &sig, id, msg, paths),
-        other => other.map_err(Error::from),
-    };
-    if !keep.is_empty() {
-        restore_others(&repo, keep)?;
-    }
-    let id = saved.map_err(|e| match e {
-        Error::Git(g) if g.code() == git2::ErrorCode::NotFound => Error::Msg("There are no local changes to stash.".into()),
-        e => e,
-    })?;
     let label = match (msg, paths.len()) {
         (Some(m), _) => format!("Stash \"{m}\""),
         (None, 0) => "Stash changes".to_string(),
@@ -143,77 +128,195 @@ pub fn save_paths(repo_path: &str, message: Option<&str>, include_untracked: boo
     Ok(())
 }
 
-/// Tidy a stash made from chosen paths, as `git stash push -- paths` would
-/// leave it: git2 can't pass a message along with paths, and libgit2 puts
-/// every untracked file in the stash, not only the chosen ones, so applying
-/// it later would collide with the untracked files left in place.
-fn finish_partial(repo: &Repository, sig: &git2::Signature, id: Oid, msg: Option<&str>, paths: &[String]) -> Result<Oid> {
-    let c = repo.find_commit(id)?;
-    let mut parents: Vec<git2::Commit> = c.parents().collect();
-    let mut changed = false;
-    let mut tree = c.tree()?;
-    if parents.len() > 2 {
-        let untracked = parents[2].clone();
-        let chosen = |p: &str| paths.iter().any(|s| p == s || p.starts_with(&format!("{}/", s.trim_end_matches('/'))));
-        let mut idx = git2::Index::new()?;
-        idx.read_tree(&untracked.tree()?)?;
-        let all: Vec<String> = idx.iter().map(|e| String::from_utf8_lossy(&e.path).into_owned()).collect();
-        // libgit2 also puts chosen untracked files in the working-tree
-        // commit, where git keeps only tracked ones; applying such a stash
-        // would then find them in the way.
-        let mut work = git2::Index::new()?;
-        work.read_tree(&tree)?;
-        let mut stray = false;
-        for p in &all {
-            if work.get_path(std::path::Path::new(p), 0).is_some() {
-                work.remove_path(std::path::Path::new(p))?;
-                stray = true;
+/// Stash only the changes in `paths` (files or folders), as
+/// `git stash push -- paths` does, leaving every other change alone.
+///
+/// libgit2 can do this, but it puts every untracked file in the stash, takes
+/// seconds with a few thousand paths, and resets the whole working tree, so
+/// the stash commits are built here (as `snapshot` does) and then just the
+/// chosen files are put back as they are at HEAD.
+fn save_partial(repo: &Repository, repo_path: &str, sig: &git2::Signature, msg: Option<&str>, include_untracked: bool, keep_index: bool, paths: &[String]) -> Result<Oid> {
+    if super::unborn(repo) {
+        return err("Stashing needs a first commit to compare your changes with. Make the first commit, then try again.");
+    }
+    let mut index = repo.index()?;
+    if index.has_conflicts() {
+        return err("Some files still have conflicts. Resolve them (or abort the merge) first.");
+    }
+    let root = repo.workdir().ok_or_else(|| Error::Msg("This repository has no working tree.".into()))?.to_path_buf();
+    let head = repo.head()?.peel_to_commit()?;
+    let head_tree = head.tree()?;
+    let branch = super::head_branch(repo).unwrap_or_else(|| "(no branch)".into());
+    let head_line = format!("{} {}", short(head.id()), super::summary(&head));
+
+    // What changed among the chosen paths. A chosen file that was staged as
+    // a rename brings the file it was renamed from along.
+    let chosen = chooser(paths);
+    let mut so = git2::StatusOptions::new();
+    so.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false).exclude_submodules(true).renames_head_to_index(true);
+    let mut staged: Vec<String> = vec![];
+    let mut worktree: Vec<String> = vec![];
+    let mut untracked: Vec<String> = vec![];
+    for e in repo.statuses(Some(&mut so))?.iter() {
+        let Ok(path) = e.path() else { continue };
+        // A staged rename is one entry; the list shows it by its new name.
+        let renamed = e.head_to_index().and_then(|d| {
+            let new = d.new_file().path()?.to_string_lossy().into_owned();
+            let old = d.old_file().path()?.to_string_lossy().into_owned();
+            (new != old).then_some((new, old))
+        });
+        if !chosen(path) && !renamed.as_ref().is_some_and(|(n, o)| chosen(n) || chosen(o)) {
+            continue;
+        }
+        let st = e.status();
+        if st.contains(git2::Status::WT_NEW) {
+            if include_untracked {
+                untracked.push(path.to_string());
             }
+            continue;
         }
-        if stray {
-            changed = true;
-            tree = repo.find_tree(work.write_tree_to(repo)?)?;
-        }
-        let drop: Vec<&String> = all.iter().filter(|p| !chosen(p)).collect();
-        if !drop.is_empty() {
-            changed = true;
-            if drop.len() == all.len() {
-                parents.truncate(2);
-            } else {
-                for p in &drop {
-                    idx.remove_path(std::path::Path::new(p.as_str()))?;
+        if st.intersects(git2::Status::INDEX_NEW | git2::Status::INDEX_MODIFIED | git2::Status::INDEX_DELETED | git2::Status::INDEX_RENAMED | git2::Status::INDEX_TYPECHANGE) {
+            match &renamed {
+                Some((n, o)) => {
+                    staged.push(n.clone());
+                    staged.push(o.clone());
                 }
-                let t = repo.find_tree(idx.write_tree_to(repo)?)?;
-                let u = repo.commit(None, &untracked.author(), &untracked.committer(), untracked.message_raw().unwrap_or(""), &t, &[])?;
-                parents[2] = repo.find_commit(u)?;
+                None => staged.push(path.to_string()),
+            }
+        }
+        if st.intersects(git2::Status::WT_MODIFIED | git2::Status::WT_DELETED | git2::Status::WT_TYPECHANGE | git2::Status::WT_RENAMED) {
+            worktree.push(renamed.as_ref().map(|(n, _)| n.clone()).unwrap_or_else(|| path.to_string()));
+        }
+    }
+    if staged.is_empty() && worktree.is_empty() && untracked.is_empty() {
+        return err("There are no local changes to stash.");
+    }
+
+    // Index commit: HEAD with the chosen files as they're staged.
+    let mut i_idx = git2::Index::new()?;
+    i_idx.read_tree(&head_tree)?;
+    for p in &staged {
+        match index.get_path(std::path::Path::new(p), 0) {
+            Some(e) => i_idx.add(&e)?,
+            None => {
+                let _ = i_idx.remove_path(std::path::Path::new(p));
             }
         }
     }
-    let text = match msg {
-        Some(m) => {
-            changed = true;
-            let branch = super::head_branch(repo).unwrap_or_else(|| "(no branch)".into());
-            format!("On {branch}: {m}")
+    let i_tree = i_idx.write_tree_to(repo)?;
+
+    // The other two go through a second handle with a throwaway index, so
+    // files are read with the repository's filters (line endings, LFS).
+    let dir = tempfile::tempdir()?;
+    let scratch = |file: &str, start: Option<Oid>, add: &dyn Fn(&mut git2::Index) -> std::result::Result<(), git2::Error>| -> Result<Oid> {
+        let other = open(repo_path)?;
+        let mut idx = git2::Index::open(&dir.path().join(file))?;
+        if let Some(t) = start {
+            idx.read_tree(&other.find_tree(t)?)?;
         }
-        None => c.message_raw().unwrap_or("").to_string(),
+        other.set_index(&mut idx)?;
+        let mut idx = other.index()?;
+        add(&mut idx)?;
+        Ok(idx.write_tree_to(&other)?)
     };
-    if !changed {
-        return Ok(id);
+    // Working-tree commit: the index commit plus the chosen files as they are on disk.
+    let w_tree = scratch("work", Some(i_tree), &|idx| {
+        for p in &worktree {
+            if root.join(p).symlink_metadata().is_ok() {
+                idx.add_path(std::path::Path::new(p))?;
+            } else {
+                let _ = idx.remove_path(std::path::Path::new(p));
+            }
+        }
+        Ok(())
+    })?;
+    let u_tree = if untracked.is_empty() {
+        None
+    } else {
+        Some(scratch("untracked", None, &|idx| {
+            for p in &untracked {
+                idx.add_path(std::path::Path::new(p))?;
+            }
+            Ok(())
+        })?)
+    };
+
+    let i = repo.find_commit(repo.commit(None, sig, sig, &format!("index on {branch}: {head_line}\n"), &repo.find_tree(i_tree)?, &[&head])?)?;
+    let u = match u_tree {
+        Some(t) => Some(repo.find_commit(repo.commit(None, sig, sig, &format!("untracked files on {branch}: {head_line}\n"), &repo.find_tree(t)?, &[])?)?),
+        None => None,
+    };
+    let mut parents = vec![&head, &i];
+    if let Some(u) = &u {
+        parents.push(u);
     }
-    let prefs: Vec<&git2::Commit> = parents.iter().collect();
-    let named = repo.commit(None, &c.author(), &c.committer(), &text, &tree, &prefs)?;
-    let mut reflog = repo.reflog("refs/stash")?;
-    reflog.remove(0, false)?;
-    reflog.append(named, sig, Some(&text))?;
-    reflog.write()?;
-    repo.reference("refs/stash", named, true, &text)?;
-    // Setting the ref may log it again; keep one entry.
-    let mut reflog = repo.reflog("refs/stash")?;
-    if reflog.len() >= 2 && reflog.get(0).map(|e| e.id_new()) == Some(named) && reflog.get(1).map(|e| e.id_new()) == Some(named) {
-        reflog.remove(0, false)?;
-        reflog.write()?;
+    let message = match msg {
+        Some(m) => format!("On {branch}: {m}"),
+        None => format!("WIP on {branch}: {head_line}"),
+    };
+    let w = repo.commit(None, sig, sig, &format!("{message}\n"), &repo.find_tree(w_tree)?, &parents)?;
+    restore_entry(repo, w, &message)?;
+
+    // Now take the chosen changes out: the index back to HEAD for those
+    // files (unless keeping the index), the files back to match it.
+    if !keep_index {
+        for p in &staged {
+            match head_tree.get_path(std::path::Path::new(p)) {
+                Ok(t) => index.add(&git2::IndexEntry {
+                    ctime: git2::IndexTime::new(0, 0),
+                    mtime: git2::IndexTime::new(0, 0),
+                    dev: 0,
+                    ino: 0,
+                    mode: t.filemode() as u32,
+                    uid: 0,
+                    gid: 0,
+                    file_size: 0,
+                    id: t.id(),
+                    flags: 0,
+                    flags_extended: 0,
+                    path: p.as_bytes().to_vec(),
+                })?,
+                Err(_) => {
+                    let _ = index.remove_path(std::path::Path::new(p));
+                }
+            }
+        }
+        index.write()?;
     }
-    Ok(named)
+    let mut back: Vec<&String> = staged.iter().chain(worktree.iter()).collect();
+    back.sort();
+    back.dedup();
+    let mut co = git2::build::CheckoutBuilder::new();
+    co.force().disable_pathspec_match(true);
+    let mut any = false;
+    for p in &back {
+        if index.get_path(std::path::Path::new(p.as_str()), 0).is_some() {
+            co.path(p.as_str());
+            any = true;
+        } else {
+            remove_file(&root, p);
+        }
+    }
+    if any {
+        repo.checkout_index(Some(&mut index), Some(&mut co))?;
+    }
+    for p in &untracked {
+        remove_file(&root, p);
+    }
+    Ok(w)
+}
+
+/// Delete a file from the working tree, and the folders it leaves empty.
+fn remove_file(root: &std::path::Path, path: &str) {
+    let full = root.join(path);
+    let _ = std::fs::remove_file(&full);
+    let mut dir = full.parent();
+    while let Some(d) = dir {
+        if d == root || !d.starts_with(root) || std::fs::remove_dir(d).is_err() {
+            break;
+        }
+        dir = d.parent();
+    }
 }
 
 fn apply_opts() -> StashApplyOptions<'static> {
@@ -378,86 +481,28 @@ pub fn branch(repo_path: &str, index: usize, name: &str) -> Result<()> {
 
 fn drop_repo(_r: Repository) {}
 
-/// A changed file outside a partial stash: its working-tree bytes (None if
-/// deleted) and its index entry (None if not in the index).
-struct Kept {
-    path: String,
-    bytes: Option<Vec<u8>>,
-    entry: Option<git2::IndexEntry>,
-}
-
-/// libgit2 can't stash a folder by name; name the changed files in it instead.
-fn expand_folders(repo: &Repository, paths: &[String]) -> Result<Vec<String>> {
-    let Some(root) = repo.workdir() else { return Ok(paths.to_vec()) };
-    if !paths.iter().any(|p| root.join(p).is_dir()) {
-        return Ok(paths.to_vec());
-    }
-    let mut o = git2::StatusOptions::new();
-    o.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false).exclude_submodules(true);
-    let changed: Vec<String> = repo.statuses(Some(&mut o))?.iter().filter_map(|e| e.path().ok().map(String::from)).collect();
-    let mut out = vec![];
-    for p in paths {
-        if root.join(p).is_dir() {
-            let prefix = format!("{}/", p.trim_end_matches('/'));
-            out.extend(changed.iter().filter(|c| c.starts_with(&prefix)).cloned());
-        } else {
-            out.push(p.clone());
+/// Whether a path is one of `paths` or inside one of them. A set lookup
+/// per folder of the path, so thousands of paths against thousands of
+/// changes stays quick.
+fn chooser(paths: &[String]) -> impl Fn(&str) -> bool {
+    let set: std::collections::HashSet<String> = paths.iter().map(|p| p.trim_end_matches('/').to_string()).collect();
+    move |p: &str| {
+        if set.contains(p) {
+            return true;
         }
-    }
-    if out.is_empty() {
-        return Err(Error::Msg("There are no local changes to stash.".into()));
-    }
-    Ok(out)
-}
-
-fn snapshot_others(repo: &Repository, paths: &[String]) -> Result<Vec<Kept>> {
-    let chosen = |p: &str| paths.iter().any(|s| p == s || p.starts_with(&format!("{}/", s.trim_end_matches('/'))));
-    let mut o = git2::StatusOptions::new();
-    o.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false).exclude_submodules(true);
-    let root = repo.workdir().ok_or_else(|| Error::Msg("This repository has no working tree.".into()))?.to_path_buf();
-    let index = repo.index()?;
-    let mut out = vec![];
-    for e in repo.statuses(Some(&mut o))?.iter() {
-        let Ok(path) = e.path() else { continue };
-        if chosen(path) {
-            continue;
-        }
-        let full = root.join(path);
-        out.push(Kept {
-            path: path.to_string(),
-            bytes: std::fs::read(&full).ok(),
-            entry: index.get_path(std::path::Path::new(path), 0),
-        });
-    }
-    Ok(out)
-}
-
-fn restore_others(repo: &Repository, keep: Vec<Kept>) -> Result<()> {
-    let root = repo.workdir().ok_or_else(|| Error::Msg("This repository has no working tree.".into()))?.to_path_buf();
-    let mut index = repo.index()?;
-    for k in keep {
-        let full = root.join(&k.path);
-        match &k.bytes {
-            Some(b) => {
-                if let Some(d) = full.parent() {
-                    std::fs::create_dir_all(d)?;
-                }
-                std::fs::write(&full, b)?;
-            }
-            None => {
-                let _ = std::fs::remove_file(&full);
+        let mut rest = p;
+        while let Some(i) = rest.rfind('/') {
+            rest = &rest[..i];
+            if set.contains(rest) {
+                return true;
             }
         }
-        match k.entry {
-            Some(e) => index.add(&e)?,
-            None => {
-                let _ = index.remove_path(std::path::Path::new(&k.path));
-            }
-        }
+        false
     }
-    index.write()?;
-    Ok(())
 }
+
+
+
 
 /// Save a snapshot: every current change (staged, unstaged and untracked)
 /// stored as a stash, while the working tree and index stay exactly as they
