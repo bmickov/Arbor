@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata: what software centres (GNOME Software, KDE Discover,
+     Flathub) show about Arbor. Installed as
+     /usr/share/metainfo/app.arbor.git.metainfo.xml by the .deb, .rpm,
+     AppImage and FreeBSD packages. CI sets the <release> line to the version
+     being built and its commit date (scripts/update-metainfo.sh). -->
+<component type="desktop-application">
+  <id>app.arbor.git</id>
+  <name>Arbor</name>
+  <summary>A friendly Git client</summary>
+  <developer id="app.arbor">
+    <name>The Arbor authors</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <description>
+    <p>
+      Arbor is a Git client for Linux, the BSDs, macOS and Windows: drag-and-drop
+      merging and rebasing, commit reordering, line-by-line staging, and an undo
+      button that covers almost everything.
+    </p>
+    <ul>
+      <li>Stage or discard whole files, single hunks or individual lines</li>
+      <li>Undo commits, merges, rebases, resets, discards and branch and stash operations</li>
+      <li>Drop a branch on another to merge or rebase it</li>
+      <li>Resolve conflicts side by side</li>
+      <li>Quick Actions to run any command, switch branch or jump to a commit</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">Arbor.desktop</launchable>
+  <icon type="stock">arbor</icon>
+
+  <url type="homepage">https://github.com/bmickov/Arbor</url>
+  <url type="bugtracker">https://github.com/bmickov/Arbor/issues</url>
+  <url type="vcs-browser">https://github.com/bmickov/Arbor</url>
+
+  <categories>
+    <category>Development</category>
+    <category>RevisionControl</category>
+  </categories>
+  <keywords>
+    <keyword>git</keyword>
+    <keyword>version control</keyword>
+    <keyword>vcs</keyword>
+  </keywords>
+  <provides>
+    <binary>arbor</binary>
+  </provides>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.15.4" date="2026-11-18"/>
+  </releases>
+</component>

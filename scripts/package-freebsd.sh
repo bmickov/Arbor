@@ -32,12 +32,14 @@ name="arbor-${version}-${os}-${arch}"
 stage="dist-bundles/${name}"
 rm -rf "$stage"
 mkdir -p "$stage/bin" "$stage/share/applications" "$stage/share/icons/hicolor/128x128/apps" \
-  "$stage/share/icons/hicolor/32x32/apps" "$stage/share/doc/arbor"
+  "$stage/share/icons/hicolor/32x32/apps" "$stage/share/metainfo" "$stage/share/doc/arbor"
 
 install -m 755 "$target/release/arbor" "$stage/bin/arbor"
 install -m 644 src-tauri/icons/128x128.png "$stage/share/icons/hicolor/128x128/apps/arbor.png"
 install -m 644 src-tauri/icons/32x32.png "$stage/share/icons/hicolor/32x32/apps/arbor.png"
 install -m 644 LICENSE THIRD_PARTY_NOTICES.md README.md "$stage/share/doc/arbor/"
+# AppStream metadata, for software centres.
+install -m 644 src-tauri/linux/app.arbor.git.metainfo.xml "$stage/share/metainfo/"
 
 # Named after Arbor's application id ("Arbor", see src-tauri/src/desktop.rs),
 # so docks and task switchers match the window to this launcher and its icon.
@@ -63,13 +65,14 @@ set -eu
 PREFIX=${PREFIX:-/usr/local}
 cd "$(dirname "$0")"
 install -d "$PREFIX/bin" "$PREFIX/share/applications" "$PREFIX/share/icons/hicolor/128x128/apps" \
-  "$PREFIX/share/icons/hicolor/32x32/apps" "$PREFIX/share/doc/arbor"
+  "$PREFIX/share/icons/hicolor/32x32/apps" "$PREFIX/share/metainfo" "$PREFIX/share/doc/arbor"
 install -m 755 bin/arbor "$PREFIX/bin/arbor"
 install -m 644 share/applications/Arbor.desktop "$PREFIX/share/applications/"
 # Older versions installed it in lower case.
 rm -f "$PREFIX/share/applications/arbor.desktop"
 install -m 644 share/icons/hicolor/128x128/apps/arbor.png "$PREFIX/share/icons/hicolor/128x128/apps/"
 install -m 644 share/icons/hicolor/32x32/apps/arbor.png "$PREFIX/share/icons/hicolor/32x32/apps/"
+install -m 644 share/metainfo/app.arbor.git.metainfo.xml "$PREFIX/share/metainfo/"
 install -m 644 share/doc/arbor/* "$PREFIX/share/doc/arbor/"
 echo "Installed to $PREFIX/bin/arbor"
 EOF

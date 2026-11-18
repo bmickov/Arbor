@@ -43,13 +43,24 @@
         "depends": [
           "git"
         ],
-        "desktopTemplate": "linux/Arbor.desktop"
+        "desktopTemplate": "linux/Arbor.desktop",
+        "files": {
+          "/usr/share/metainfo/app.arbor.git.metainfo.xml": "linux/app.arbor.git.metainfo.xml"
+        }
       },
       "rpm": {
         "depends": [
           "git"
         ],
-        "desktopTemplate": "linux/Arbor.desktop"
+        "desktopTemplate": "linux/Arbor.desktop",
+        "files": {
+          "/usr/share/metainfo/app.arbor.git.metainfo.xml": "linux/app.arbor.git.metainfo.xml"
+        }
+      },
+      "appimage": {
+        "files": {
+          "/usr/share/metainfo/app.arbor.git.metainfo.xml": "linux/app.arbor.git.metainfo.xml"
+        }
       }
     },
     "longDescription": "Arbor is a Git client for Linux, the BSDs, macOS and Windows: drag-and-drop merging and rebasing, commit reordering, line-by-line staging, and an undo button that covers almost everything.",
