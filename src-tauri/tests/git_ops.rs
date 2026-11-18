@@ -10,6 +10,13 @@ struct Repo {
     path: String,
 }
 
+/// A file as a fresh clone checked it out, with line endings made "\n".
+/// A clone follows the machine's own git settings, and Git for Windows turns
+/// on core.autocrlf system-wide, so there it writes "\r\n".
+fn checked_out(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap().replace("\r\n", "\n")
+}
+
 /// Keep tests out of the real ~/.config/arbor.
 fn isolate_config() {
     static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
@@ -623,7 +630,7 @@ fn push_and_pull_over_local_remote() {
 
     let p = git::remote::pull(&b_path, false, None, None).unwrap();
     assert_eq!(p.result, "fast-forward");
-    assert_eq!(std::fs::read_to_string(Path::new(&b_path).join("f.txt")).unwrap(), "2\n");
+    assert_eq!(checked_out(&Path::new(&b_path).join("f.txt")), "2\n");
 
     // Diverge and get a rejected push.
     std::fs::write(Path::new(&b_path).join("g.txt"), "g\n").unwrap();
@@ -1382,7 +1389,7 @@ fn submodules_list_and_update() {
     let c = clone.to_string_lossy().to_string();
     assert_eq!(git::worktree::submodules(&c).unwrap()[0].state, "uninitialized");
     assert_eq!(git::worktree::update_submodules(&c, &[], None, None).unwrap(), 1);
-    assert_eq!(std::fs::read_to_string(clone.join("vendor/lib/lib.txt")).unwrap(), "v1\n");
+    assert_eq!(checked_out(&clone.join("vendor/lib/lib.txt")), "v1\n");
     assert_eq!(git::worktree::submodules(&c).unwrap()[0].state, "ok");
 
     // New commits in the submodule's folder show as moved; update puts it back.
