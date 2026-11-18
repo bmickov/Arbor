@@ -37,7 +37,9 @@ jobs:
             artifact: arbor-linux-arm64
             args: --bundles deb,rpm,appimage
           - name: macOS (Apple silicon and Intel)
-            os: macos-latest
+            # A fixed image rather than macos-latest, which moves to each new
+            # macOS release.
+            os: macos-15
             artifact: arbor-macos-universal
             args: --target universal-apple-darwin --bundles app,dmg
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
