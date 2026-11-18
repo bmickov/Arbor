@@ -1,0 +1,107 @@
+# Publishes a release: push a version tag (git tag v0.6.0 && git push origin
+# v0.6.0) and this builds every platform and attaches the installers to a
+# GitHub release for that tag. The tag must match the version in
+# package.json, src-tauri/Cargo.toml and src-tauri/tauri.conf.json.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)build and publish, e.g. v0.6.0
+        required: true
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - id: v
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          ok=true
+          for f in package.json src-tauri/tauri.conf.json; do
+            v=$(node -p "require('./$f').version")
+            if [ "$v" != "$version" ]; then echo "::error file=$f::Version is $v but the tag is $TAG."; ok=false; fi
+          done
+          v=$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n 1)
+          if [ "$v" != "$version" ]; then echo "::error file=src-tauri/Cargo.toml::Version is $v but the tag is $TAG."; ok=false; fi
+          $ok
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build
+    needs: version
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.version.outputs.tag }}
+    secrets: inherit
+
+  publish:
+    name: Publish release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: arbor-*
+          path: release
+          merge-multiple: true
+
+      - name: Write checksums and release notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cd release
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cat > ../notes.md <<EOF
+          ## Downloads
+
+          | System | File |
+          | --- | --- |
+          | **Windows** 10 and 11 (x64) | \`Arbor_${VERSION}_x64-setup.exe\` (installer), or the \`.msi\` |
+          | **macOS** 10.15 or later (Apple silicon and Intel) | \`Arbor_${VERSION}_universal.dmg\` |
+          | **Debian, Ubuntu, Mint, Pop!_OS** | \`Arbor_${VERSION}_amd64.deb\` or \`_arm64.deb\` |
+          | **Fedora, openSUSE, RHEL** | \`Arbor-${VERSION}-1.x86_64.rpm\` or \`.aarch64.rpm\` |
+          | **Any Linux** | \`Arbor_${VERSION}_amd64.AppImage\` or \`_aarch64.AppImage\` |
+          | **FreeBSD** 14+ (x64) | \`Arbor_${VERSION}_freebsd_amd64.tar.gz\` |
+
+          The builds aren't signed with a paid certificate yet, so the first launch asks for confirmation:
+          on **macOS**, open System Settings → Privacy & Security and choose *Open Anyway*;
+          on **Windows**, choose *More info → Run anyway*. On **FreeBSD**, run \`pkg install webkit2-gtk_41 git\`,
+          then \`./install.sh\` from the unpacked folder. \`SHA256SUMS.txt\` lists every file's checksum.
+          EOF
+
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            pre=""
+            case "$VERSION" in *-*) pre="--prerelease" ;; esac
+            gh release create "$TAG" release/* --verify-tag $pre \
+              --title "Arbor $VERSION" --notes-file notes.md --generate-notes
+          fi

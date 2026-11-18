@@ -1,0 +1,189 @@
+# Builds Arbor's installers for every platform and uploads them as workflow
+# artifacts. CI runs it on every push and pull request; the release workflow
+# runs it for a tag and attaches the results to the GitHub release.
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build (defaults to the commit that triggered the run)
+        type: string
+        default: ""
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  desktop:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-22.04 # oldest supported glibc, so the builds run on more distros
+            artifact: arbor-linux-x64
+            args: --bundles deb,rpm,appimage
+          - name: Linux arm64
+            os: ubuntu-22.04-arm
+            artifact: arbor-linux-arm64
+            args: --bundles deb,rpm,appimage
+          - name: macOS (Apple silicon and Intel)
+            os: macos-latest
+            artifact: arbor-macos-universal
+            args: --target universal-apple-darwin --bundles app,dmg
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - name: Windows x64
+            os: windows-latest
+            artifact: arbor-windows-x64
+            args: --bundles msi,nsis
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential file libssl-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf xdg-utils
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.artifact }}
+
+      - run: npm ci
+
+      # macOS builds are ad-hoc signed by default. To sign and notarize with an
+      # Apple Developer ID instead, add these repository secrets: APPLE_CERTIFICATE
+      # (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+      # APPLE_ID, APPLE_PASSWORD (app-specific password) and APPLE_TEAM_ID.
+      - name: Use Apple signing secrets, if configured
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -n "${!v}" ]; then
+              echo "::add-mask::${!v}"
+              echo "$v=${!v}" >> "$GITHUB_ENV"
+            fi
+          done
+
+      - name: Build installers
+        shell: bash
+        env:
+          # linuxdeploy (used for the AppImage) is itself an AppImage; runners have no FUSE.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: npx tauri build ${{ matrix.args }}
+
+      - name: Check the macOS app is universal and self-contained
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bin=src-tauri/target/universal-apple-darwin/release/bundle/macos/Arbor.app/Contents/MacOS/arbor
+          lipo -info "$bin"
+          lipo "$bin" -verify_arch arm64 x86_64
+          otool -L "$bin"
+          if otool -L "$bin" | grep -E '/opt/homebrew|/usr/local/(opt|Cellar|lib)'; then
+            echo "::error::The app links to a Homebrew library that users won't have."
+            exit 1
+          fi
+
+      - name: Collect installers
+        shell: bash
+        run: |
+          mkdir -p out
+          for bundle in src-tauri/target/release/bundle src-tauri/target/*/release/bundle; do
+            for f in "$bundle"/deb/*.deb "$bundle"/rpm/*.rpm "$bundle"/appimage/*.AppImage \
+                     "$bundle"/dmg/*.dmg "$bundle"/msi/*.msi "$bundle"/nsis/*-setup.exe; do
+              [ -f "$f" ] && cp "$f" out/
+            done
+          done
+          ls -l out
+          [ -n "$(ls out)" ] || { echo "::error::No installers were produced."; exit 1; }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: out/*
+          if-no-files-found: error
+
+  # Tauri's CLI isn't published for the BSDs, so the web UI is built here on
+  # Linux and the FreeBSD job only compiles the Rust app around it.
+  web-ui:
+    name: Web UI for FreeBSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-ui
+          path: dist
+          if-no-files-found: error
+
+  freebsd:
+    name: FreeBSD x64
+    needs: web-ui
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-ui
+          path: dist
+
+      - name: Build in a FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.3"
+          usesh: true
+          mem: 8192
+          prepare: |
+            pkg install -y curl git pkgconf gtk3 webkit2-gtk_41 libsoup3 librsvg2-rust
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          run: |
+            . "$HOME/.cargo/env"
+            # Keep the (large) build folder outside the synced workspace.
+            export CARGO_TARGET_DIR="$HOME/arbor-target"
+            sh scripts/package-freebsd.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: arbor-freebsd-x64
+          path: dist-bundles/*.tar.gz
+          if-no-files-found: error

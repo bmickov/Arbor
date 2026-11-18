@@ -1,0 +1,88 @@
+# Checks and tests every push and pull request, and builds the installers
+# for all platforms. Each run's installers can be downloaded from the run's
+# summary page ("Artifacts"). Changes to documentation alone don't rebuild.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "design/**", "LICENSE"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**", "design/**", "LICENSE"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  web:
+    name: Web UI checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libssl-dev libwebkit2gtk-4.1-dev librsvg2-dev
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Build the web UI
+        run: |
+          npm ci
+          npm run build
+
+      # The tests drive the git command line to set up repositories.
+      - name: Configure git
+        run: |
+          git config --global user.name "Arbor CI"
+          git config --global user.email "ci@example.com"
+          git config --global init.defaultBranch main
+
+      - name: Run backend tests
+        working-directory: src-tauri
+        run: cargo test --locked
+
+  # Builds start once the web UI checks pass, alongside the tests, so a test
+  # failure on one system doesn't hold back everyone's installers.
+  build:
+    name: Build
+    needs: [web]
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
