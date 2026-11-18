@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { nearEnd, Progressive } from "../lib/progressive.svelte";
   import { api, type Blame, type FileDiff, type FileHistoryEntry } from "../lib/api";
   import { authorHue, basename, fullDate, initials, relTime } from "../lib/format";
   import { app } from "../lib/state.svelte";
@@ -61,6 +62,12 @@
   function key(e: KeyboardEvent) {
     if (e.key === "Escape") onclose();
   }
+  // A long file's blame is put on screen a slice at a time.
+  const blameProg = new Progressive(1000);
+  $effect(() => {
+    void blame;
+    blameProg.reset();
+  });
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -98,7 +105,7 @@
         <div class="empty"><div><strong>Binary file</strong>There are no lines to blame.</div></div>
       {:else}
         <div class="blame mono">
-          {#each blame.lines as line, i}
+          {#each blame.lines.length > blameProg.limit ? blame.lines.slice(0, blameProg.limit) : blame.lines as line, i}
             {@const h = gutter[i]}
             <div class="bl" class:start={!!h} class:odd={hunkIndex[i] % 2 === 1}>
               <span class="who">
@@ -114,6 +121,7 @@
               <span class="code">{line}</span>
             </div>
           {/each}
+          {#if blame.lines.length > blameProg.limit}<div class="bl" use:nearEnd={blameProg.more}><span class="who"></span><span class="no"></span><span class="code faint">{blame.lines.length - blameProg.limit} more lines…</span></div>{/if}
         </div>
       {/if}
     {:else}

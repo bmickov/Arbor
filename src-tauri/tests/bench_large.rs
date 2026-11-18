@@ -60,4 +60,18 @@ fn bench_dirty() {
     let f = st.unstaged[0].path.clone();
     time("unstaged_file", || git::diff::unstaged_file(p, &f, ds()));
     time("stash list (dirty)", || git::stash::list(p));
+    let head = git::status::status(p).unwrap().head.unwrap();
+    time("commit_info (head)", || git::log::commit_info(p, &head));
+    let st = git::status::status(p).unwrap();
+    println!("staged {} unstaged {} json {} KB", st.staged.len(), st.unstaged.len(), serde_json::to_string(&st).unwrap().len() / 1024);
+    if std::env::var("ARBOR_BENCH_STAGE").is_ok() {
+        time("stage_all", || git::patch::stage_all(p));
+        time("status (all staged)", || git::status::status(p));
+        let st = git::status::status(p).unwrap();
+        println!("staged {} json {} KB", st.staged.len(), serde_json::to_string(&st).unwrap().len() / 1024);
+        time("unstage_all", || git::patch::unstage_all(p));
+        let all: Vec<String> = st.staged.iter().take(2000).map(|e| e.path.clone()).collect();
+        time("stage 2000 files", || git::patch::stage_files(p, &all));
+        time("unstage 2000 files", || git::patch::unstage_files(p, &all));
+    }
 }

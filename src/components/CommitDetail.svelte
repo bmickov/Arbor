@@ -16,6 +16,7 @@
   import Linked from "./Linked.svelte";
   import { treeRows } from "../lib/filetree";
   import { SvelteSet } from "svelte/reactivity";
+  import { nearEnd, Progressive } from "../lib/progressive.svelte";
 
   let { oid, header }: { oid: string; header?: Snippet } = $props();
 
@@ -96,6 +97,12 @@
   const fileRows = $derived(
     !info ? [] : app.settings.fileTree ? treeRows(info.files, (f) => f.path, closedDirs) : info.files.map((f) => ({ kind: "file" as const, item: f, name: basename(f.path), depth: 0 })),
   );
+  // A commit can touch tens of thousands of files: show them a slice at a time.
+  const prog = new Progressive(300);
+  $effect(() => {
+    void oid;
+    prog.reset();
+  });
   const totals = $derived(info ? info.files.reduce((a, f) => [a[0] + f.additions, a[1] + f.deletions], [0, 0]) : [0, 0]);
   const sameCommitter = $derived(info && info.author.email === info.committer.email && info.author.name === info.committer.name);
 </script>
@@ -140,7 +147,7 @@
           <Icon name={app.settings.fileTree ? "file" : "folder"} size={12} />
         </button>
       </div>
-      {#each fileRows as row (row.kind === "dir" ? `d:${row.path}` : row.item.path)}
+      {#each fileRows.length > prog.limit ? fileRows.slice(0, prog.limit) : fileRows as row (row.kind === "dir" ? `d:${row.path}` : row.item.path)}
         {#if row.kind === "dir"}
           <button class="file dirrow" style:padding-left="{8 + row.depth * 14}px" onclick={() => (closedDirs.has(row.path) ? closedDirs.delete(row.path) : closedDirs.add(row.path))}>
             <span class="chev" class:open={row.open}><Icon name="chevron" size={11} /></span>
@@ -158,6 +165,7 @@
           </button>
         {/if}
       {/each}
+      {#if fileRows.length > prog.limit}<div class="more faint" use:nearEnd={prog.more}>{fileRows.length - prog.limit} more…</div>{/if}
     </div>
     </div>
     <Splitter id="commit.top" axis="y" min={70} keep={140} />
@@ -197,6 +205,7 @@
   .head { flex: none; }
   .files { max-height: 34vh; overflow-y: auto; padding: 4px 6px 6px; flex: none; }
   .top.sized .files { max-height: none; flex: 1 0 60px; }
+  .more { padding: 6px 8px; font-size: calc(var(--fs) * 12); }
   .fsum { font-size: calc(var(--fs) * 12); padding: 4px 8px 4px; display: flex; align-items: center; justify-content: space-between; }
   .viewtoggle { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 4px; color: var(--ink-3); }
   .viewtoggle:hover { background: var(--surface-3); color: var(--ink); }

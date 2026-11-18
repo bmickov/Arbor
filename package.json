@@ -1,7 +1,7 @@
 {
   "name": "arbor",
   "private": true,
-  "version": "0.15.2",
+  "version": "0.15.3",
   "description": "A friendly Git client for Linux, the BSDs, macOS and Windows",
   "license": "GPL-3.0-or-later",
   "type": "module",

@@ -434,7 +434,7 @@ pub fn rename_branch(repo_path: &str, from: &str, to: &str) -> Result<()> {
     if from != to {
         check_new_branch(&repo, to, Some(from))?;
     }
-    let mut b = repo.find_branch(from, BranchType::Local)?;
+    let mut b = repo.find_branch(from, BranchType::Local).map_err(|_| Error::Msg(format!("There's no branch called '{from}'. It may have been deleted or renamed; refresh and try again.")))?;
     b.rename(to, false)?;
     undo::record(&repo, format!("Rename {from} to {to}"), Action::RenameBranch { from: from.into(), to: to.into() });
     Ok(())
@@ -442,7 +442,12 @@ pub fn rename_branch(repo_path: &str, from: &str, to: &str) -> Result<()> {
 
 pub fn set_upstream(repo_path: &str, branch: &str, upstream: Option<&str>) -> Result<()> {
     let repo = open(repo_path)?;
-    let mut b = repo.find_branch(branch, BranchType::Local)?;
+    let mut b = repo.find_branch(branch, BranchType::Local).map_err(|_| Error::Msg(format!("There's no branch called '{branch}'.")))?;
+    if let Some(u) = upstream {
+        if repo.find_branch(u, BranchType::Remote).is_err() && repo.find_branch(u, BranchType::Local).is_err() {
+            return err(format!("There's no branch '{u}' to track. Fetch first if it's new on the remote."));
+        }
+    }
     let previous = b.upstream().ok().and_then(|u| u.name().ok().flatten().map(|s| s.to_string()));
     b.set_upstream(upstream)?;
     undo::record(&repo, format!("Change upstream of {branch}"), Action::SetUpstream { branch: branch.into(), previous });
@@ -456,6 +461,16 @@ pub fn create_tag(repo_path: &str, name: &str, target: &str, message: Option<&st
     }
     if repo.find_reference(&format!("refs/tags/{name}")).is_ok() {
         return err(format!("A tag named '{name}' already exists."));
+    }
+    // Tag names are stored like folders, as branch names are.
+    let tags = repo.tag_names(None)?;
+    for t in tags.iter().flatten().flatten() {
+        if name.starts_with(&format!("{t}/")) {
+            return err(format!("'{t}' is already a tag, so '{name}' can't be one too: git stores tag names like folders. Try '{t}-{}'.", &name[t.len() + 1..]));
+        }
+        if t.starts_with(&format!("{name}/")) {
+            return err(format!("There's already a tag '{t}', so '{name}' can't be a tag too: git stores tag names like folders."));
+        }
     }
     let obj = repo.revparse_single(target).map_err(|_| Error::Msg(format!("Couldn't find '{target}' to tag.")))?;
     match message.filter(|m| !m.trim().is_empty()) {
@@ -473,7 +488,7 @@ pub fn create_tag(repo_path: &str, name: &str, target: &str, message: Option<&st
 
 pub fn delete_tag(repo_path: &str, name: &str) -> Result<()> {
     let repo = open(repo_path)?;
-    let r = repo.find_reference(&format!("refs/tags/{name}"))?;
+    let r = repo.find_reference(&format!("refs/tags/{name}")).map_err(|_| Error::Msg(format!("There's no tag called '{name}'. It may have been deleted already; refresh and try again.")))?;
     let target = r.target().ok_or_else(|| Error::Msg("Tag has no target.".into()))?;
     repo.tag_delete(name)?;
     undo::record(&repo, format!("Delete tag {name}"), Action::RecreateTag { name: name.into(), target: target.to_string() });
@@ -482,6 +497,13 @@ pub fn delete_tag(repo_path: &str, name: &str) -> Result<()> {
 
 pub fn add_remote(repo_path: &str, name: &str, url: &str) -> Result<()> {
     let repo = open(repo_path)?;
+    let url = url.trim();
+    if url.is_empty() {
+        return err("Enter the remote's URL (or the path of a repository on this computer).");
+    }
+    if repo.find_remote(name).is_ok() {
+        return err(format!("There's already a remote called '{name}'."));
+    }
     repo.remote(name, url)?;
     undo::record(&repo, format!("Add remote {name}"), Action::RemoveRemote { name: name.into() });
     Ok(())
@@ -489,7 +511,7 @@ pub fn add_remote(repo_path: &str, name: &str, url: &str) -> Result<()> {
 
 pub fn remove_remote(repo_path: &str, name: &str) -> Result<()> {
     let repo = open(repo_path)?;
-    let url = repo.find_remote(name)?.url().unwrap_or("").to_string();
+    let url = repo.find_remote(name).map_err(|_| Error::Msg(format!("There's no remote called '{name}'.")))?.url().unwrap_or("").to_string();
     repo.remote_delete(name)?;
     undo::record(&repo, format!("Remove remote {name}"), Action::RecreateRemote { name: name.into(), url });
     Ok(())

@@ -2082,3 +2082,156 @@ fn checkout_during_a_paused_arbor_rebase_is_refused() {
     assert!(e.starts_with("A rebase is paused"), "{e}");
     git::rebase::abort_rebase(&r.path).unwrap();
 }
+
+#[test]
+fn partial_staging_keeps_crlf_and_non_utf8_bytes() {
+    let r = Repo::new();
+    let p = Path::new(&r.path);
+    std::fs::write(p.join("crlf.txt"), b"a\r\nb\r\nc\r\n").unwrap();
+    std::fs::write(p.join("latin1.txt"), b"caf\xe9\nx\n").unwrap();
+    r.commit_all("base");
+    std::fs::write(p.join("crlf.txt"), b"a\r\nB\r\nc\r\nd\r\n").unwrap();
+    std::fs::write(p.join("latin1.txt"), b"caf\xe9 cr\xe8me\nx\nna\xefve\n").unwrap();
+
+    let fd = git::diff::unstaged_file(&r.path, "crlf.txt", s()).unwrap().unwrap();
+    git::patch::stage_lines(&r.path, "crlf.txt", &[pick(&fd, 0, &["d"])], s()).unwrap();
+    assert_eq!(r.staged_content("crlf.txt"), "a\r\nb\r\nc\r\nd\r\n");
+    let fd = git::diff::unstaged_file(&r.path, "crlf.txt", s()).unwrap().unwrap();
+    git::patch::discard_lines(&r.path, "crlf.txt", &[pick(&fd, 0, &["b", "B"])], s()).unwrap();
+    assert_eq!(std::fs::read(p.join("crlf.txt")).unwrap(), b"a\r\nb\r\nc\r\nd\r\n");
+
+    let fd = git::diff::unstaged_file(&r.path, "latin1.txt", s()).unwrap().unwrap();
+    git::patch::stage_lines(&r.path, "latin1.txt", &[pick(&fd, 0, &["na"])], s()).unwrap();
+    let out = Command::new("git").args(["show", ":latin1.txt"]).current_dir(&r.path).output().unwrap();
+    assert_eq!(out.stdout, b"caf\xe9\nx\nna\xefve\n");
+}
+
+#[test]
+fn partial_staging_of_a_new_executable_keeps_its_mode() {
+    let r = Repo::new();
+    r.write("a.txt", "a\n");
+    r.commit_all("base");
+    r.write("run.sh", "#!/bin/sh\necho one\necho two\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(Path::new(&r.path).join("run.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let fd = git::diff::unstaged_file(&r.path, "run.sh", s()).unwrap().unwrap();
+        git::patch::stage_lines(&r.path, "run.sh", &[pick(&fd, 0, &["#!", "one"])], s()).unwrap();
+        assert!(r.git(&["ls-files", "-s", "run.sh"]).starts_with("100755"));
+        assert_eq!(r.staged_content("run.sh"), "#!/bin/sh\necho one\n");
+    }
+}
+
+#[test]
+fn discard_restores_odd_names_and_type_changes() {
+    let r = Repo::new();
+    r.write("back\\slash.txt", "a\n");
+    r.write("t.txt", "t\n");
+    r.commit_all("base");
+    r.write("back\\slash.txt", "b\n");
+    #[cfg(unix)]
+    {
+        let p = Path::new(&r.path);
+        std::fs::remove_file(p.join("t.txt")).unwrap();
+        std::os::unix::fs::symlink("back\\slash.txt", p.join("t.txt")).unwrap();
+    }
+    git::patch::discard_files(&r.path, &["back\\slash.txt".into(), "t.txt".into()]).unwrap();
+    assert_eq!(r.read("back\\slash.txt"), "a\n");
+    assert!(!std::fs::symlink_metadata(Path::new(&r.path).join("t.txt")).unwrap().file_type().is_symlink());
+    assert_eq!(r.read("t.txt"), "t\n");
+    assert_eq!(r.git(&["status", "--porcelain"]), "");
+}
+
+#[test]
+fn status_pairs_moved_files_in_small_working_trees() {
+    let r = Repo::new();
+    r.write("docs/guide.md", &lines(30));
+    r.commit_all("base");
+    std::fs::rename(Path::new(&r.path).join("docs/guide.md"), Path::new(&r.path).join("docs/manual.md")).unwrap();
+    let st = git::status::status(&r.path).unwrap();
+    assert_eq!(st.unstaged.len(), 1, "{:?}", st.unstaged);
+    assert_eq!(st.unstaged[0].status, "renamed");
+    assert_eq!(st.unstaged[0].old_path.as_deref(), Some("docs/guide.md"));
+}
+
+#[test]
+fn partial_stash_handles_staged_renames_deletions_and_leaves_the_rest_alone() {
+    let r = Repo::new();
+    r.write("a.txt", &lines(20));
+    r.write("b.txt", "b\n");
+    r.write("c.txt", "c\n");
+    r.write("other.txt", "o\n");
+    r.commit_all("base");
+    r.git(&["mv", "a.txt", "moved.txt"]);
+    r.write("moved.txt", &(lines(20) + "edited after the move\n"));
+    std::fs::remove_file(Path::new(&r.path).join("b.txt")).unwrap();
+    r.write("c.txt", "c staged\n");
+    r.git(&["add", "c.txt"]);
+    r.write("c.txt", "c staged\nand more\n");
+    r.write("other.txt", "o changed\n");
+    r.git(&["add", "other.txt"]);
+    let other_mtime = std::fs::metadata(Path::new(&r.path).join("other.txt")).unwrap().modified().unwrap();
+
+    git::stash::save_paths(&r.path, None, true, false, false, &["moved.txt".into(), "b.txt".into(), "c.txt".into()]).unwrap();
+    // Only other.txt is left, untouched and still staged.
+    assert_eq!(r.git(&["status", "--porcelain"]), "M  other.txt\n");
+    assert_eq!(std::fs::metadata(Path::new(&r.path).join("other.txt")).unwrap().modified().unwrap(), other_mtime);
+    assert_eq!(r.read("a.txt"), lines(20));
+    assert_eq!(r.read("c.txt"), "c\n");
+
+    git::stash::pop(&r.path, 0, false).unwrap();
+    let st = r.git(&["status", "--porcelain"]);
+    assert!(st.contains("RM a.txt -> moved.txt"), "{st}");
+    assert_eq!(r.read("moved.txt"), lines(20) + "edited after the move\n");
+    assert!(st.contains(" D b.txt"), "{st}");
+    assert!(st.contains("MM c.txt"), "{st}");
+    assert!(st.contains("M  other.txt"), "{st}");
+    assert_eq!(r.staged_content("c.txt"), "c staged\n");
+    assert_eq!(r.read("c.txt"), "c staged\nand more\n");
+
+    // Keeping the index: the staged part stays, on disk too.
+    r.git(&["reset", "-q", "--hard"]);
+    r.write("c.txt", "c staged\n");
+    r.git(&["add", "c.txt"]);
+    r.write("c.txt", "c staged\nand more\n");
+    git::stash::save_paths(&r.path, None, false, true, false, &["c.txt".into()]).unwrap();
+    assert_eq!(r.git(&["status", "--porcelain"]), "M  c.txt\n");
+    assert_eq!(r.read("c.txt"), "c staged\n");
+}
+
+#[test]
+fn push_to_a_non_bare_repository_on_this_computer() {
+    let r = Repo::new();
+    r.write("a.txt", "a\n");
+    r.commit_all("one");
+    let other = Repo::new();
+    other.write("x.txt", "x\n");
+    other.commit_all("theirs");
+    git::branches::add_remote(&r.path, "peer", &other.path).unwrap();
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    git::branches::create_tag(&r.path, "v1", "HEAD", None).unwrap();
+    assert_eq!(git::remote::push(&r.path, Some("feature"), Some("peer"), false, false, true, None, None).unwrap(), "peer/feature");
+    git::remote::push_tag(&r.path, "v1", "peer", None, None).unwrap();
+    assert_eq!(other.git(&["rev-parse", "feature"]), r.git(&["rev-parse", "HEAD"]));
+    assert_eq!(other.git(&["rev-parse", "v1"]), r.git(&["rev-parse", "HEAD"]));
+    assert_eq!(r.git(&["rev-parse", "peer/feature"]), r.git(&["rev-parse", "HEAD"]));
+    // Its checked-out branch refuses pushes, with a message that says why.
+    r.git(&["branch", "-f", "main", "HEAD"]);
+    let e = git::remote::push(&r.path, Some("main"), Some("peer"), true, false, false, None, None).unwrap_err().to_string();
+    assert!(e.contains("checked out in the remote"), "{e}");
+}
+
+#[test]
+fn tag_names_are_checked_like_folders() {
+    let r = Repo::new();
+    r.write("a.txt", "a\n");
+    r.commit_all("one");
+    git::branches::create_tag(&r.path, "v1", "HEAD", None).unwrap();
+    let e = git::branches::create_tag(&r.path, "v1/rc", "HEAD", None).unwrap_err().to_string();
+    assert!(e.contains("stores tag names like folders"), "{e}");
+    git::branches::create_tag(&r.path, "rel/1", "HEAD", None).unwrap();
+    let e = git::branches::create_tag(&r.path, "rel", "HEAD", None).unwrap_err().to_string();
+    assert!(e.contains("stores tag names like folders"), "{e}");
+    assert!(git::branches::delete_tag(&r.path, "nope").unwrap_err().to_string().starts_with("There's no tag"));
+}

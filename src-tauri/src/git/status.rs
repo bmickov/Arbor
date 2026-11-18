@@ -47,19 +47,84 @@ fn state_name(s: RepositoryState) -> &'static str {
     }
 }
 
+/// Most moved files can't be paired as renames in the working tree by
+/// content (git doesn't even try). Past this many deleted × new files
+/// the search costs more than it can find: libgit2 gives up after its
+/// rename limit anyway, having spent most of a second getting there.
+const WORKDIR_RENAME_PAIRS: usize = 100_000;
+
+/// Status, finding renames in the working tree only where that's cheap.
+fn statuses_with_renames(repo: &Repository) -> Result<git2::Statuses<'_>> {
+    let opts = |workdir_renames: bool| {
+        let mut o = StatusOptions::new();
+        o.include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .include_ignored(false)
+            .renames_head_to_index(true)
+            .renames_index_to_workdir(workdir_renames);
+        o
+    };
+    let first = repo.statuses(Some(&mut opts(false)))?;
+    let (mut gone, mut new) = (0usize, 0usize);
+    for e in first.iter() {
+        let s = e.status();
+        gone += s.contains(Status::WT_DELETED) as usize;
+        new += s.contains(Status::WT_NEW) as usize;
+    }
+    if gone == 0 || new == 0 || gone.saturating_mul(new) > WORKDIR_RENAME_PAIRS {
+        return Ok(first);
+    }
+    drop(first);
+    Ok(repo.statuses(Some(&mut opts(true)))?)
+}
+
+/// libgit2 never saves what it learns about unchanged files, so when the
+/// index's record of file times and sizes is out of date (files touched by
+/// a build, a fresh copy of the repository, a tool that rewrites files
+/// without changing them), every refresh reads and hashes those files again:
+/// five times slower on a large working tree, forever. `git status` would
+/// fix it as a side effect. When a status was slow, have git bring the
+/// record up to date, in the background and at most once a minute per
+/// repository. git takes the index lock before reading the index, so this
+/// can't lose a change made meanwhile (writing it from here could).
+fn refresh_stat_cache_later(repo: &Repository, took: std::time::Duration) {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static LAST: Mutex<Option<HashMap<std::path::PathBuf, Instant>>> = Mutex::new(None);
+    if took < Duration::from_millis(250) {
+        return;
+    }
+    let Some(dir) = repo.workdir().map(|d| d.to_path_buf()) else { return };
+    {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        let map = last.get_or_insert_with(HashMap::new);
+        if map.get(&dir).is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
+            return;
+        }
+        map.insert(dir.clone(), Instant::now());
+    }
+    std::thread::spawn(move || {
+        let _ = crate::platform::quiet_command("git")
+            .current_dir(&dir)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .args(["update-index", "-q", "--refresh", "--ignore-submodules"])
+            .status();
+    });
+}
+
 pub fn status(repo_path: &str) -> Result<WorkingStatus> {
     let mut repo = open(repo_path)?;
     if super::lfs::refresh_if_needed(&repo) {
         // git rewrote the index; don't use libgit2's cached copy.
         repo = open(repo_path)?;
     }
-    let mut opts = StatusOptions::new();
-    opts.include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .include_ignored(false)
-        .renames_head_to_index(true)
-        .renames_index_to_workdir(true);
-    let statuses = repo.statuses(Some(&mut opts))?;
+    let started = std::time::Instant::now();
+    let statuses = statuses_with_renames(&repo)?;
+    refresh_stat_cache_later(&repo, started.elapsed());
 
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
