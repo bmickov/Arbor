@@ -90,3 +90,45 @@ jobs:
     needs: [web]
     uses: ./.github/workflows/build.yml
     secrets: inherit
+
+  # Releases happen by bumping the version: when a push to main passes the
+  # checks and tests and its version has no tag yet, this tags the commit
+  # (v<version>) and starts the Release workflow for that tag. Any other
+  # push does nothing here. A tag made with the workflow's token doesn't
+  # trigger workflows itself, so the release is started explicitly.
+  tag:
+    name: Tag and release new version
+    needs: [web, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the tag
+      actions: write # start the Release workflow
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the version
+        id: v
+        run: |
+          version=$(node -p "require('./package.json').version")
+          ok=true
+          v=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "$v" != "$version" ]; then echo "::error file=src-tauri/tauri.conf.json::Version is $v but package.json says $version."; ok=false; fi
+          v=$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n 1)
+          if [ "$v" != "$version" ]; then echo "::error file=src-tauri/Cargo.toml::Version is $v but package.json says $version."; ok=false; fi
+          $ok
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Tag the commit and start the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo "$TAG already exists, so there's nothing new to release."
+            exit 0
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" > /dev/null
+          echo "Tagged $GITHUB_SHA as $TAG."
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" -f tag="$TAG"
+          echo "::notice::Tagged $TAG and started the Release workflow."

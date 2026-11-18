@@ -543,13 +543,14 @@ from the workflows in `.github/workflows`:
   *Artifacts* for 90 days.
 - **Releases** (`release.yml`): bump the version in `package.json`,
   `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, run `cargo check` in
-  `src-tauri` so `Cargo.lock` picks up the new version, commit, and push a
-  matching tag. The workflow checks the versions match, builds everything and
-  publishes a GitHub release with all installers and a `SHA256SUMS.txt`:
-
-  ```sh
-  git tag v0.16.0 && git push origin main v0.16.0
-  ```
+  `src-tauri` so `Cargo.lock` picks up the new version, commit, and push to
+  `main`. Once that commit's checks and tests pass, CI tags it (`v0.16.0`)
+  and starts the Release workflow, which builds everything and publishes a
+  GitHub release with all installers and a `SHA256SUMS.txt`. Pushes that
+  don't change the version don't release anything. CI fails if the three
+  version numbers disagree. You can also push a tag yourself
+  (`git tag v0.16.0 && git push origin v0.16.0`); CI then sees it exists and
+  leaves it alone.
 
   Tags with a suffix (`v0.16.0-beta.1`) are published as pre-releases. If
   a platform's build fails or times out, the release is published with the

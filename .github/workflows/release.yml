@@ -1,7 +1,9 @@
-# Publishes a release: push a version tag (git tag v0.6.0 && git push origin
-# v0.6.0) and this builds every platform and attaches the installers to a
-# GitHub release for that tag. The tag must match the version in
-# package.json, src-tauri/Cargo.toml and src-tauri/tauri.conf.json.
+# Publishes a release: builds every platform and attaches the installers to
+# a GitHub release for a version tag. CI starts it on its own after tagging a
+# push to main whose version is new (see the tag job in ci.yml); pushing a
+# tag yourself (git tag v0.6.0 && git push origin v0.6.0) also works. The tag
+# must match the version in package.json, src-tauri/Cargo.toml and
+# src-tauri/tauri.conf.json.
 name: Release
 
 on:
