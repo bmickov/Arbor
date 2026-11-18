@@ -172,15 +172,31 @@ jobs:
         with:
           release: "14.3"
           usesh: true
-          mem: 8192
+          cpu: 4
+          mem: 12288
           prepare: |
-            pkg install -y curl git pkgconf gtk3 webkit2-gtk_41 libsoup3 librsvg2-rust
+            set -e
+            pkg install -y curl git pkgconf gtk3 webkit2-gtk_41 libsoup3
+            pkg clean -ay
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           run: |
+            set -e
             . "$HOME/.cargo/env"
+            rustc -V
+            df -h / "$HOME"
+            sysctl -n hw.physmem hw.ncpu
             # Keep the (large) build folder outside the synced workspace.
             export CARGO_TARGET_DIR="$HOME/arbor-target"
-            sh scripts/package-freebsd.sh
+            # A full-program LTO link of a WebKit app needs more memory than a
+            # small VM has; thin LTO is nearly as good and far lighter.
+            export CARGO_PROFILE_RELEASE_LTO=thin
+            export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+            export CARGO_BUILD_JOBS=3
+            if ! sh scripts/package-freebsd.sh; then
+              echo "::error::The FreeBSD build failed; the compiler output above says why."
+              df -h / "$HOME"
+              exit 1
+            fi
 
       - uses: actions/upload-artifact@v7
         with:
