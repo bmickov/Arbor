@@ -170,14 +170,35 @@ jobs:
       - name: Build in a FreeBSD VM
         uses: vmactions/freebsd-vm@v1
         with:
-          release: "14.3"
+          # The newest 14.x: packages are built for the latest base system,
+          # and an older one lacks files they expect (14.3 had no bzip2.pc,
+          # which FreeType's needs, so GTK couldn't be found).
+          release: "14"
           usesh: true
-          cpu: 4
-          mem: 12288
+          # The VM shares the GitHub runner: for private repositories that's
+          # 2 CPUs and 7 GB of memory, so it can't be given more than this.
+          cpu: 2
+          mem: 6144
           prepare: |
             set -e
+            freebsd-version
             pkg install -y curl git pkgconf gtk3 webkit2-gtk_41 libsoup3
             pkg clean -ay
+            # Should the base system still lack bzip2.pc, describe its libbz2.
+            if ! pkg-config --exists bzip2; then
+              mkdir -p /usr/local/libdata/pkgconfig
+              printf '%s\n' 'Name: bzip2' 'Description: bzip2 (base system)' 'Version: 1.0.8' \
+                'Libs: -lbz2' 'Cflags:' > /usr/local/libdata/pkgconfig/bzip2.pc
+            fi
+            pkg-config --modversion gtk+-3.0 webkit2gtk-4.1
+            # Some swap, so a memory-hungry compile step slows down instead
+            # of being killed (when the disk has room for it).
+            avail=$(df -k / | awk 'NR==2 {print $4}')
+            if [ "$avail" -gt 12000000 ]; then
+              dd if=/dev/zero of=/swapfile bs=1m count=4096 status=none
+              chmod 600 /swapfile
+              swapon "$(mdconfig -a -t vnode -f /swapfile)" && echo "Added 4 GB of swap"
+            fi
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           run: |
             set -e
@@ -185,13 +206,15 @@ jobs:
             rustc -V
             df -h / "$HOME"
             sysctl -n hw.physmem hw.ncpu
+            swapinfo -h || true
             # Keep the (large) build folder outside the synced workspace.
             export CARGO_TARGET_DIR="$HOME/arbor-target"
-            # A full-program LTO link of a WebKit app needs more memory than a
-            # small VM has; thin LTO is nearly as good and far lighter.
-            export CARGO_PROFILE_RELEASE_LTO=thin
+            # Link-time optimisation of a WebKit app needs more memory than this
+            # small VM has; without it the app is a little larger, not slower
+            # in any way that matters for a Git client.
+            export CARGO_PROFILE_RELEASE_LTO=false
             export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
-            export CARGO_BUILD_JOBS=3
+            export CARGO_BUILD_JOBS=2
             if ! sh scripts/package-freebsd.sh; then
               echo "::error::The FreeBSD build failed; the compiler output above says why."
               df -h / "$HOME"
