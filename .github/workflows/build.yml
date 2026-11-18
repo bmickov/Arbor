@@ -97,6 +97,11 @@ jobs:
             fi
           done
 
+      # Software centres show the AppStream metadata's version and date.
+      - name: Set the release in the AppStream metadata
+        if: runner.os == 'Linux'
+        run: sh scripts/update-metainfo.sh
+
       - name: Build installers
         shell: bash
         env:
@@ -171,6 +176,9 @@ jobs:
         with:
           name: web-ui
           path: dist
+
+      - name: Set the release in the AppStream metadata
+        run: sh scripts/update-metainfo.sh
 
       - name: Build in a FreeBSD VM
         uses: vmactions/freebsd-vm@v1
