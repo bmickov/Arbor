@@ -39,15 +39,21 @@ install -m 644 src-tauri/icons/128x128.png "$stage/share/icons/hicolor/128x128/a
 install -m 644 src-tauri/icons/32x32.png "$stage/share/icons/hicolor/32x32/apps/arbor.png"
 install -m 644 LICENSE THIRD_PARTY_NOTICES.md README.md "$stage/share/doc/arbor/"
 
-cat > "$stage/share/applications/arbor.desktop" <<EOF
+# Named after Arbor's application id ("Arbor", see src-tauri/src/desktop.rs),
+# so docks and task switchers match the window to this launcher and its icon.
+cat > "$stage/share/applications/Arbor.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Arbor
+GenericName=Git client
 Comment=A friendly Git client
-Exec=arbor %f
+Exec=arbor %F
 Icon=arbor
 Terminal=false
 Categories=Development;RevisionControl;
+Keywords=git;version control;vcs;
+StartupWMClass=Arbor
+StartupNotify=true
 EOF
 
 cat > "$stage/install.sh" <<'EOF'
@@ -59,7 +65,9 @@ cd "$(dirname "$0")"
 install -d "$PREFIX/bin" "$PREFIX/share/applications" "$PREFIX/share/icons/hicolor/128x128/apps" \
   "$PREFIX/share/icons/hicolor/32x32/apps" "$PREFIX/share/doc/arbor"
 install -m 755 bin/arbor "$PREFIX/bin/arbor"
-install -m 644 share/applications/arbor.desktop "$PREFIX/share/applications/"
+install -m 644 share/applications/Arbor.desktop "$PREFIX/share/applications/"
+# Older versions installed it in lower case.
+rm -f "$PREFIX/share/applications/arbor.desktop"
 install -m 644 share/icons/hicolor/128x128/apps/arbor.png "$PREFIX/share/icons/hicolor/128x128/apps/"
 install -m 644 share/icons/hicolor/32x32/apps/arbor.png "$PREFIX/share/icons/hicolor/32x32/apps/"
 install -m 644 share/doc/arbor/* "$PREFIX/share/doc/arbor/"

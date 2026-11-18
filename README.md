@@ -1,24 +1,163 @@
-# Arbor
+<p align="center">
+  <img src="design/icon.png" width="112" alt="Arbor's icon">
+</p>
 
-[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
-[![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+<h1 align="center">Arbor</h1>
 
-A free, open-source Git client for **Linux, FreeBSD, macOS and Windows**, built
-around the workflows that make Tower pleasant:
-drag-and-drop merging and rebasing, commit reordering, line-by-line staging,
-and an undo button that covers almost everything.
+<p align="center">
+  A friendly, fast Git client for <b>Linux, macOS, Windows and FreeBSD</b>.<br>
+  Drag-and-drop merging, line-by-line staging, a real conflict wizard, and an undo button that covers almost everything.
+</p>
 
-Arbor is an original app. It isn't affiliated with Tower or fournova and
-contains none of their code or artwork.
+<p align="center">
+  <a href="https://github.com/bmickov/Arbor/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/bmickov/Arbor?include_prereleases&sort=semver&label=release"></a>
+  <a href="https://github.com/bmickov/Arbor/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/bmickov/Arbor/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20FreeBSD-informational">
+  <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/bmickov/Arbor/releases/latest"><b>Download</b></a> ·
+  <a href="#a-quick-tour">Tour</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#keyboard">Keyboard</a> ·
+  <a href="#build-from-source">Build from source</a>
+</p>
+
+![Arbor's history view: a commit graph of several branches, with the selected commit's changes beside it](docs/screenshots/history.png)
+
+Arbor is an original app, free and open source under the GPL. It's inspired by
+the workflows that make Tower pleasant, but isn't affiliated with Tower or
+fournova and contains none of their code or artwork.
+
+## Why Arbor
+
+- **Stage exactly what you mean.** Whole files, single hunks or individual
+  lines: click, shift-click or drag across a diff, then stage or discard.
+- **Undo almost anything.** Commits, merges, rebases, resets, discards (even of
+  new files), branch and stash operations: Ctrl+Z puts them back.
+- **Drag and drop.** Drop a branch on another to merge or rebase, on a remote to
+  push; drag commits to reorder them or onto your branch to cherry-pick.
+- **Conflicts without fear.** Each conflict side by side, mine against theirs,
+  with one click per side. Arbor tells you a merge will conflict *before* you start.
+- **Fast on big repositories.** History, blame and file lists load a page at a
+  time, and diffs with millions of lines still scroll smoothly.
+- **Everywhere you work.** Native installers for Windows, macOS (Apple silicon
+  and Intel), Linux (.deb, .rpm, AppImage, x64 and arm64) and FreeBSD.
+
+## A quick tour
+
+### Stage lines, not just files
+
+Select the lines you want in any diff and stage or discard just those. The
+commit composer remembers your draft, knows your templates, and shows who
+you're committing as.
+
+![The Changes view: a file's diff with four added lines selected and a bar offering to stage or discard them](docs/screenshots/changes.png)
+
+### Resolve conflicts side by side
+
+Every conflict in a file, your version beside theirs (and the common base when
+you want it). Pick a side, take both in either order, or write the result
+yourself, then mark the file resolved and commit the merge.
+
+![The conflict wizard showing one conflict in a TypeScript file, with Mine and Theirs side by side](docs/screenshots/conflicts.png)
+
+### All your repositories at a glance
+
+Group your repositories, see which ones have changes, commits to push or pull,
+stashes or a merge in progress, and fetch them all at once.
+
+![The repository list, grouped into Work and Personal, with branch, sync, changes and last commit columns](docs/screenshots/repositories.png)
+
+### Tidy up branches
+
+Branches Review lists every local branch with whether it's merged (including
+squash and rebase merges), how far it's ahead and behind, and whether its
+remote branch still exists. Select and delete in bulk; one Undo restores them.
+
+![Branches Review with four branches, one merged and selected for deletion](docs/screenshots/branches-review.png)
+
+### Do anything from the keyboard
+
+Quick Actions (Ctrl+Shift+P or Ctrl+K) searches commands, branches, commits,
+files and repositories in one box. Every shortcut can be changed.
+
+![Quick Actions listing stash and stage commands and matching commits](docs/screenshots/quick-actions.png)
+
+### Make it yours
+
+Light and dark themes (or follow your desktop), an Ubuntu-style dark theme,
+and adjustable fonts and sizes for the interface and for code.
+
+<p align="center">
+  <img src="docs/screenshots/themes.png" width="640" alt="The Appearance preferences with System, Arbor Light, Arbor Dark and Ubuntu Dark themes">
+</p>
+
+## Download
+
+Get the latest version from the [**Releases page**](https://github.com/bmickov/Arbor/releases/latest):
+
+| System | File |
+| --- | --- |
+| **Windows** 10 and 11 | `Arbor_<version>_x64-setup.exe` (or the `.msi`) |
+| **macOS** 10.15+, Apple silicon and Intel | `Arbor_<version>_universal.dmg` |
+| **Debian, Ubuntu, Mint, Pop!_OS** | `Arbor_<version>_amd64.deb` / `_arm64.deb` |
+| **Fedora, openSUSE, RHEL** | `Arbor-<version>-1.x86_64.rpm` / `.aarch64.rpm` |
+| **Any Linux** | `Arbor_<version>_amd64.AppImage` / `_aarch64.AppImage` |
+| **FreeBSD** 14+ | `Arbor_<version>_freebsd_amd64.tar.gz` |
+
+```sh
+# Debian/Ubuntu                 # Fedora/openSUSE
+sudo apt install ./Arbor_*.deb  sudo dnf install ./Arbor-*.rpm
+
+# AppImage
+chmod +x Arbor_*.AppImage && ./Arbor_*.AppImage
+
+# FreeBSD
+pkg install webkit2-gtk_41 git
+tar xzf Arbor_*_freebsd_amd64.tar.gz && cd arbor-* && doas ./install.sh
+```
+
+The AppImage adds Arbor to your applications menu the first time it runs
+(a launcher in `~/.local/share/applications` and icons in
+`~/.local/share/icons`), so the dock and task switcher show its name and
+icon. It follows the AppImage if you move it or switch versions; turn it off
+in Preferences → General to remove it. The .deb and .rpm install their own.
+
+The builds aren't signed with a paid certificate, so the first launch asks
+you to confirm: on **macOS**, open System Settings → Privacy & Security and
+choose *Open Anyway*; on **Windows**, choose *More info → Run anyway*. Each
+release lists SHA-256 checksums in `SHA256SUMS.txt`.
+
+Want the very latest? Every commit to `main` is built for every platform by
+[GitHub Actions](https://github.com/bmickov/Arbor/actions/workflows/ci.yml):
+open a run and download the installers under *Artifacts* (you need to be
+signed in to GitHub).
+
+Run `arbor /path/to/repo` to open a repository directly in a new tab.
+Without an argument, Arbor picks up where you left off (unless that's turned off).
+
+Settings live in your system's config folder: `~/.config/arbor` on Linux and
+the BSDs, `~/Library/Application Support/arbor` on macOS, and
+`%APPDATA%\arbor` on Windows.
 
 ## Features
 
-**Quick Actions**
+Click a group to expand it.
+
+<details>
+<summary><b>Quick Actions</b></summary>
+
 - Ctrl+Shift+P (or Ctrl+K) opens one search box for everything: run any
   command, check out a branch, jump to a tag or commit (by message, author or
   ID), open a file's history, or switch repository
 
-**Many repositories**
+</details>
+
+<details>
+<summary><b>Many repositories</b></summary>
+
 - A repository manager (Ctrl+T) lists every repository you've added, with its
   branch, commits to push and pull, uncommitted changes, stashes and latest commit
 - Organise repositories into groups by dragging them; rename or reorder groups
@@ -37,13 +176,21 @@ contains none of their code or artwork.
   position
 - Folders that moved or were deleted are flagged, with Locate… and Remove
 
-**Resizable panels**
+</details>
+
+<details>
+<summary><b>Resizable panels</b></summary>
+
 - Drag any divider: the sidebar, file lists, the commit composer, the stash,
   reflog, compare and file-browser lists, the split between a commit's
   details and its diff, and the columns of the repository list. Double-click
   a divider to reset it; sizes are saved
 
-**Pick up where you left off**
+</details>
+
+<details>
+<summary><b>Pick up where you left off</b></summary>
+
 - When you quit and start Arbor again, it reopens your tabs on the same tab,
   and each one comes back on the same view (Changes, History or Stashes), with
   the same selected commit, file or stash, history search, branch filter and
@@ -53,7 +200,11 @@ contains none of their code or artwork.
 - On by default; turn it off in Preferences → General to start on the
   repository list every time
 
-**Working copy**
+</details>
+
+<details>
+<summary><b>Working copy</b></summary>
+
 - Stage, unstage or discard whole files, single hunks, or individual lines
   (click a line, shift-click or drag to extend, ctrl-click to toggle)
 - Drag files between the Unstaged and Staged lists
@@ -81,7 +232,11 @@ contains none of their code or artwork.
   Each commit can opt out. Merges, cherry-picks, reverts and rewritten commits
   are signed too
 
-**History**
+</details>
+
+<details>
+<summary><b>History</b></summary>
+
 - Commit graph for all branches, the current branch, or any single branch
 - Commit details with per-file diffs, unified or side by side, and image previews
 - **Changed words** are highlighted inside changed lines, so a one-character
@@ -135,7 +290,11 @@ contains none of their code or artwork.
 - "Rewrite from here…" opens an interactive rebase editor: reorder by drag,
   then keep, edit message, squash, fixup or remove each commit
 
-**Branches and remotes**
+</details>
+
+<details>
+<summary><b>Branches and remotes</b></summary>
+
 - Select several branches with Ctrl+click or Shift+click and delete them at
   once. One confirmation lists them, flags any with unmerged commits (with a
   "Delete only merged" choice), and one Undo brings them all back
@@ -167,7 +326,11 @@ contains none of their code or artwork.
   macOS, Windows, editors, Node, Rust, Python and PHP), and see every git
   setting that applies, where it comes from, and change this repository's own
 
-**Git-flow, stacked branches and bisect**
+</details>
+
+<details>
+<summary><b>Git-flow, stacked branches and bisect</b></summary>
+
 - **Git-flow** (toolbar button): set it up once, then start and finish
   features, releases and hotfixes. Finishing merges with a merge commit,
   tags releases and hotfixes on the production branch and merges them back
@@ -183,7 +346,11 @@ contains none of their code or artwork.
   this…". Arbor checks out commits in between; mark each **Good**, **Bad** or
   **Skip** until it names the first bad commit. Uses git's own bisect state
 
-**External tools, pinned branches and Git LFS**
+</details>
+
+<details>
+<summary><b>External tools, pinned branches and Git LFS</b></summary>
+
 - **External diff and merge tools**: Meld, Visual Studio Code, Beyond
   Compare, KDiff3, P4Merge, Kaleidoscope, WinMerge or Kompare, git's own
   difftool/mergetool settings, or any command (`$LOCAL $REMOTE $BASE
@@ -197,7 +364,11 @@ contains none of their code or artwork.
   need downloading, and file locks (lock and unlock from a file's menu).
   "Track *.ext with LFS" on any file. Needs git-lfs installed
 
-**Worktrees and submodules**
+</details>
+
+<details>
+<summary><b>Worktrees and submodules</b></summary>
+
 - **Worktrees**: check out a branch in its own folder ("Check out in a new
   worktree…" on any branch, or New worktree in Quick Actions), so you can work
   on two branches at once. The sidebar lists them with uncommitted changes;
@@ -207,7 +378,11 @@ contains none of their code or artwork.
   different commit than recorded, or changed). Click to open one in a tab, or
   to clone it; Update checks out the recorded commits, recursively
 
-**Branches Review**
+</details>
+
+<details>
+<summary><b>Branches Review</b></summary>
+
 - Every local branch in one table: merged into a base branch or not
   (including squash and rebase merges, which plain Git can't tell), commits
   ahead and behind, upstream status (flags branches whose remote branch was
@@ -215,7 +390,11 @@ contains none of their code or artwork.
 - Filter by merged, not merged, stale (30 days to a year) or upstream gone,
   select, and delete in bulk; one Undo restores them
 
-**Stashes**
+</details>
+
+<details>
+<summary><b>Stashes</b></summary>
+
 - Stash with a message, optionally including new files or keeping staged changes
 - Apply, apply-and-remove, delete, or turn a stash into a branch
 - **Snapshots** (right-click Stash, or the command palette): save every
@@ -227,7 +406,11 @@ contains none of their code or artwork.
   first, and one Undo restores them all
 - Drag a stash onto Changes to apply it
 
-**Undo**
+</details>
+
+<details>
+<summary><b>Undo</b></summary>
+
 - Ctrl+Z undoes commits, amends, staging, discards (even of untracked files),
   merges, rebases, history rewrites, cherry-picks, reverts, resets, checkouts,
   branch and tag creation, deletion and renames, stash operations, and remote changes
@@ -236,58 +419,18 @@ contains none of their code or artwork.
 - The undo history lives in `.git/arbor/undo.json`, so it survives restarts
 - Undo refuses rather than guesses when the repository changed since the operation
 
-**Safety**
+</details>
+
+<details>
+<summary><b>Safety</b></summary>
+
 - Merges, rebases and rewrites refuse to start over uncommitted changes, and
   offer to stash them, run the operation, and put them back
 - Rebases are replayed in memory, and the branch only moves when they finish:
   abort a paused rebase and everything is as it was
 - Rewriting commits that are already pushed asks for confirmation first
 
-## Download
-
-Get the latest version from the [**Releases page**](../../releases/latest):
-
-| System | File |
-| --- | --- |
-| **Windows** 10 and 11 | `Arbor_<version>_x64-setup.exe` (or the `.msi`) |
-| **macOS** 10.15+, Apple silicon and Intel | `Arbor_<version>_universal.dmg` |
-| **Debian, Ubuntu, Mint, Pop!_OS** | `Arbor_<version>_amd64.deb` / `_arm64.deb` |
-| **Fedora, openSUSE, RHEL** | `Arbor-<version>-1.x86_64.rpm` / `.aarch64.rpm` |
-| **Any Linux** | `Arbor_<version>_amd64.AppImage` / `_aarch64.AppImage` |
-| **FreeBSD** 14+ | `Arbor_<version>_freebsd_amd64.tar.gz` |
-
-```sh
-# Debian/Ubuntu                 # Fedora/openSUSE
-sudo apt install ./Arbor_*.deb  sudo dnf install ./Arbor-*.rpm
-
-# AppImage
-chmod +x Arbor_*.AppImage && ./Arbor_*.AppImage
-
-# FreeBSD
-pkg install webkit2-gtk_41 git
-tar xzf Arbor_*_freebsd_amd64.tar.gz && cd arbor-* && doas ./install.sh
-```
-
-The AppImage adds Arbor to your applications menu the first time it runs
-(a launcher in `~/.local/share/applications` and icons in
-`~/.local/share/icons`), so the dock and task switcher show its name and
-icon. It follows the AppImage if you move it or switch versions; turn it off
-in Preferences → General to remove it. The .deb and .rpm install their own.
-
-The builds aren't signed with a paid certificate, so the first launch asks
-you to confirm: on **macOS**, open System Settings → Privacy & Security and
-choose *Open Anyway*; on **Windows**, choose *More info → Run anyway*. Each
-release lists SHA-256 checksums in `SHA256SUMS.txt`.
-
-Every commit to `main` is also built by CI; the installers are attached to
-each [workflow run](../../actions/workflows/ci.yml) under *Artifacts*.
-
-Run `arbor /path/to/repo` to open a repository directly in a new tab.
-Without an argument, Arbor picks up where you left off (unless that's turned off).
-
-Settings live in your system's config folder: `~/.config/arbor` on Linux and
-the BSDs, `~/Library/Application Support/arbor` on macOS, and
-`%APPDATA%\arbor` on Windows.
+</details>
 
 ## Preferences
 
@@ -312,6 +455,9 @@ Open with **Ctrl+,** or the sliders button.
   if another action used them, it's unassigned and you're told which
 
 ## Keyboard
+
+<details>
+<summary>All keyboard shortcuts</summary>
 
 On macOS, Ctrl in the table below is ⌘ (Command), Alt is ⌥ and Shift is ⇧.
 
@@ -352,6 +498,8 @@ On macOS, Ctrl in the table below is ⌘ (Command), Alt is ⌥ and Shift is ⇧.
 | Ctrl+Shift+D | Side-by-side diffs in history |
 | Ctrl+\\ | Show or hide the sidebar |
 
+</details>
+
 ## Build from source
 
 You need [Rust](https://rustup.rs) (1.80 or newer), [Node.js](https://nodejs.org)
@@ -384,21 +532,28 @@ cd src-tauri && cargo test
 
 ### Continuous integration and releases
 
-- **CI** (`.github/workflows/ci.yml`) runs on every push and pull request:
-  type checks, the backend tests on Linux, macOS and Windows, then builds the
-  installers for every platform (`build.yml`) and keeps them as downloadable
-  artifacts.
-- **Releases** (`.github/workflows/release.yml`): bump the version in
-  `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, run
-  `cargo check` in `src-tauri` so `Cargo.lock` picks up the new version, commit,
-  and push a matching tag. The workflow builds everything and publishes a
-  GitHub release with all installers and checksums:
+Everything is built by [GitHub Actions](https://github.com/bmickov/Arbor/actions)
+from the workflows in `.github/workflows`:
+
+- **CI** (`ci.yml`) runs on every push to `main` and every pull request: type
+  checks, the backend tests on Linux, macOS and Windows, then builds the
+  installers for every platform (`build.yml`): Windows x64 (`.exe` and
+  `.msi`), macOS universal (`.dmg`), Linux x64 and arm64 (`.deb`, `.rpm`,
+  AppImage) and FreeBSD x64 (`.tar.gz`). Each run keeps them as downloadable
+  *Artifacts* for 90 days.
+- **Releases** (`release.yml`): bump the version in `package.json`,
+  `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, run `cargo check` in
+  `src-tauri` so `Cargo.lock` picks up the new version, commit, and push a
+  matching tag. The workflow checks the versions match, builds everything and
+  publishes a GitHub release with all installers and a `SHA256SUMS.txt`:
 
   ```sh
-  git tag v0.8.0 && git push origin main v0.8.0
+  git tag v0.16.0 && git push origin main v0.16.0
   ```
 
-  Tags with a suffix (`v0.8.0-beta.1`) are published as pre-releases.
+  Tags with a suffix (`v0.16.0-beta.1`) are published as pre-releases. To
+  rebuild an existing tag, run the Release workflow by hand from the Actions
+  tab and enter the tag.
 - **Code signing** is optional. macOS builds are ad-hoc signed; to sign and
   notarize with an Apple Developer ID, add the repository secrets listed in
   `build.yml`.
@@ -428,7 +583,8 @@ cd src-tauri && cargo test
 - LFS needs `git` and `git-lfs` installed, since libgit2 can't run the LFS
   filter itself. Adding or removing submodules is
   left to the git CLI (listing, cloning, updating and opening them works).
-- Pull requests and hosting-service integrations aren't included.
+- Pull requests are opened on the hosting site's own page; Arbor doesn't list
+  or review them inside the app.
 - On Windows, Git hooks run through Git for Windows' `sh`, so hooks need
   [Git for Windows](https://git-scm.com) to be installed.
 - Other BSDs (OpenBSD, NetBSD) should build the same way as FreeBSD with

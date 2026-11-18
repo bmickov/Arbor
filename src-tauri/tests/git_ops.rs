@@ -2123,6 +2123,9 @@ fn partial_staging_of_a_new_executable_keeps_its_mode() {
     }
 }
 
+// A backslash is a folder separator on Windows, and symlinks need special
+// rights there.
+#[cfg(unix)]
 #[test]
 fn discard_restores_odd_names_and_type_changes() {
     let r = Repo::new();
