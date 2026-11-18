@@ -172,22 +172,12 @@ jobs:
         with:
           release: "14.3"
           usesh: true
-          # The VM shares the GitHub runner: for private repositories that's
-          # 2 CPUs and 7 GB of memory, so it can't be given more than this.
-          cpu: 2
-          mem: 6144
+          cpu: 4
+          mem: 12288
           prepare: |
             set -e
             pkg install -y curl git pkgconf gtk3 webkit2-gtk_41 libsoup3
             pkg clean -ay
-            # Some swap, so a memory-hungry compile step slows down instead
-            # of being killed (when the disk has room for it).
-            avail=$(df -k / | awk 'NR==2 {print $4}')
-            if [ "$avail" -gt 12000000 ]; then
-              dd if=/dev/zero of=/swapfile bs=1m count=4096 status=none
-              chmod 600 /swapfile
-              swapon "$(mdconfig -a -t vnode -f /swapfile)" && echo "Added 4 GB of swap"
-            fi
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           run: |
             set -e
@@ -195,15 +185,13 @@ jobs:
             rustc -V
             df -h / "$HOME"
             sysctl -n hw.physmem hw.ncpu
-            swapinfo -h || true
             # Keep the (large) build folder outside the synced workspace.
             export CARGO_TARGET_DIR="$HOME/arbor-target"
-            # Link-time optimisation of a WebKit app needs more memory than this
-            # small VM has; without it the app is a little larger, not slower
-            # in any way that matters for a Git client.
-            export CARGO_PROFILE_RELEASE_LTO=false
+            # A full-program LTO link of a WebKit app needs more memory than a
+            # small VM has; thin LTO is nearly as good and far lighter.
+            export CARGO_PROFILE_RELEASE_LTO=thin
             export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
-            export CARGO_BUILD_JOBS=2
+            export CARGO_BUILD_JOBS=3
             if ! sh scripts/package-freebsd.sh; then
               echo "::error::The FreeBSD build failed; the compiler output above says why."
               df -h / "$HOME"
