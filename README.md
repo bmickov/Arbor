@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="design/icon.png" width="112" alt="Arbor's icon">
+  <img src="design/icon.svg" width="112" alt="Arbor's icon">
 </p>
 
 <h1 align="center">Arbor</h1>
