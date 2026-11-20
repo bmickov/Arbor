@@ -96,6 +96,13 @@ fn refresh_stat_cache_later(repo: &Repository, took: std::time::Duration) {
         return;
     }
     let Some(dir) = repo.workdir().map(|d| d.to_path_buf()) else { return };
+    // Refreshing runs the clean filters of changed files. Arbor starts this
+    // on its own, so never where the repository's config names filter
+    // programs of its own (other than Git LFS's): opening a folder someone
+    // handed you shouldn't run whatever its .git/config says.
+    if foreign_filters(repo) {
+        return;
+    }
     {
         let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
         let map = last.get_or_insert_with(HashMap::new);
@@ -111,9 +118,23 @@ fn refresh_stat_cache_later(repo: &Repository, took: std::time::Duration) {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .args(["update-index", "-q", "--refresh", "--ignore-submodules"])
+            .args(["-c", "core.fsmonitor=false", "update-index", "-q", "--refresh", "--ignore-submodules"])
             .status();
     });
+}
+
+/// The repository's config sets up filter programs other than Git LFS's.
+fn foreign_filters(repo: &Repository) -> bool {
+    let Ok(cfg) = repo.config() else { return true };
+    let Ok(mut entries) = cfg.entries(Some(r"^filter\..*\.(clean|process)$")) else { return true };
+    let mut foreign = false;
+    while let Some(Ok(e)) = entries.next() {
+        let v = e.value().unwrap_or("");
+        if !v.trim_start().starts_with("git-lfs ") {
+            foreign = true;
+        }
+    }
+    foreign
 }
 
 pub fn status(repo_path: &str) -> Result<WorkingStatus> {

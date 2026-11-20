@@ -64,7 +64,7 @@ pub fn restore_file(repo_path: &str, rev: &str, path: &str) -> Result<()> {
         .map_err(|_| Error::Msg(format!("Couldn't find the commit {rev}.")))?;
     let entry = commit.tree()?.get_path(Path::new(path)).ok();
     let saved = undo::save_files(&repo, &[path.to_string()])?;
-    let full = workdir(&repo)?.join(path);
+    let full = super::in_workdir(workdir(&repo)?, path)?;
     match entry {
         Some(e) => {
             let blob = repo.find_blob(e.id())?;

@@ -130,7 +130,7 @@ pub fn save_files(repo: &Repository, paths: &[String]) -> Result<Vec<SavedFile>>
     let root = repo.workdir().ok_or_else(|| Error::Msg("bare repository".into()))?;
     let mut out = Vec::new();
     for p in paths {
-        let full = root.join(p);
+        let full = super::in_workdir(root, p)?;
         if full.is_file() {
             let data = std::fs::read(&full)?;
             let blob = repo.blob(&data)?;
@@ -243,7 +243,8 @@ fn apply(repo: &Repository, action: &Action) -> Result<()> {
         Action::RestoreFiles { files } => {
             let root = repo.workdir().ok_or_else(|| Error::Msg("bare repository".into()))?;
             for f in files {
-                let full = root.join(&f.path);
+                // The journal is a file on disk: never trust its paths blindly.
+                let full = super::in_workdir(root, &f.path)?;
                 match &f.blob {
                     Some(b) => {
                         let blob = repo.find_blob(oid(b)?)?;
@@ -255,7 +256,7 @@ fn apply(repo: &Repository, action: &Action) -> Result<()> {
                         {
                             use std::os::unix::fs::PermissionsExt;
                             if f.mode != 0 {
-                                let _ = std::fs::set_permissions(&full, std::fs::Permissions::from_mode(f.mode));
+                                let _ = std::fs::set_permissions(&full, std::fs::Permissions::from_mode(f.mode & 0o777));
                             }
                         }
                     }

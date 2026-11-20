@@ -576,6 +576,35 @@ from the workflows in `.github/workflows`:
   differ between operating systems (opening files and terminals, running hooks
   on Windows, shortcut labels and paths).
 
+## Security
+
+Repositories can come from anyone, so Arbor is careful with what it runs and
+where it writes:
+
+- **Nothing runs just because you opened or browsed a repository.** Arbor
+  works through libgit2, which doesn't run filters or hooks. Where it hands
+  work to the `git` program on its own (a background index refresh, blame),
+  it turns off `core.fsmonitor` and textconv, and skips repositories whose
+  config sets up filter programs other than Git LFS's. Hooks run only when
+  you commit, as with git.
+- **Signatures are checked with your own GPG or SSH program**, from your
+  global git settings. A repository that names a different one in its own
+  config isn't checked automatically (`git verify-commit` still works).
+- **Files are only written or deleted inside the working tree.** Paths
+  that would leave it (`..`, absolute paths, `.git`, a symlinked folder) are
+  refused, including ones read from Arbor's undo journal.
+- **Open doesn't run programs.** Opening a script, executable or shortcut
+  from a repository shows its folder instead, and only web and mail links
+  are opened, never other link types.
+- **The window shows only Arbor's own pages**, under a strict Content
+  Security Policy: text from repositories is always shown as text.
+- **Credentials stay in memory** for the operation that asked for them, or
+  in your system's git credential helper; Arbor never writes them to disk.
+
+Found a problem? Please report it privately through GitHub's
+[security advisories](https://github.com/bmickov/Arbor/security/advisories/new)
+rather than a public issue.
+
 ## Known limits
 
 - Signing uses the `gpg` and `ssh-keygen` programs, like Git. An SSH key with

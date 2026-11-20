@@ -223,3 +223,30 @@ pub fn config_dir() -> Option<std::path::PathBuf> {
     }
     dirs::config_dir().map(|d| d.join("arbor"))
 }
+
+/// A file named the way git names it (relative, forward slashes) as a path
+/// inside the working tree `root`. Refuses names that could reach outside it
+/// or into the repository's own folder: absolute paths, `.` and `..`, `.git`,
+/// and paths through a folder that's a symlink. Paths come from git itself,
+/// but also from the undo journal on disk and from the UI, so whatever goes
+/// wrong upstream, deleting or writing a file never lands anywhere else.
+pub fn in_workdir(root: &std::path::Path, rel: &str) -> Result<std::path::PathBuf> {
+    use std::path::Component;
+    let bad = || Error::Msg(format!("'{rel}' isn't a file in this repository's working tree."));
+    let comps: Vec<Component> = std::path::Path::new(rel).components().collect();
+    if comps.is_empty() {
+        return Err(bad());
+    }
+    let mut full = root.to_path_buf();
+    for (i, c) in comps.iter().enumerate() {
+        let Component::Normal(name) = c else { return Err(bad()) };
+        if name.to_string_lossy().eq_ignore_ascii_case(".git") {
+            return Err(bad());
+        }
+        full.push(name);
+        if i + 1 < comps.len() && full.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err(bad());
+        }
+    }
+    Ok(full)
+}

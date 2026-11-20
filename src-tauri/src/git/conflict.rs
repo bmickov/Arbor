@@ -90,7 +90,7 @@ pub fn conflict_file(repo_path: &str, path: &str) -> Result<ConflictFile> {
         None => head_branch(&repo).unwrap_or_else(|| "HEAD".into()),
     };
 
-    let full = repo.workdir().ok_or_else(|| Error::Msg("This repository has no working tree.".into()))?.join(path);
+    let full = super::in_workdir(repo.workdir().ok_or_else(|| Error::Msg("This repository has no working tree.".into()))?, path)?;
     let bytes = std::fs::read(&full).ok();
     let mut binary = bytes.as_deref().map(is_binary).unwrap_or(false);
     for e in [&c.ancestor, &c.our, &c.their].into_iter().flatten() {
@@ -162,7 +162,7 @@ pub fn resolve_with_content(repo_path: &str, path: &str, content: &str) -> Resul
     if content.lines().any(|l| l.starts_with("<<<<<<< ") || l == "<<<<<<<" || l.starts_with(">>>>>>> ") || l == ">>>>>>>") {
         return err("The file still has conflict markers.");
     }
-    let full = repo.workdir().ok_or_else(|| Error::Msg("This repository has no working tree.".into()))?.join(path);
+    let full = super::in_workdir(repo.workdir().ok_or_else(|| Error::Msg("This repository has no working tree.".into()))?, path)?;
     if let Some(dir) = full.parent() {
         std::fs::create_dir_all(dir)?;
     }

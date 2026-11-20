@@ -5,7 +5,7 @@ use super::{err, head_oid, oid, open, short, Error, Result};
 use git2::{BranchType, Oid, Repository};
 use serde::Serialize;
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalBranch {
     pub name: String,
@@ -20,7 +20,7 @@ pub struct LocalBranch {
     pub time: i64,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteBranch {
     /// Name without the remote ("feature/x").
@@ -30,7 +30,7 @@ pub struct RemoteBranch {
     pub oid: String,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Remote {
     pub name: String,
@@ -38,7 +38,7 @@ pub struct Remote {
     pub branches: Vec<RemoteBranch>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Tag {
     pub name: String,
@@ -48,7 +48,7 @@ pub struct Tag {
     pub message: Option<String>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Refs {
     pub local: Vec<LocalBranch>,
@@ -56,18 +56,63 @@ pub struct Refs {
     pub tags: Vec<Tag>,
 }
 
+/// What `refs` depends on, cheaply: every ref and where it points, HEAD,
+/// and the repository's config file (upstreams, remote URLs).
+fn refs_fingerprint(repo: &Repository) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for r in repo.references().ok()?.flatten() {
+        r.name_bytes().hash(&mut h);
+        r.target().hash(&mut h);
+        r.symbolic_target_bytes().hash(&mut h);
+    }
+    let head = repo.find_reference("HEAD").ok()?;
+    head.symbolic_target_bytes().hash(&mut h);
+    head.target().hash(&mut h);
+    // The file itself, not its time: it's small, and an edit within the
+    // same second (coarse file times) would otherwise go unnoticed.
+    std::fs::read(repo.commondir().join("config")).ok()?.hash(&mut h);
+    Some(h.finish())
+}
+
+/// Branches, remotes and tags. Refreshing asks for these every few seconds;
+/// with hundreds of branches and thousands of tags building them takes tens
+/// of milliseconds, so the last answer is kept while nothing it depends on
+/// has changed.
 pub fn refs(repo_path: &str) -> Result<Refs> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<HashMap<String, (u64, Refs)>>> = Mutex::new(None);
     let repo = open(repo_path)?;
+    let print = refs_fingerprint(&repo);
+    if let Some(fp) = print {
+        let cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((k, r)) = cache.as_ref().and_then(|c| c.get(repo_path)) {
+            if *k == fp {
+                return Ok(r.clone());
+            }
+        }
+    }
+    let refs = build_refs(&repo)?;
+    if let Some(fp) = print {
+        let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let map = cache.get_or_insert_with(HashMap::new);
+        if map.len() > 32 {
+            map.clear();
+        }
+        map.insert(repo_path.to_string(), (fp, refs.clone()));
+    }
+    Ok(refs)
+}
+
+fn build_refs(repo: &Repository) -> Result<Refs> {
+    let cfg = repo.config()?.snapshot()?;
     let mut local = vec![];
     for b in repo.branches(Some(BranchType::Local))? {
         let (b, _) = b?;
         let Some(name) = b.name()?.map(|s| s.to_string()) else { continue };
         let Some(target) = b.get().target() else { continue };
-        let configured = repo
-            .config()
-            .ok()
-            .and_then(|c| c.get_string(&format!("branch.{name}.merge")).ok())
-            .is_some();
+        let configured = cfg.get_string(&format!("branch.{name}.merge")).is_ok();
         let (upstream, gone, ahead, behind) = match b.upstream() {
             Ok(u) => {
                 let un = u.name().ok().flatten().map(|s| s.to_string());

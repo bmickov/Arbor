@@ -136,7 +136,7 @@ fn remove_empty_parents(root: &std::path::Path, file: &std::path::Path) {
 
 /// Put a tracked file back as the index has it.
 fn restore_from_index(repo: &Repository, root: &std::path::Path, path: &str, entry: &git2::IndexEntry) -> Result<()> {
-    let full = root.join(path);
+    let full = super::in_workdir(root, path)?;
     let link = entry.mode == 0o120000;
     // libgit2 won't turn a symlink back into a file (or the reverse) in place.
     if let Ok(m) = full.symlink_metadata() {
@@ -189,7 +189,7 @@ pub fn discard_files(repo_path: &str, paths: &[String]) -> Result<()> {
         if let Some(entry) = index.get_path(std::path::Path::new(p), 0) {
             restore_from_index(&repo, &root, p, &entry)?;
         } else {
-            let full = root.join(p);
+            let full = super::in_workdir(&root, p)?;
             if full.is_dir() {
                 std::fs::remove_dir_all(&full)?;
             } else if full.symlink_metadata().is_ok() {
@@ -392,7 +392,7 @@ pub fn resolve_conflict(repo_path: &str, path: &str, side: &str) -> Result<()> {
         })
         .ok_or_else(|| Error::Msg(format!("{path} isn't conflicted.")))?;
     let entry = if side == "ours" { conflict.our } else { conflict.their };
-    let full = repo.workdir().unwrap().join(path);
+    let full = super::in_workdir(repo.workdir().ok_or_else(|| Error::Msg("This repository has no working tree.".into()))?, path)?;
     match entry {
         Some(e) => {
             let blob = repo.find_blob(e.id)?;

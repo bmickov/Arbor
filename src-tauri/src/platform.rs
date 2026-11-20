@@ -28,18 +28,60 @@ pub fn native_path(path: &str) -> PathBuf {
     }
 }
 
-/// A web or mail link rather than a file path.
-fn is_link(s: &str) -> bool {
-    let scheme = s.split_once(':').map(|(a, _)| a).unwrap_or("");
-    (s.contains("://") && scheme.len() > 1 && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))) || s.starts_with("mailto:")
+/// The scheme of a link ("https" in "https://…", "mailto" in "mailto:…"):
+/// anything that starts like a URI, the name before ":" longer than a drive
+/// letter. None for a file path.
+fn link_scheme(s: &str) -> Option<String> {
+    let (scheme, _) = s.split_once(':')?;
+    (scheme.len() > 1 && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))).then(|| scheme.to_ascii_lowercase())
 }
 
 /// Open a file or folder with the desktop's default application, or a link
 /// in the browser. Links are passed on as they are: turning their slashes
 /// into Windows path separators would break them.
+///
+/// Files come from repositories, which anyone can fill: a program or script
+/// isn't "opened" (which would run it on Windows and some desktops), its
+/// folder is, so running it stays a deliberate step. Only web and mail links
+/// are opened, not other kinds that hand a link to some installed app.
 pub fn open_path(path: &str) -> Result<(), String> {
-    let result = if is_link(path) { open::that_detached(path) } else { open::that_detached(native_path(path)) };
-    result.map_err(|e| format!("Couldn't open {path}: {e}"))
+    if let Some(scheme) = link_scheme(path) {
+        if !matches!(scheme.as_str(), "http" | "https" | "mailto") {
+            return Err(format!("Arbor only opens web and mail links, not {scheme}: links."));
+        }
+        return open::that_detached(path).map_err(|e| format!("Couldn't open {path}: {e}"));
+    }
+    let p = native_path(path);
+    let target = match p.parent() {
+        Some(dir) if runs_when_opened(&p) => dir.to_path_buf(),
+        _ => p,
+    };
+    open::that_detached(&target).map_err(|e| format!("Couldn't open {path}: {e}"))
+}
+
+/// Opening this would run it rather than show it.
+fn runs_when_opened(p: &Path) -> bool {
+    const RUNNABLE: &[&str] = &[
+        // Windows
+        "exe", "com", "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "msi", "msp", "msc", "scr", "pif",
+        "lnk", "url", "hta", "cpl", "reg", "inf", "scf", "chm", "application", "appref-ms", "jar", "library-ms", "settingcontent-ms",
+        // macOS
+        "app", "command", "tool", "terminal", "workflow", "scpt", "applescript", "pkg", "mpkg", "webloc", "inetloc", "fileloc",
+        // Linux and the BSDs
+        "desktop", "appimage", "run", "sh", "bash", "zsh", "ksh", "csh", "fish", "py", "pl", "rb",
+    ];
+    let ext = p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if RUNNABLE.contains(&ext.as_str()) {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(m) = std::fs::metadata(p) {
+            return m.is_file() && m.permissions().mode() & 0o111 != 0;
+        }
+    }
+    false
 }
 
 /// Open a terminal window in `dir`.
@@ -172,11 +214,24 @@ mod tests {
 
     #[test]
     fn links_are_not_paths() {
-        assert!(is_link("https://github.com/o/r/pull/new/x"));
-        assert!(is_link("mailto:someone@example.com"));
-        assert!(!is_link("C:/Users/me/repo"));
-        assert!(!is_link("/home/me/repo"));
-        assert!(!is_link("C://odd"));
+        assert_eq!(link_scheme("https://github.com/o/r/pull/new/x").as_deref(), Some("https"));
+        assert_eq!(link_scheme("mailto:someone@example.com").as_deref(), Some("mailto"));
+        assert_eq!(link_scheme("C:/Users/me/repo"), None);
+        assert_eq!(link_scheme("/home/me/repo"), None);
+        assert_eq!(link_scheme("C://odd"), None);
+        assert_eq!(link_scheme("/home/me/a:b.txt"), None);
+    }
+
+    #[test]
+    fn programs_are_not_run_by_opening() {
+        assert!(runs_when_opened(Path::new("setup.EXE")));
+        assert!(runs_when_opened(Path::new("dir/run.bat")));
+        assert!(runs_when_opened(Path::new("x/Arbor.desktop")));
+        assert!(!runs_when_opened(Path::new("README.md")));
+        assert!(!runs_when_opened(Path::new("/nonexistent/folder")));
+        assert!(open_path("file:///etc/passwd").is_err());
+        assert!(open_path("ms-msdt:/id x").is_err());
+        assert!(open_path("javascript:alert(1)").is_err());
     }
 
     #[test]
