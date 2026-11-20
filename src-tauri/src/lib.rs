@@ -3,6 +3,7 @@
 pub mod git;
 pub mod platform;
 pub mod desktop;
+pub mod update;
 
 use git::diff::DiffSettings;
 use git::patch::Selection;
@@ -644,6 +645,48 @@ fn startup_path() -> Option<String> {
     abs.is_dir().then(|| abs.to_string_lossy().to_string())
 }
 
+// ---------------------------------------------------------------- updates
+
+/// The release the last check found; "Install" installs this one.
+static LATEST: std::sync::Mutex<Option<update::Release>> = std::sync::Mutex::new(None);
+
+#[tauri::command]
+fn update_context() -> update::Context {
+    update::context()
+}
+
+/// Ask GitHub for the newest release.
+#[tauri::command]
+async fn update_check() -> R<update::Release> {
+    let release = tauri::async_runtime::spawn_blocking(update::check).await.map_err(|e| e.to_string())??;
+    *LATEST.lock().unwrap_or_else(|e| e.into_inner()) = Some(release.clone());
+    Ok(release)
+}
+
+/// Download and install the release the last check found, reporting
+/// progress as "update-progress" events. Afterwards the UI quits; the new
+/// version starts once Arbor has.
+#[tauri::command]
+async fn update_install(app: AppHandle) -> R<()> {
+    let release = LATEST
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .filter(|r| r.newer)
+        .ok_or("Check for updates first.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let report = |done: u64, total: Option<u64>| {
+            let _ = app.emit("update-progress", (done, total));
+        };
+        match update::install(&release, &report)? {
+            update::Then::Relaunch(program) => update::relaunch_after_exit(&program),
+            update::Then::Nothing => Ok(()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Quit Arbor. The UI saves the session and window state first.
 #[tauri::command]
 fn quit(app: AppHandle) {
@@ -721,7 +764,7 @@ pub fn run() {
             fetch, pull, push, push_tag, delete_remote_branch,
             stash_list, stash_save, stash_apply, stash_pop, stash_drop, stash_drop_many, stash_branch,
             undo, undo_list,
-            open_external, open_terminal, quit, startup_path, log_ui, desktop_entry,
+            open_external, open_terminal, quit, update_context, update_check, update_install, startup_path, log_ui, desktop_entry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Arbor");

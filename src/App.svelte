@@ -26,6 +26,7 @@
   import RepoManager from "./components/RepoManager.svelte";
   import TabBar from "./components/TabBar.svelte";
   import WorkingCopy from "./components/WorkingCopy.svelte";
+  import { updates } from "./lib/updates.svelte";
 
 
   // Load the library, then reopen last session's tabs (plus any folder
@@ -51,6 +52,18 @@
     if (!app.settings.autoFetchMinutes) return;
     const first = setTimeout(() => app.autoFetch(), 5000);
     const t = setInterval(() => app.autoFetch(), 30000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(t);
+    };
+  });
+
+  // New versions: on startup (once the window has settled) and once a day
+  // after, unless turned off in Preferences → Updates.
+  $effect(() => {
+    if (!app.settings.autoUpdate) return;
+    const first = setTimeout(() => updates.auto(true), 8000);
+    const t = setInterval(() => updates.auto(), 60 * 60 * 1000);
     return () => {
       clearTimeout(first);
       clearInterval(t);

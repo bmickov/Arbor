@@ -10,6 +10,19 @@ export type DesktopIntegration = "unsupported" | "packaged" | "development" | "i
 export interface Group { id: string; name: string; collapsed: boolean }
 export interface Bookmark { path: string; name: string; group: string | null; opened: number }
 export interface Library { groups: Group[]; repos: Bookmark[] }
+/** How this copy of Arbor was installed, which decides how it updates (src-tauri/src/update.rs). */
+export interface UpdateContext {
+  version: string;
+  kind: "appimage" | "deb" | "rpm" | "dmg" | "nsis" | "msi" | "manual";
+  label: string;
+  installable: boolean;
+  releases: string;
+}
+export interface Release {
+  version: string; tag: string; current: string; newer: boolean; name: string;
+  notes: string; published: string | null; page: string;
+  asset: { name: string; url: string; sha256: string } | null;
+}
 export interface RepoSummary {
   path: string; ok: boolean; error: string | null; branch: string | null; detached: boolean;
   upstream: string | null; ahead: number; behind: number; changes: number; conflicts: number;
@@ -376,5 +389,11 @@ export const api = {
   /** Exit the app (call after saving the session). */
   quit: () => call<void>("quit"),
   openExternal: (path: string) => call<void>("open_external", { path }),
+
+  updateContext: () => call<UpdateContext>("update_context"),
+  /** Ask GitHub for the newest release. */
+  updateCheck: () => call<Release>("update_check"),
+  /** Download and install the release the last check found (progress: "update-progress" events). Quit afterwards. */
+  updateInstall: () => call<void>("update_install"),
   openTerminal: (path: string) => call<void>("open_terminal", { path }),
 };

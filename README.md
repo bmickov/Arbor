@@ -135,6 +135,27 @@ Want the very latest? Every commit to `main` is built for every platform by
 open a run and download the installers under *Artifacts* (you need to be
 signed in to GitHub).
 
+### Updates
+
+Arbor checks GitHub for a new release when it starts and once a day after
+(turn that off in Preferences → Updates, which also shows your version and
+has a **Check for updates** button). When there's one, it says so; nothing
+is downloaded until you choose **Install and restart**. Every download is
+checked against the release's `SHA256SUMS.txt` before it's used, then:
+
+| Installed from | How it updates |
+| --- | --- |
+| AppImage | The new AppImage replaces the old file, and Arbor restarts |
+| .deb / .rpm | The package is installed with apt, dnf, zypper or rpm (asks for your password), and Arbor restarts |
+| macOS .dmg | The new app replaces the one in Applications, and Arbor restarts |
+| Windows .exe / .msi | The installer of the same kind runs and opens Arbor again |
+| FreeBSD, a build from source | The release page opens, to download it yourself |
+
+The check asks `github.com` where the latest release's checksum file is,
+which names the version; release notes come from GitHub's API when it's
+reachable. GitHub sees your Arbor version and, like any website, your IP
+address; nothing about your repositories is sent.
+
 Run `arbor /path/to/repo` to open a repository directly in a new tab.
 Without an argument, Arbor picks up where you left off (unless that's turned off).
 
@@ -453,6 +474,9 @@ Open with **Ctrl+,** or the sliders button.
   commit signing
 - **Keyboard:** every shortcut below can be changed. Click it and press new keys;
   if another action used them, it's unassigned and you're told which
+- **Updates:** your version and how it was installed, **Check for updates**,
+  the new version's release notes and **Install and restart**, and whether
+  to check automatically (on by default)
 
 ## Keyboard
 
@@ -548,7 +572,9 @@ from the workflows in `.github/workflows`:
   `src-tauri/linux/app.arbor.git.metainfo.xml`; `scripts/update-metainfo.sh`
   does the same locally.) Once that commit's checks and tests pass, CI tags it (`v0.16.0`)
   and starts the Release workflow, which builds everything and publishes a
-  GitHub release with all installers and a `SHA256SUMS.txt`. Pushes that
+  GitHub release with all installers and a `SHA256SUMS.txt` (Arbor's update
+  check finds new versions through that file, so keep it and the installers'
+  names as they are). Pushes that
   don't change the version don't release anything. CI fails if the three
   version numbers disagree. You can also push a tag yourself
   (`git tag v0.16.0 && git push origin v0.16.0`); CI then sees it exists and
@@ -598,6 +624,9 @@ where it writes:
   are opened, never other link types.
 - **The window shows only Arbor's own pages**, under a strict Content
   Security Policy: text from repositories is always shown as text.
+- **Updates are checked before they're installed**: downloads come only
+  from this repository's GitHub releases over HTTPS and must match the
+  release's SHA-256 checksums, and nothing is installed until you ask.
 - **Credentials stay in memory** for the operation that asked for them, or
   in your system's git credential helper; Arbor never writes them to disk.
 

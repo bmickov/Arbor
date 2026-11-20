@@ -155,13 +155,17 @@ export interface Settings {
   shortcuts: Record<string, string[]>;
   /** Reopen tabs, views, selections, layout and window size on startup. */
   restoreSession: boolean;
+  /** Ask GitHub for a new release on startup and once a day. */
+  autoUpdate: boolean;
+  /** A release not to mention again ("Skip this version"). */
+  skipVersion: string;
 }
 export const DEFAULT_SETTINGS: Settings = {
   context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false,
   theme: "system", uiFont: "atkinson", uiSize: 13, codeFont: "commit", codeSize: 12, shortcuts: {},
   restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10, syntax: true, wordDiff: true, notify: true, desktopEntry: true, imageMode: "side", fileTree: false, issueLinks: [],
   diffTool: "", mergeTool: "", diffCommand: "", mergeCommand: "", pinned: {},
-  commitTemplates: [], profiles: [],
+  commitTemplates: [], profiles: [], autoUpdate: true, skipVersion: "",
 };
 export const UI_SIZES = { min: 10, max: 20, default: 13 };
 export const CODE_SIZES = { min: 9, max: 22, default: 12 };
@@ -234,7 +238,7 @@ class App {
   }
 
   /** Preferences window: closed, or open at a section. */
-  prefs = $state<null | "general" | "appearance" | "diffs" | "commits" | "keyboard">(null);
+  prefs = $state<null | "general" | "appearance" | "diffs" | "commits" | "keyboard" | "updates">(null);
   /** Branch switcher (Ctrl+P) visibility. */
   switcher = $state(false);
   /** A commit message for the composer to pick up (from an applied email patch). */

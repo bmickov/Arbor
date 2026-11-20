@@ -46,6 +46,10 @@ export const COMMANDS: Command[] = [
     const w = getCurrentWindow();
     await w.setFullscreen(!(await w.isFullscreen()));
   } },
+  { id: "updates", label: "Check for updates", group: "General", keys: [], inInputs: true, run: () => {
+    app.prefs = "updates";
+    import("./updates.svelte").then((u) => u.updates.check(true));
+  } },
   { id: "quit", label: "Quit Arbor", group: "General", keys: ["Ctrl+Q"], inInputs: true, run: () => app.quit() },
 
   // Text size

@@ -1,6 +1,6 @@
 [package]
 name = "arbor"
-version = "0.15.5"
+version = "0.15.6"
 description = "A friendly Git client for Linux, the BSDs, macOS and Windows"
 license = "GPL-3.0-or-later"
 authors = ["The Arbor authors"]
@@ -29,6 +29,11 @@ regex-lite = "0.1"
 open = "5"
 chrono = "0.4"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# Update checks and downloads from GitHub. TLS through the system (OpenSSL,
+# Schannel or Secure Transport) and its trusted certificates, so proxies that
+# a company's machines trust work too.
+ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
+sha2 = "0.10"
 
 # Linux/BSD: GTK's program name is what desktops match windows to launchers
 # by (see src/desktop.rs). Already used by Tauri; this is the same version.

@@ -9,15 +9,47 @@
   import { THEMES, resolveTheme, type Theme, type ThemeId } from "../lib/themes";
   import Icon from "./Icon.svelte";
   import SigningPrefs from "./SigningPrefs.svelte";
+  import { updates } from "../lib/updates.svelte";
+  import appIcon from "../../src-tauri/icons/128x128.png";
 
-  type Section = "general" | "appearance" | "diffs" | "commits" | "keyboard";
+  type Section = "general" | "appearance" | "diffs" | "commits" | "keyboard" | "updates";
   const SECTIONS: { id: Section; label: string; icon: string }[] = [
     { id: "general", label: "General", icon: "history" },
     { id: "appearance", label: "Appearance", icon: "settings" },
     { id: "diffs", label: "Diffs & Git", icon: "split" },
     { id: "commits", label: "Commits", icon: "commit" },
     { id: "keyboard", label: "Keyboard", icon: "grid" },
+    { id: "updates", label: "Updates", icon: "sync" },
   ];
+
+  const MB = (n: number) => (n / 1048576).toFixed(1);
+  /** "just now", "5 minutes ago", "yesterday", or a date. */
+  function ago(ms: number): string {
+    const m = Math.round((Date.now() - ms) / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m} minute${m === 1 ? "" : "s"} ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h} hour${h === 1 ? "" : "s"} ago`;
+    const d = Math.round(h / 24);
+    return d === 1 ? "yesterday" : new Date(ms).toLocaleDateString();
+  }
+  /** Release notes are Markdown: show headings, bullets and paragraphs, as plain text. */
+  function noteLines(md: string): { kind: "h" | "li" | "p"; text: string }[] {
+    const plain = (t: string) => t.replace(/\*\*|__|`/g, "").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").trim();
+    return md
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !/^(-{3,}|\*{3,})$/.test(l))
+      .map((l) => {
+        const h = /^#{1,6}\s+(.*)$/.exec(l);
+        if (h) return { kind: "h" as const, text: plain(h[1]) };
+        const li = /^[-*+]\s+(.*)$/.exec(l) ?? /^\d+[.)]\s+(.*)$/.exec(l);
+        if (li) return { kind: "li" as const, text: plain(li[1]) };
+        return { kind: "p" as const, text: plain(l) };
+      });
+  }
+  const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "");
+  const pct = $derived(updates.progress?.total ? Math.min(100, (updates.progress.done / updates.progress.total) * 100) : null);
 
   const s = app.settings;
   let tools = $state.raw<ToolInfo[]>([]);
@@ -134,8 +166,12 @@
       {#each SECTIONS as sec}
         <button class:on={app.prefs === sec.id} onclick={() => { stopRecording(); app.prefs = sec.id; }}>
           <Icon name={sec.icon} size={15} /> {sec.label}
+          {#if sec.id === "updates" && updates.available}<span class="dot" title="An update is available"></span>{/if}
         </button>
       {/each}
+      {#if updates.ctx}
+        <button class="version" onclick={() => (app.prefs = "updates")} title="About this version">Arbor {updates.ctx.version}</button>
+      {/if}
     </nav>
 
     <div class="content">
@@ -403,6 +439,104 @@
             </div>
           </section>
           <SigningPrefs />
+        {:else if app.prefs === "updates"}
+          {@const r = updates.release}
+          <section>
+            <div class="about">
+              <img src={appIcon} alt="" width="44" height="44" />
+              <div>
+                <b>Arbor {updates.ctx?.version ?? ""}</b>
+                <small>{updates.ctx?.label ?? ""}</small>
+              </div>
+              <button class="btn" disabled={updates.phase !== "idle"} onclick={() => updates.check(true)}>
+                {updates.phase === "checking" ? "Checking…" : "Check for updates"}
+              </button>
+            </div>
+
+            {#if updates.error}
+              <p class="upd-error" role="alert"><Icon name="warning" size={14} /> <span>{updates.error}</span></p>
+            {/if}
+
+            {#if r?.newer}
+              <div class="release">
+                <div class="rel-head">
+                  <div>
+                    <b>{r.name === `Arbor ${r.version}` ? `Arbor ${r.version} is available` : `${r.name} is available`}</b>
+                    <small>{r.published ? `Released ${day(r.published)} · you have ${r.current}` : `You have ${r.current}`}</small>
+                  </div>
+                  <button class="link" onclick={() => api.openExternal(r.page)}>Release page</button>
+                </div>
+                {#if r.notes.trim()}
+                  <div class="notes">
+                    {#each noteLines(r.notes) as l}
+                      {#if l.kind === "h"}<b>{l.text}</b>{:else if l.kind === "li"}<span class="li">{l.text}</span>{:else}<span>{l.text}</span>{/if}
+                    {/each}
+                  </div>
+                {/if}
+                {#if updates.phase === "installing" || updates.phase === "restarting"}
+                  <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct ?? undefined}>
+                    <div class="bar" class:indeterminate={pct === null || pct >= 100} style:width={pct !== null && pct < 100 ? `${pct}%` : null}></div>
+                  </div>
+                  <small class="faint">
+                    {#if updates.phase === "restarting"}
+                      Restarting…
+                    {:else if updates.progress && updates.progress.total && updates.progress.done < updates.progress.total}
+                      Downloading… {MB(updates.progress.done)} of {MB(updates.progress.total)} MB
+                    {:else if updates.progress && updates.progress.done > 0}
+                      Installing…
+                    {:else}
+                      Starting the download…
+                    {/if}
+                  </small>
+                {:else}
+                  <div class="rel-actions">
+                    {#if updates.ctx?.installable && r.asset}
+                      <button class="btn primary" onclick={() => updates.install()}>Install and restart</button>
+                    {:else}
+                      <button class="btn primary" onclick={() => api.openExternal(r.page)}>Download</button>
+                    {/if}
+                    {#if s.skipVersion === r.version}
+                      <span class="faint">You won't be reminded of this version.</span>
+                    {:else}
+                      <button class="btn ghost" onclick={() => updates.skip()}>Skip this version</button>
+                    {/if}
+                  </div>
+                  <p class="hint">
+                    {#if !updates.ctx?.installable}
+                      This copy of Arbor can't update itself; the release page has the download for your system.
+                    {:else if updates.ctx.kind === "deb" || updates.ctx.kind === "rpm"}
+                      Installing the package asks for an administrator's password.
+                    {:else if updates.ctx.kind === "nsis" || updates.ctx.kind === "msi"}
+                      The installer runs and opens Arbor again when it's done.
+                    {:else}
+                      Arbor downloads the new version, checks it against the release's checksums and restarts into it.
+                    {/if}
+                  </p>
+                {/if}
+              </div>
+            {:else if r && !updates.error}
+              <p class="uptodate"><Icon name="check" size={14} /> You have the newest version.</p>
+            {/if}
+            {#if updates.checked}
+              <p class="hint">Last checked {ago(updates.checked)}.</p>
+            {/if}
+          </section>
+          <section>
+            <h4>Automatic checks</h4>
+            <label class="toggle">
+              <input type="checkbox" checked={s.autoUpdate} onchange={() => { s.autoUpdate = !s.autoUpdate; save(); }} />
+              <span>
+                <b>Check for updates automatically</b>
+                <small>
+                  When Arbor starts, and once a day while it's open, ask GitHub whether there's a new release,
+                  and say so if there is. Nothing is downloaded or installed until you choose to.
+                </small>
+              </span>
+            </label>
+            <p class="hint">
+              All versions and their release notes are on <button class="link" onclick={() => updates.ctx && api.openExternal(updates.ctx.releases)}>GitHub</button>.
+            </p>
+          </section>
         {:else}
           <section class="kb">
             <div class="kbtools">
@@ -551,6 +685,36 @@
   .toggle input { margin-top: 3px; }
   .toggle span { display: flex; flex-direction: column; gap: 2px; }
   .toggle small { color: var(--ink-3); font-size: calc(var(--fs) * 12); }
+
+  .version { margin-top: auto; font-size: calc(var(--fs) * 11.5); color: var(--ink-3) !important; font-weight: 500 !important; font-variant-numeric: tabular-nums; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: auto; }
+  .about { display: flex; align-items: center; gap: 14px; padding: 6px 0 4px; }
+  .about img { border-radius: 10px; flex: none; }
+  .about div { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+  .about b { font-size: calc(var(--fs) * 15); }
+  .about small, .rel-head small { color: var(--ink-3); font-size: calc(var(--fs) * 12); }
+  .upd-error { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--ink); font-size: calc(var(--fs) * 12.5); user-select: text; }
+  .upd-error :global(svg) { color: var(--warn); flex: none; margin-top: 2px; }
+  .uptodate { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; font-weight: 600; }
+  .uptodate :global(svg) { color: var(--add-ink); }
+  .release { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); display: flex; flex-direction: column; gap: 10px; }
+  .rel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .rel-head div { display: flex; flex-direction: column; gap: 2px; }
+  .notes {
+    max-height: 180px; overflow-y: auto; user-select: text; padding: 8px 12px; border-radius: 7px;
+    background: var(--surface); border: 1px solid var(--line-soft); font-size: calc(var(--fs) * 12.5); line-height: 1.5;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .notes b { margin-top: 6px; }
+  .notes b:first-child { margin-top: 0; }
+  .notes .li { position: relative; padding-left: 14px; }
+  .notes .li::before { content: ""; position: absolute; left: 3px; top: 0.62em; width: 4px; height: 4px; border-radius: 50%; background: var(--ink-3); }
+  .rel-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .release .hint { margin: 0; }
+  .progress { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+  .bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.2s; }
+  .bar.indeterminate { width: 30%; animation: slide-bar 1.1s ease-in-out infinite; }
+  @keyframes slide-bar { from { translate: -100% 0; } to { translate: 340% 0; } }
 
   .kb { padding-top: 4px; }
   .kbtools { display: flex; gap: 10px; align-items: center; }
