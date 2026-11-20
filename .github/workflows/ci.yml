@@ -1,6 +1,9 @@
 # Checks and tests every push and pull request, and builds the installers
 # for all platforms. Each run's installers can be downloaded from the run's
-# summary page ("Artifacts"). Changes to documentation alone don't rebuild.
+# summary page ("Artifacts"). Changes to documentation alone don't rebuild,
+# and neither does an empty commit: a push that touches no path outside
+# paths-ignore starts no run, so rebuild such a commit from the Actions
+# page ("Run workflow") instead.
 name: CI
 
 on:
