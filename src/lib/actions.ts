@@ -381,9 +381,8 @@ export function remoteBranchMenu(e: MouseEvent, fullName: string) {
 }
 
 export function showHistory(scope: string) {
-  app.scope = scope;
   app.view = "history";
-  app.loadLog();
+  app.setScope(scope);
 }
 
 // ----------------------------------------------- hosting: links and PRs
@@ -569,7 +568,7 @@ export function remoteMenu(e: MouseEvent, name: string) {
 
 export function selectCommit(oid: string) {
   app.view = "history";
-  app.selectedCommit = oid;
+  app.reveal(oid);
   if (!app.log.some((r) => r.oid === oid)) app.loadLog();
 }
 

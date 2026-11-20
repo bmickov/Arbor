@@ -34,25 +34,42 @@
     const hit = verifications.get(`${repo}|${id}`);
     if (hit !== undefined) return void (verified = { oid: id, v: hit });
     verified = null;
-    api.verifyCommit(repo, id).then((v) => {
-      verifications.set(`${repo}|${id}`, v);
-      if (oid === id) verified = { oid: id, v };
-    }).catch(() => {});
+    // Checking a signature runs gpg or ssh-keygen: not for every commit
+    // passed on the way with the arrow keys.
+    const t = setTimeout(() => {
+      api.verifyCommit(repo, id).then((v) => {
+        verifications.set(`${repo}|${id}`, v);
+        if (oid === id) verified = { oid: id, v };
+      }).catch(() => {});
+    }, 150);
+    return () => clearTimeout(t);
   });
   const sigLabel = (v: Verification) =>
     v.status === "good" ? "Verified" : v.status === "bad" ? "Bad signature" : v.status === "error" ? "Signed" : "Signed";
   const sigTitle = (v: Verification) =>
     [`${v.format === "ssh" ? "SSH" : v.format === "x509" ? "X.509" : "GPG"} signature`, v.signer && `by ${v.signer}`, v.key && `key ${v.key}`].filter(Boolean).join(" ") + `\n${v.detail}`;
 
+  // A commit never changes, only the branch and tag labels on it do: load
+  // it again when the refs change, not on every refresh (editing a file
+  // refreshes too, and a huge commit takes a while to read).
+  const refsKey = $derived(app.refs ? JSON.stringify(app.refs) : "");
+  let shownOid = "";
   $effect(() => {
     const id = oid;
-    void app.version;
-    api.commitInfo(app.path, id).then((i) => {
-      if (oid !== id) return;
-      info = i;
-      error = null;
-      if (!file || !i.files.some((f) => f.path === file)) file = i.files[0]?.path ?? null;
-    }).catch((e) => (error = String(e)));
+    const repo = app.path;
+    void refsKey;
+    const load = () =>
+      api.commitInfo(repo, id).then((i) => {
+        if (oid !== id) return;
+        info = i;
+        shownOid = id;
+        error = null;
+        if (!file || !i.files.some((f) => f.path === file)) file = i.files[0]?.path ?? null;
+      }).catch((e) => oid === id && (error = String(e)));
+    // Moving through the list with the arrow keys: load only where it stops.
+    if (!shownOid || shownOid === id) return void load();
+    const t = setTimeout(load, 60);
+    return () => clearTimeout(t);
   });
 
   $effect(() => {
@@ -133,7 +150,7 @@
         <div class="parents faint">
           {info.parents.length > 1 ? "Parents" : "Parent"}
           {#each info.parents as p}
-            <button class="mono plink" onclick={() => (app.selectedCommit = p)}>{p.slice(0, 7)}</button>
+            <button class="mono plink" onclick={() => app.reveal(p)}>{p.slice(0, 7)}</button>
           {/each}
         </div>
       {/if}

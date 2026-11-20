@@ -112,7 +112,7 @@
   // Stacked branches sit under their parent, indented.
   let stacks = $state.raw<Stacked[]>([]);
   $effect(() => {
-    void app.version;
+    void app.refsVersion;
     const p = app.path;
     if (!p) return;
     api.stackList(p).then((s) => {
@@ -142,10 +142,7 @@
   const total = $derived((refs?.local.length ?? 0) + (refs?.remotes.reduce((n, r) => n + r.branches.length, 0) ?? 0));
 
   function go(v: View) {
-    if (v === "history" && app.view === "history" && app.scope !== "all") {
-      app.scope = "all";
-      app.loadLog();
-    }
+    if (v === "history" && app.view === "history" && app.scope !== "all") app.setScope("all");
     app.view = v;
     if (v === "history" && !app.log.length) app.loadLog();
   }

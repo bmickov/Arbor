@@ -110,7 +110,7 @@
             <div class="bl" class:start={!!h} class:odd={hunkIndex[i] % 2 === 1}>
               <span class="who">
                 {#if h}
-                  <button class="hc" title="{h.summary}\n{h.author}, {fullDate(h.time)}" onclick={() => { app.selectedCommit = h.oid; app.view = "history"; onclose(); if (!app.log.length) app.loadLog(); }}>
+                  <button class="hc" title="{h.summary}\n{h.author}, {fullDate(h.time)}" onclick={() => { app.reveal(h.oid); app.view = "history"; onclose(); if (!app.log.length) app.loadLog(); }}>
                     <span class="av" style:--h={authorHue(h.author)}>{initials(h.author)}</span>
                     <span class="hs">{h.summary}</span>
                     <span class="age">{relTime(h.time)}</span>

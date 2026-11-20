@@ -24,6 +24,10 @@ export interface TabUI {
   selectedFile: { path: string; area: "staged" | "unstaged" | "conflicted" } | null;
   historyQuery: string;
   historyScroll: number;
+  /** The commit at the top of the History list and how far it's scrolled
+   * into it, so the list comes back to the same commits even when new ones
+   * were added above it meanwhile. */
+  historyAnchor?: HistoryAnchor | null;
   logLimit: number;
   fileHistoryPath: string | null;
   /** The two branches being compared (Compare view). */
@@ -32,6 +36,11 @@ export interface TabUI {
   browse?: { rev: string; label: string } | null;
   /** History filters (empty strings are off). */
   historyFilter?: HistoryFilter | null;
+}
+
+export interface HistoryAnchor {
+  oid: string;
+  offset: number;
 }
 
 export interface HistoryFilter {
@@ -209,6 +218,15 @@ class App {
   historyQuery = $state("");
   historyFilter = $state<HistoryFilter>({ ...NO_FILTER });
   historyScroll = $state(0);
+  historyAnchor = $state.raw<HistoryAnchor | null>(null);
+  /** HEAD and the refs as of the last history load (see refresh). */
+  private logSig = "";
+  /** Goes up when HEAD, a branch or a tag moves (not when files change):
+   * for views built from commits, which needn't reload as you edit. */
+  refsVersion = $state(0);
+  private refsSig = "";
+  /** A commit the History list should scroll into view (it's selected too). */
+  revealOid = $state<string | null>(null);
   layout = $state<Layout>(structuredClone(DEFAULT_LAYOUT));
   /** A resizable panel's size, or its default. */
   size(id: string, def: number): number {
@@ -361,14 +379,15 @@ class App {
 
   /** Just the view-and-selection part of a tab's saved state. */
   private pickUI(t: TabState): TabUI {
-    const { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath, compare, browse, historyFilter } = t;
-    return { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, logLimit, fileHistoryPath, compare, browse, historyFilter };
+    const { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, historyAnchor, logLimit, fileHistoryPath, compare, browse, historyFilter } = t;
+    return { view, scope, selectedCommit, selectedStash, selectedFile, historyQuery, historyScroll, historyAnchor, logLimit, fileHistoryPath, compare, browse, historyFilter };
   }
 
   private uiSnapshot(): TabUI {
     return {
       view: this.view, scope: this.scope, selectedCommit: this.selectedCommit, selectedStash: this.selectedStash,
       selectedFile: this.selectedFile, historyQuery: this.historyQuery, historyScroll: this.historyScroll,
+      historyAnchor: this.historyAnchor ? { ...this.historyAnchor } : null,
       logLimit: this.logLimit, fileHistoryPath: this.fileHistoryPath,
       compare: this.compare ? { ...this.compare } : null, browse: this.browse ? { ...this.browse } : null,
       historyFilter: { ...this.historyFilter },
@@ -402,8 +421,12 @@ class App {
     this.selectedStash = t?.selectedStash ?? null;
     this.selectedFile = t?.selectedFile ?? null;
     this.lastSig = d?.lastSig ?? "";
+    this.logSig = "";
+    this.refsSig = "";
     this.historyQuery = t?.historyQuery ?? "";
     this.historyScroll = t?.historyScroll ?? 0;
+    this.historyAnchor = t?.historyAnchor ?? null;
+    this.revealOid = null;
     this.fileHistoryPath = t?.fileHistoryPath ?? null;
     this.compare = t?.compare ?? null;
     this.browse = t?.browse ?? null;
@@ -668,13 +691,30 @@ class App {
       this.lastSig = sig;
       if (!changed && !withLog && !this.workdirMayHaveChanged) return;
       this.workdirMayHaveChanged = false;
+      const before = this.status;
       this.status = status;
       this.refs = refs;
       this.stashes = stashes;
       this.undoTop = undo[0] ?? null;
       if (this.selectedStash !== null && !stashes.some((s) => s.index === this.selectedStash)) this.selectedStash = null;
-      if (withLog || changed) {
-        if (withLog || this.view === "history" || this.log.length > 0) await this.loadLog();
+      // The history only changes with HEAD and the refs: editing files (the
+      // usual reason for a change here) leaves it alone, so don't reload it.
+      const logSig = JSON.stringify([status.head, status.branch, refs]);
+      const refsSig = JSON.stringify([logSig, status.state, stashes.length]);
+      if (withLog || refsSig !== this.refsSig) {
+        this.refsSig = refsSig;
+        this.refsVersion++;
+      }
+      const logStale = withLog || logSig !== this.logSig || (this.view === "history" && !this.log.length);
+      if (logStale && (withLog || this.view === "history" || this.log.length > 0)) {
+        await this.loadLog();
+        if (p === this.path) this.logSig = logSig;
+      }
+      // After switching branches (or a commit, merge or pull that moved the
+      // branch you were looking at the tip of), show where HEAD is now.
+      if (before && status.head && before.head !== status.head) {
+        const moved = before.branch !== status.branch || !this.selectedCommit || this.selectedCommit === before.head;
+        if (moved) this.reveal(status.head);
       }
       this.version++;
       this.refreshError = "";
@@ -691,6 +731,28 @@ class App {
         this.refresh(withLog);
       }
     }
+  }
+
+  /** Show the history of another branch (or "all", "head"), from its newest commit. */
+  async setScope(scope: string) {
+    const changed = scope !== this.scope;
+    if (changed) {
+      this.scope = scope;
+      this.historyAnchor = null;
+      this.historyScroll = 0;
+    }
+    await this.loadLog();
+    if (this.scope !== scope) return;
+    // Select the branch's newest commit (for all branches, the current one).
+    const head = this.status?.head;
+    const pick = scope === "all" || scope === "head" ? (this.log.find((r) => r.oid === head) ?? this.log[0]) : this.log[0];
+    if (pick) this.reveal(pick.oid);
+  }
+
+  /** Select a commit and have the History list scroll to it. */
+  reveal(oid: string) {
+    this.selectedCommit = oid;
+    this.revealOid = oid;
   }
 
   async loadLog(): Promise<void> {
