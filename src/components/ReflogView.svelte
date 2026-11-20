@@ -21,7 +21,7 @@
 
   $effect(() => {
     const r = refname;
-    void app.version;
+    void app.refsVersion;
     api.reflog(app.path, r, 500)
       .then((e) => {
         entries = e;

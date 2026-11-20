@@ -45,6 +45,20 @@
   const shown = $derived(rows.length > prog.limit ? rows.slice(0, prog.limit) : rows);
   let list: HTMLElement;
 
+  // Coming back to this view (another tab, another view): bring the selected
+  // file into sight, once, rather than leave it scrolled off below.
+  let revealed = false;
+  $effect(() => {
+    const sel = app.selectedFile;
+    if (revealed || !list || !rows.length) return;
+    revealed = true;
+    if (sel?.area !== area) return;
+    const i = rows.findIndex((r) => r.kind === "file" && r.item.path === sel.path);
+    if (i < 0) return;
+    prog.reveal(i);
+    tick().then(() => list?.querySelector<HTMLElement>(`.file[data-path="${CSS.escape(sel.path)}"]`)?.scrollIntoView({ block: "nearest" }));
+  });
+
   function key(e: KeyboardEvent, f: FileEntry) {
     const i = visible.indexOf(f);
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {

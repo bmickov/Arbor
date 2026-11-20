@@ -5,6 +5,7 @@
   import { authorHue, initials, laneVar, relTime, fullDate } from "../lib/format";
   import { app, NO_FILTER } from "../lib/state.svelte";
   import { menu } from "../lib/ui.svelte";
+  import { untrack } from "svelte";
   import CommitDetail from "./CommitDetail.svelte";
   import GraphCell from "./GraphCell.svelte";
   import Linked from "./Linked.svelte";
@@ -50,7 +51,7 @@
   let searchSeq = 0;
   const day = (d: string, end: boolean) => (d ? Math.floor(new Date(`${d}T${end ? "23:59:59" : "00:00:00"}`).getTime() / 1000) : null);
   $effect(() => {
-    void app.version;
+    void app.refsVersion;
     const filter = {
       text: q || null, author: f.author.trim() || null, path: f.path.trim() || null, contains: f.contains || null,
       since: f.when === "custom" ? day(f.since, false) : f.when ? Math.floor(Date.now() / 1000) - Number(f.when) * 86400 : null,
@@ -88,25 +89,98 @@
   const pushed = $derived(act.pushedSet());
   const head = $derived(app.status?.head);
 
-  // Put the list back where this tab left it (once the commits are loaded).
-  let scrollRestored = false;
+  // Where the list is scrolled is kept as the commit at its top (and how far
+  // into it), not as a pixel offset: the list is rebuilt after every change
+  // (a commit, a fetch, switching branches or tabs), and new commits at the
+  // top would otherwise push the view further into the past each time. At
+  // the very top it stays at the top, so new commits come into view.
+  let anchor: { oid: string; offset: number } | null = untrack(() => app.historyAnchor);
+  let placedRows: CommitRow[] | null = null;
+  let placedRow = 0;
+
+  function remember() {
+    if (!scroller) return;
+    const top = scroller.scrollTop;
+    scrollTop = top;
+    const i = Math.floor(top / ROW);
+    anchor = top >= ROW / 2 && rows[i] ? { oid: rows[i].oid, offset: top - i * ROW } : null;
+    app.historyAnchor = anchor;
+    app.historyScroll = Math.round(top);
+  }
+
+  function scrollTo(y: number) {
+    if (!scroller) return;
+    scroller.scrollTop = Math.max(0, y);
+    remember();
+  }
+
+  /** Scroll so row `i` is in view; `centre` puts it a third of the way down. */
+  function show(i: number, centre: boolean) {
+    if (!scroller) return;
+    const top = i * ROW;
+    const h = scroller.clientHeight || viewH;
+    if (top >= scroller.scrollTop && top + ROW <= scroller.scrollTop + h) return;
+    if (centre) scrollTo(top - h / 3);
+    else scrollTo(top < scroller.scrollTop ? top : top + ROW - h);
+  }
+
+  // Place the list when its commits change (or the row height does), and
+  // scroll to a commit something asked to show.
   $effect(() => {
-    if (scrollRestored || !scroller || !rows.length) return;
-    scrollRestored = true;
-    if (app.historyScroll > 0) {
-      scroller.scrollTop = app.historyScroll;
-      scrollTop = scroller.scrollTop;
+    const list = rows;
+    const sc = scroller;
+    const rowH = ROW;
+    const want = app.revealOid;
+    if (!sc || !list.length) return;
+    untrack(() => {
+      if (want) {
+        const i = list.findIndex((r) => r.oid === want);
+        if (i >= 0) {
+          placedRows = list;
+          placedRow = rowH;
+          app.revealOid = null;
+          show(i, true);
+          return;
+        }
+        // Not among the loaded commits (or hidden by a search): drop the
+        // request rather than jump there later, out of the blue.
+        if (!app.logLoading) app.revealOid = null;
+      }
+      if (list === placedRows && rowH === placedRow) return;
+      const firstTime = placedRows === null;
+      placedRows = list;
+      placedRow = rowH;
+      if (!anchor) {
+        // At the top (or saved by an older version, as a pixel offset).
+        return scrollTo(firstTime ? app.historyScroll : 0);
+      }
+      const i = list.findIndex((r) => r.oid === anchor!.oid);
+      if (i >= 0) return scrollTo(i * rowH + Math.min(anchor.offset, rowH - 1));
+      // The commit at the top isn't in this list (another scope or a
+      // search): start at the top, or at the selected commit if it's there.
+      scrollTo(0);
+      const sel = list.findIndex((r) => r.oid === app.selectedCommit);
+      if (sel >= 0) show(sel, true);
+    });
+  });
+
+  // Another branch's history starts from its newest commit, at the top.
+  let lastScope = untrack(() => app.scope);
+  $effect(() => {
+    const sc = app.scope;
+    if (sc !== lastScope) {
+      lastScope = sc;
+      anchor = null;
     }
   });
 
-  // Keep the selected commit in view when it changes from elsewhere.
+  // Clearing a search or filter goes back to the selected commit, now among
+  // all the others.
+  let wasFiltering = untrack(() => filtering);
   $effect(() => {
-    const sel = app.selectedCommit;
-    if (!sel || !scroller) return;
-    const i = rows.findIndex((r) => r.oid === sel);
-    if (i < 0) return;
-    const top = i * ROW;
-    if (top < scroller.scrollTop || top + ROW > scroller.scrollTop + viewH) scroller.scrollTop = Math.max(0, top - viewH / 3);
+    const f = filtering;
+    if (wasFiltering && !f && app.selectedCommit) app.revealOid = app.selectedCommit;
+    wasFiltering = f;
   });
 
   // Select the head commit when nothing is selected.
@@ -118,8 +192,11 @@
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
     const i = rows.findIndex((r) => r.oid === app.selectedCommit);
-    const n = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
-    if (n) app.selectedCommit = n.oid;
+    const j = Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
+    if (rows[j]) {
+      app.selectedCommit = rows[j].oid;
+      show(j, false);
+    }
   }
 
   function pillKind(l: RefLabel) {
@@ -156,10 +233,7 @@
 
   function scopeMenu(e: MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const set = (s: string) => {
-      app.scope = s;
-      app.loadLog();
-    };
+    const set = (s: string) => app.setScope(s);
     menu.open(r.left, r.bottom + 4, [
       { label: "All branches", hint: app.scope === "all" ? "current" : undefined, action: () => set("all") },
       { label: "Current branch only", hint: app.scope === "head" ? "current" : undefined, action: () => set("head") },
@@ -226,7 +300,7 @@
 
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div class="rows" tabindex="0" role="listbox" aria-label="Commits" bind:this={scroller} bind:clientHeight={viewH}
-      onscroll={(e) => { scrollTop = (e.currentTarget as HTMLElement).scrollTop; app.historyScroll = Math.round(scrollTop); }} onkeydown={key}>
+      onscroll={remember} onkeydown={key}>
       <div class="spacer" style:height="{rows.length * ROW + (app.logMore ? 56 : 12)}px">
         {#each visible as row, k (row.oid)}
           {@const i = first + k}

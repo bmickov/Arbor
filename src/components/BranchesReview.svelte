@@ -32,7 +32,7 @@
 
   // Reload when the repository changes (commits, merges, deletions).
   $effect(() => {
-    void app.version;
+    void app.refsVersion;
     void app.path;
     load();
   });

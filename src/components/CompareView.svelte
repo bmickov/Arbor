@@ -25,7 +25,7 @@
   let prediction = $state.raw<MergePrediction | null>(null);
   $effect(() => {
     const b = base, t = target;
-    void app.version;
+    void app.refsVersion;
     prediction = null;
     if (!b || !t || b === t) return;
     api.predictMerge(app.path, t, b).then((p) => {
@@ -35,7 +35,7 @@
 
   $effect(() => {
     const b = base, t = target;
-    void app.version;
+    void app.refsVersion;
     cmp = null;
     error = null;
     if (!b || !t) return;
