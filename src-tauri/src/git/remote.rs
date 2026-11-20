@@ -293,6 +293,8 @@ fn push_with_git(repo: &Repository, remote: &str, specs: &[String]) -> Result<()
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(std::process::Stdio::null())
         .arg("push")
+        // A remote can't be mistaken for an option, whatever it's called.
+        .arg("--")
         .arg(remote)
         .args(specs)
         .output()

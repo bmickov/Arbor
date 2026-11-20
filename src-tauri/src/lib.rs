@@ -675,6 +675,17 @@ pub fn run() {
     // Before any thread: libgit2's cache settings are process-wide.
     git::init();
     tauri::Builder::default()
+        // The window only ever shows Arbor's own pages: a link that slipped
+        // through (in a commit message, say) can't navigate it elsewhere.
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("navigation-guard")
+                .on_navigation(|_, url| {
+                    let own = matches!(url.scheme(), "tauri" | "asset") || url.host_str() == Some("tauri.localhost");
+                    let dev = cfg!(debug_assertions) && matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"));
+                    own || dev || url.scheme() == "about"
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         // Window size and position are saved on exit; the UI decides whether

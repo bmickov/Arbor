@@ -1217,6 +1217,8 @@ fn ssh_signed_commits_and_verification() {
 
     // Use plain ssh-keygen whatever the machine's global git config says.
     r.git(&["config", "gpg.ssh.program", "ssh-keygen"]);
+    let own = git2::Config::new().unwrap();
+    let verify = |id: &str| git::sign::verify_with(&r.path, id, &own);
     r.write("a", "1\n");
     r.commit_all("unsigned");
     git::sign::set_settings(&r.path, true, "ssh", &key_s, false).unwrap();
@@ -1232,14 +1234,14 @@ fn ssh_signed_commits_and_verification() {
     assert!(r.git(&["reflog", "-1", "--format=%gs"]).starts_with("commit: signed"));
 
     // Without an allowed signers file the signature is valid but the signer unknown.
-    let v = git::sign::verify(&r.path, &c.oid).unwrap().unwrap();
+    let v = verify(&c.oid).unwrap().unwrap();
     assert_eq!((v.format.as_str(), v.status.as_str()), ("ssh", "unverified"), "{v:?}");
     // With one, it's good and names the signer.
     let public = std::fs::read_to_string(keys.path().join("id_ed25519.pub")).unwrap();
     let allowed = keys.path().join("allowed");
     std::fs::write(&allowed, format!("test@example.com {}", public.trim())).unwrap();
     r.git(&["config", "gpg.ssh.allowedSignersFile", &allowed.to_string_lossy()]);
-    let v = git::sign::verify(&r.path, &c.oid).unwrap().unwrap();
+    let v = verify(&c.oid).unwrap().unwrap();
     assert_eq!(v.status, "good", "{v:?}");
     assert_eq!(v.signer.as_deref(), Some("test@example.com"));
     // git agrees.
@@ -1247,14 +1249,14 @@ fn ssh_signed_commits_and_verification() {
 
     // An unsigned commit has nothing to verify; opting out per commit works.
     let first = r.git(&["rev-parse", "HEAD~1"]);
-    assert!(git::sign::verify(&r.path, first.trim()).unwrap().is_none());
+    assert!(verify(first.trim()).unwrap().is_none());
     r.write("a", "3\n");
     r.git(&["add", "a"]);
     let u = git::commit::commit_signed(&r.path, "not signed", false, false, Some(false)).unwrap();
-    assert!(git::sign::verify(&r.path, &u.oid).unwrap().is_none());
+    assert!(verify(&u.oid).unwrap().is_none());
     // Amending signs too, and keeps the author.
     let a = git::commit::commit_signed(&r.path, "amended", true, false, None).unwrap();
-    assert_eq!(git::sign::verify(&r.path, &a.oid).unwrap().unwrap().status, "good");
+    assert_eq!(verify(&a.oid).unwrap().unwrap().status, "good");
     assert!(r.git(&["reflog", "-1", "--format=%gs"]).starts_with("commit (amend): amended"));
 }
 
@@ -1282,12 +1284,17 @@ fn gpg_signed_commits_and_verification() {
     assert!(gen.status.success(), "{}", String::from_utf8_lossy(&gen.stderr));
     r.git(&["config", "gpg.program", &wrapper.to_string_lossy()]);
     git::sign::set_settings(&r.path, true, "openpgp", "test@example.com", false).unwrap();
+    // Verification only runs the program from your own settings: stand in for them.
+    let own_file = home.path().join("own.gitconfig");
+    std::fs::write(&own_file, format!("[gpg]\n\tprogram = {}\n", wrapper.display())).unwrap();
+    let own = git2::Config::open(&own_file).unwrap();
+    let verify = |id: &str| git::sign::verify_with(&r.path, id, &own);
 
     r.write("a", "1\n");
     r.git(&["add", "a"]);
     let c = git::commit::commit_signed(&r.path, "gpg signed", false, false, None).unwrap();
     assert!(r.git(&["cat-file", "commit", &c.oid]).contains("-----BEGIN PGP SIGNATURE-----"));
-    let v = git::sign::verify(&r.path, &c.oid).unwrap().unwrap();
+    let v = verify(&c.oid).unwrap().unwrap();
     // A freshly generated key is ultimately trusted.
     assert_eq!((v.format.as_str(), v.status.as_str()), ("openpgp", "good"), "{v:?}");
     assert_eq!(v.signer.as_deref(), Some("Test <test@example.com>"));
@@ -1300,7 +1307,7 @@ fn gpg_signed_commits_and_verification() {
     use std::io::Write;
     child.stdin.take().unwrap().write_all(raw.as_bytes()).unwrap();
     let forged = String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap();
-    let v = git::sign::verify(&r.path, forged.trim()).unwrap().unwrap();
+    let v = verify(forged.trim()).unwrap().unwrap();
     assert_eq!(v.status, "bad", "{v:?}");
 
     // Merges and cherry-picks are signed as well.
@@ -1310,7 +1317,12 @@ fn gpg_signed_commits_and_verification() {
     let side = git::commit::commit_signed(&r.path, "side", false, false, Some(false)).unwrap();
     r.git(&["checkout", "-q", "main"]);
     let p = git::commit::cherry_pick(&r.path, &side.oid).unwrap();
-    assert_eq!(git::sign::verify(&r.path, &p.oid).unwrap().unwrap().status, "good");
+    assert_eq!(verify(&p.oid).unwrap().unwrap().status, "good");
+
+    // Without that, the repository's own program isn't run.
+    let v = git::sign::verify(&r.path, &c.oid).unwrap().unwrap();
+    assert_eq!(v.status, "error", "{v:?}");
+    assert!(v.detail.starts_with("Not checked"), "{v:?}");
 }
 
 #[test]
@@ -2244,4 +2256,62 @@ fn tag_names_are_checked_like_folders() {
     let e = git::branches::create_tag(&r.path, "rel", "HEAD", None).unwrap_err().to_string();
     assert!(e.contains("stores tag names like folders"), "{e}");
     assert!(git::branches::delete_tag(&r.path, "nope").unwrap_err().to_string().starts_with("There's no tag"));
+}
+
+#[test]
+fn file_operations_stay_inside_the_working_tree() {
+    let r = Repo::new();
+    r.write("a.txt", "a\n");
+    r.commit_all("base");
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("keep.txt"), "precious\n").unwrap();
+    let root = Path::new(&r.path);
+    for bad in ["../x", "/etc/passwd", ".git/config", "a/../../x", ".GIT/HEAD"] {
+        assert!(git::in_workdir(root, bad).is_err(), "{bad}");
+    }
+    assert_eq!(git::in_workdir(root, "dir/b.txt").unwrap(), root.join("dir").join("b.txt"));
+    // Discarding a path that points outside the repository deletes nothing.
+    let rel = format!("../{}/keep.txt", outside.path().file_name().unwrap().to_string_lossy());
+    let _ = git::patch::discard_files(&r.path, std::slice::from_ref(&rel));
+    assert!(outside.path().join("keep.txt").exists());
+    #[cfg(unix)]
+    {
+        // Nor through a symlinked folder inside it.
+        std::os::unix::fs::symlink(outside.path(), root.join("out")).unwrap();
+        assert!(git::in_workdir(root, "out/keep.txt").is_err());
+        assert!(git::patch::discard_files(&r.path, &["out/keep.txt".into()]).is_err());
+        assert!(outside.path().join("keep.txt").exists());
+        // An undo journal edited to point outside is refused too.
+        let journal = root.join(".git/arbor/undo.json");
+        git::patch::discard_files(&r.path, &["out".into()]).unwrap_or_default();
+        r.write("new.txt", "n\n");
+        git::patch::discard_files(&r.path, &["new.txt".into()]).unwrap();
+        let text = std::fs::read_to_string(&journal).unwrap().replace("\"new.txt\"", &format!("{:?}", rel));
+        std::fs::write(&journal, text).unwrap();
+        assert!(git::undo::undo(&r.path).is_err());
+        assert_eq!(std::fs::read_to_string(outside.path().join("keep.txt")).unwrap(), "precious\n");
+    }
+}
+
+#[test]
+fn refs_follow_changes_to_branches_tags_and_upstreams() {
+    let r = Repo::new();
+    r.write("a.txt", "a\n");
+    r.commit_all("base");
+    let first = git::branches::refs(&r.path).unwrap();
+    assert_eq!(first.local.len(), 1);
+    // The same answer again, then each kind of change shows up.
+    assert_eq!(git::branches::refs(&r.path).unwrap().local[0].oid, first.local[0].oid);
+    r.git(&["tag", "v1"]);
+    assert_eq!(git::branches::refs(&r.path).unwrap().tags.len(), 1);
+    r.git(&["branch", "side"]);
+    assert_eq!(git::branches::refs(&r.path).unwrap().local.len(), 2);
+    r.write("a.txt", "b\n");
+    r.commit_all("second");
+    let main = git::branches::refs(&r.path).unwrap().local.into_iter().find(|b| b.name == "main").unwrap();
+    assert_eq!(main.summary, "second");
+    r.git(&["config", "branch.side.remote", "."]);
+    r.git(&["config", "branch.side.merge", "refs/heads/main"]);
+    let side = git::branches::refs(&r.path).unwrap().local.into_iter().find(|b| b.name == "side").unwrap();
+    assert_eq!((side.upstream.as_deref(), side.behind), (Some("main"), 1));
 }

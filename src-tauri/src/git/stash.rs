@@ -308,7 +308,7 @@ fn save_partial(repo: &Repository, repo_path: &str, sig: &git2::Signature, msg: 
 
 /// Delete a file from the working tree, and the folders it leaves empty.
 fn remove_file(root: &std::path::Path, path: &str) {
-    let full = root.join(path);
+    let Ok(full) = super::in_workdir(root, path) else { return };
     let _ = std::fs::remove_file(&full);
     let mut dir = full.parent();
     while let Some(d) = dir {

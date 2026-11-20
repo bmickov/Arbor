@@ -56,7 +56,9 @@ fn blame_with_git(repo: &git2::Repository, head: git2::Oid, path: &str) -> Optio
         .current_dir(dir)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(std::process::Stdio::null())
-        .args(["blame", "--porcelain", "-M", &head.to_string(), "--", path])
+        // The plain file, as libgit2 would blame it: no textconv programs, and
+        // nothing the repository's config would start (core.fsmonitor).
+        .args(["-c", "core.fsmonitor=false", "blame", "--porcelain", "--no-textconv", "-M", &head.to_string(), "--", path])
         .output()
         .ok()?;
     if !out.status.success() {

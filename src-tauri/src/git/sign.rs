@@ -252,6 +252,13 @@ pub struct Verification {
 
 /// Check a commit's signature; None when it isn't signed.
 pub fn verify(repo_path: &str, id: &str) -> Result<Option<Verification>> {
+    let own = git2::Config::open_default().and_then(|mut c| c.snapshot())?;
+    verify_with(repo_path, id, &own)
+}
+
+/// `verify`, with `own` standing for your global and system git settings.
+#[doc(hidden)]
+pub fn verify_with(repo_path: &str, id: &str, own: &git2::Config) -> Result<Option<Verification>> {
     let repo = open(repo_path)?;
     let oid = super::oid(id)?;
     let Ok((sig, data)) = repo.extract_signature(&oid, None) else { return Ok(None) };
@@ -264,7 +271,23 @@ pub fn verify(repo_path: &str, id: &str) -> Result<Option<Verification>> {
     } else {
         Format::Gpg
     };
-    let prog = program(&cfg, format);
+    // Checking runs on its own whenever a signed commit is shown, so the
+    // program comes from your own (global or system) settings only: a
+    // repository's config can't make Arbor run something just by being
+    // looked at. One that names a different program isn't checked.
+    let prog = program(own, format);
+    let wanted = program(&cfg, format);
+    if wanted != prog {
+        return Ok(Some(Verification {
+            format: format.name().into(),
+            status: "error".into(),
+            signer: None,
+            key: None,
+            detail: format!(
+                "Not checked: this repository's settings name their own program for checking signatures ({wanted}), and Arbor only runs the one from your own git settings ({prog}). Run `git verify-commit` to check it yourself."
+            ),
+        }));
+    }
     let dir = tempfile::tempdir()?;
     let sig_file = dir.path().join("commit.sig");
     std::fs::write(&sig_file, &sig)?;

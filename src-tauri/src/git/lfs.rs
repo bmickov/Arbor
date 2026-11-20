@@ -29,30 +29,17 @@ fn run(repo: &Repository, args: &[&str]) -> Result<String> {
 }
 
 /// The repository uses LFS: some .gitattributes line says filter=lfs.
+/// Checked on every refresh, so it looks at the top-level file and the
+/// tracked ones (from the index) rather than walking folders, which took
+/// tens of milliseconds in a big working tree.
 pub fn used(repo: &Repository) -> bool {
     let Some(root) = repo.workdir() else { return false };
     let check = |p: &Path| std::fs::read_to_string(p).map(|s| s.contains("filter=lfs")).unwrap_or(false);
     if check(&root.join(".gitattributes")) {
         return true;
     }
-    // Nested .gitattributes files, a couple of levels down.
-    let mut dirs = vec![(root.to_path_buf(), 0)];
-    while let Some((d, depth)) = dirs.pop() {
-        let Ok(rd) = std::fs::read_dir(&d) else { continue };
-        for e in rd.flatten() {
-            let p = e.path();
-            let name = e.file_name();
-            if name == ".git" || name == "node_modules" || name == "target" {
-                continue;
-            }
-            if p.is_dir() && depth < 2 {
-                dirs.push((p, depth + 1));
-            } else if name == ".gitattributes" && check(&p) {
-                return true;
-            }
-        }
-    }
-    false
+    let Ok(index) = repo.index() else { return false };
+    index.iter().any(|e| e.path.ends_with(b"/.gitattributes") && super::in_workdir(root, &String::from_utf8_lossy(&e.path)).is_ok_and(|p| check(&p)))
 }
 
 pub fn installed() -> bool {
@@ -181,6 +168,9 @@ pub fn track(repo_path: &str, pattern: &str, untrack: bool) -> Result<()> {
     if !untrack {
         // Make sure the LFS filters are set up for this user.
         let _ = run(&repo, &["lfs", "install", "--local"]);
+    }
+    if pattern.starts_with('-') {
+        return err("A pattern can't start with \"-\".");
     }
     run(&repo, &["lfs", if untrack { "untrack" } else { "track" }, pattern])?;
     Ok(())

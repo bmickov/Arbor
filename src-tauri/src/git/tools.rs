@@ -150,10 +150,11 @@ fn temp_copy(dir: &Path, path: &str, label: &str, bytes: &[u8]) -> Result<PathBu
     Ok(p)
 }
 
+/// A new private folder for a tool's copies (made with a random name and
+/// only its owner's access, so nobody else can plant or swap files there).
+/// It's kept: the diff tool goes on reading it after Arbor returns.
 fn temp_dir() -> Result<PathBuf> {
-    let d = std::env::temp_dir().join(format!("arbor-tool-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
-    std::fs::create_dir_all(&d)?;
-    Ok(d)
+    Ok(tempfile::Builder::new().prefix("arbor-tool-").tempdir()?.keep())
 }
 
 /// Open the change to `path` in a diff tool. `area`: "unstaged" (index ↔
@@ -171,6 +172,7 @@ pub fn diff(repo_path: &str, path: &str, area: &str, tool: &str, custom: &str) -
                 c.arg("--cached");
             }
             commit => {
+                super::oid(commit)?;
                 c.arg(format!("{commit}^!"));
             }
         }
@@ -182,7 +184,7 @@ pub fn diff(repo_path: &str, path: &str, area: &str, tool: &str, custom: &str) -
     let (local, mut remote) = match area {
         "unstaged" => {
             let old = index_blob(&repo, path, 0).or_else(|| blob_at(&repo, "HEAD", path)).unwrap_or_default();
-            (temp_copy(&dir, path, "INDEX", &old)?, root.join(path))
+            (temp_copy(&dir, path, "INDEX", &old)?, super::in_workdir(&root, path)?)
         }
         "staged" => {
             let old = blob_at(&repo, "HEAD", path).unwrap_or_default();
@@ -218,7 +220,7 @@ pub struct MergeResult {
 pub fn merge(repo_path: &str, path: &str, tool: &str, custom: &str) -> Result<MergeResult> {
     let repo = open(repo_path)?;
     let root = repo.workdir().map(Path::to_path_buf).unwrap_or_default();
-    let merged = root.join(path);
+    let merged = super::in_workdir(&root, path)?;
     if tool == "git" {
         let st = quiet_command("git")
             .current_dir(&root)

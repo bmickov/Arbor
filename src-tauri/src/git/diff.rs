@@ -326,7 +326,8 @@ pub fn file_at(repo_path: &str, rev: Option<&str>, path: &str) -> Result<Option<
     let repo = open(repo_path)?;
     match rev {
         None => {
-            let full = repo.workdir().unwrap().join(path);
+            let Some(root) = repo.workdir() else { return Ok(None) };
+            let full = super::in_workdir(root, path)?;
             Ok(std::fs::read(full).ok())
         }
         Some(r) => {
