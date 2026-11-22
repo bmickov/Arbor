@@ -53,7 +53,7 @@
       { label: "New branch here…", hint: x.lost ? "recovers it" : undefined, action: () => act.newBranch(x.oid, x.short) },
       { label: "Check out this commit", action: () => app.act("Checking out", () => api.checkoutCommit(app.path, x.oid), { success: `Checked out ${x.short} (detached).` }) },
       { label: `Cherry-pick into ${app.headBranch ?? "HEAD"}`, action: () => act.cherryPick(x.oid) },
-      { label: `Reset ${app.headBranch ?? "HEAD"} to here…`, action: () => act.resetTo(x) },
+      { label: `Reset ${app.headBranch ?? "HEAD"} to here…`, disabled: x.oid === app.status?.head, hint: x.oid === app.status?.head ? "already here" : undefined, action: () => act.resetTo(x) },
       { separator: true },
       { label: "Show in history", disabled: x.lost, action: () => act.selectCommit(x.oid) },
       { label: "Copy commit ID", action: () => navigator.clipboard.writeText(x.oid) },
@@ -97,7 +97,7 @@
           {#snippet header()}
             <div class="actions">
               <button class="btn small" class:primary={sel.lost} onclick={() => act.newBranch(sel.oid, sel.short)}><Icon name="branch" size={13} /> {sel.lost ? "Recover as new branch…" : "New branch here…"}</button>
-              <button class="btn small" onclick={() => act.resetTo(sel)}>Reset {app.headBranch ?? "HEAD"} to here…</button>
+              <button class="btn small" disabled={sel.oid === app.status?.head} title={sel.oid === app.status?.head ? `${app.headBranch ?? "HEAD"} is already here` : undefined} onclick={() => act.resetTo(sel)}>Reset {app.headBranch ?? "HEAD"} to here…</button>
               {#if !sel.lost}<button class="btn small ghost" onclick={() => act.selectCommit(sel.oid)}>Show in history</button>{/if}
             </div>
           {/snippet}

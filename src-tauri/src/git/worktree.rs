@@ -46,8 +46,13 @@ fn main_workdir(repo: &Repository) -> Option<PathBuf> {
 fn describe(path: &Path, name: Option<String>, is_main: bool, here: &Path) -> WorktreeInfo {
     let wt = Repository::open(path).ok();
     let head = wt.as_ref().and_then(|r| r.head().ok()).and_then(|h| h.peel_to_commit().ok());
+    let is_current = same(path, here);
+    // Changes are counted for the other linked worktrees only: the main one
+    // isn't listed with a count, and this one's changes are already shown.
+    // (A status of a big working tree takes a while; this runs on refresh.)
     let changes = wt
         .as_ref()
+        .filter(|_| !is_main && !is_current)
         .and_then(|r| {
             let mut o = git2::StatusOptions::new();
             o.include_untracked(false).exclude_submodules(true);
@@ -61,7 +66,7 @@ fn describe(path: &Path, name: Option<String>, is_main: bool, here: &Path) -> Wo
         head: head.as_ref().map(|c| short(c.id())),
         summary: head.as_ref().map(super::summary).unwrap_or_default(),
         is_main,
-        is_current: same(path, here),
+        is_current,
         changes,
         locked: None,
         missing: !path.exists(),

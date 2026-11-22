@@ -4,7 +4,7 @@
   import { api, type Blame, type FileDiff, type FileHistoryEntry } from "../lib/api";
   import { authorHue, basename, fullDate, initials, relTime } from "../lib/format";
   import { app } from "../lib/state.svelte";
-  import { toasts } from "../lib/ui.svelte";
+  import { dialog, menu, toasts } from "../lib/ui.svelte";
   import DiffView from "./DiffView.svelte";
   import Icon from "./Icon.svelte";
 
@@ -60,8 +60,13 @@
     return out;
   });
 
+  // Escape closes it wherever the focus is (it opens from a menu, which
+  // leaves the focus behind it); menus and dialogs on top take theirs first.
   function key(e: KeyboardEvent) {
-    if (e.key === "Escape") onclose();
+    if (e.key === "Escape" && !e.defaultPrevented && !menu.items.length && !dialog.spec) {
+      e.preventDefault();
+      onclose();
+    }
   }
   // A long file's blame is put on screen a slice at a time.
   const blameProg = new Progressive(1000);
@@ -71,8 +76,9 @@
   });
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="backdrop" onkeydown={key} onclick={(e) => e.target === e.currentTarget && onclose()}>
+<svelte:window onkeydown={key} />
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+<div class="backdrop" onclick={(e) => e.target === e.currentTarget && onclose()}>
   <div class="drawer" role="dialog" aria-modal="true" aria-label="History of {path}">
     <header>
       <Icon name="file" />

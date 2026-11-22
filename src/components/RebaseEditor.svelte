@@ -3,7 +3,7 @@
   import * as act from "../lib/actions";
   import { draggable, dropTarget } from "../lib/drag.svelte";
   import { app } from "../lib/state.svelte";
-  import { dialog, toasts } from "../lib/ui.svelte";
+  import { dialog, menu, toasts } from "../lib/ui.svelte";
   import Icon from "./Icon.svelte";
 
   let { from, onclose }: { from: CommitRow; onclose: () => void } = $props();
@@ -76,13 +76,19 @@
     }
   }
 
+  // Escape closes it wherever the focus is (it opens from a menu, which
+  // leaves the focus behind it); menus and dialogs on top take theirs first.
   function key(e: KeyboardEvent) {
-    if (e.key === "Escape") onclose();
+    if (e.key === "Escape" && !e.defaultPrevented && !menu.items.length && !dialog.spec) {
+      e.preventDefault();
+      onclose();
+    }
   }
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="backdrop" onkeydown={key}>
+<svelte:window onkeydown={key} />
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+<div class="backdrop">
   <div class="panel" role="dialog" aria-modal="true" aria-labelledby="rb-title">
     <header>
       <h2 id="rb-title">Rewrite history</h2>

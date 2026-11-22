@@ -33,6 +33,17 @@ fn bench() {
     time("commit_info", || git::log::commit_info(p, &head));
     time("commit_files", || git::diff::commit_files(p, &head));
     time("file_history 300", || git::log::file_history(p, &file, 300));
+    // Same commits as git finds (several threads look paths up).
+    for f in [&file, &git::tree::tracked_files(p).unwrap()[3]] {
+        let ours: Vec<String> = git::log::file_history(p, f, 100_000).unwrap().into_iter().map(|e| e.commit.oid).collect();
+        let out = std::process::Command::new("git").args(["-C", p, "log", "--format=%H", "--", f]).output().unwrap();
+        let theirs: Vec<String> = String::from_utf8(out.stdout).unwrap().lines().map(str::to_string).collect();
+        let (mut a, mut b) = (ours.clone(), theirs.clone());
+        a.sort();
+        b.sort();
+        assert_eq!(a, b, "{f}");
+        println!("file history of {f}: {} commits, same as git", ours.len());
+    }
     time("blame", || git::blame::blame(p, &file));
     time("tree_at HEAD", || git::tree::tree_at(p, "HEAD"));
     time("tracked_files", || git::tree::tracked_files(p));
@@ -51,6 +62,52 @@ fn bench() {
     time("commit_file listed", || git::diff::commit_file_listed(p, &head, &first.path, first.old_path.as_deref(), true, ds()));
     time("commit_view", || git::log::commit_view(p, &head, None, ds()));
     time("commit_message", || git::log::commit_message(p, &head));
+    time("revwalk all topo (floor)", || {
+        let repo = git::open(p).unwrap();
+        let mut w = repo.revwalk().unwrap();
+        w.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME).unwrap();
+        w.push_glob("*").unwrap();
+        let n = w.count();
+        Ok::<_, git2::Error>(n)
+    });
+    time("walk + commit + parent", || {
+        let repo = git::open(p).unwrap();
+        let mut w = repo.revwalk().unwrap();
+        w.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME).unwrap();
+        w.push_head().unwrap();
+        let mut n = 0;
+        for id in w {
+            let c = repo.find_commit(id.unwrap()).unwrap();
+            if let Ok(pc) = c.parent(0) { n += pc.tree_id().as_bytes()[0] as usize; }
+        }
+        Ok::<_, git2::Error>(n)
+    });
+    time("walk + root + src trees", || {
+        let repo = git::open(p).unwrap();
+        let mut w = repo.revwalk().unwrap();
+        w.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME).unwrap();
+        w.push_head().unwrap();
+        let mut n = 0;
+        for id in w {
+            let c = repo.find_commit(id.unwrap()).unwrap();
+            let t = c.tree().unwrap();
+            let src = repo.find_tree(t.get_name("src").unwrap().id()).unwrap();
+            n += src.len();
+        }
+        Ok::<_, git2::Error>(n)
+    });
+    time("revwalk + find_commit + tree", || {
+        let repo = git::open(p).unwrap();
+        let mut w = repo.revwalk().unwrap();
+        w.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME).unwrap();
+        w.push_glob("*").unwrap();
+        let mut n = 0;
+        for id in w {
+            let c = repo.find_commit(id.unwrap()).unwrap();
+            n += c.tree().unwrap().len();
+        }
+        Ok::<_, git2::Error>(n)
+    });
 }
 
 #[test]

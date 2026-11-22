@@ -4,7 +4,6 @@ use super::{oid, open, short, Result};
 use git2::{DiffFindOptions, Oid, Repository, Sort};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -474,23 +473,33 @@ pub fn file_history(repo_path: &str, path: &str, limit: usize) -> Result<Vec<Fil
         return Ok(vec![]);
     }
     let labels = ref_labels(&repo)?;
+    let ids: Vec<Oid> = walk.collect::<std::result::Result<_, _>>()?;
     let mut current = path.to_string();
+    let mut trail = PathTrail::new(&repo, &current);
     let mut out = vec![];
-    for id in walk {
-        let id = id?;
-        let c = repo.find_commit(id)?;
-        let tree = c.tree()?;
-        let parent_tree = if c.parent_count() > 0 { Some(c.parent(0)?.tree()?) } else { None };
-        let (entry, parent_entry) = match &parent_tree {
-            Some(pt) => match path_ids(&repo, &tree, pt, &current)? {
-                PathIds::Same => continue,
-                PathIds::Differ(new, old) => (new, old),
-            },
-            None => (tree.get_path(Path::new(&current)).ok().map(|e| e.id()), None),
+    let (mut batch, mut batch_from): (Vec<Lookup>, usize) = (vec![], 0);
+    for (k, &id) in ids.iter().enumerate() {
+        // The path's ids in each commit and its parents, worked out a batch
+        // at a time on several threads (reading trees is most of the work).
+        // After a rename the older path is looked up here, as it comes.
+        let look = if current == path {
+            if !(batch_from..batch_from + batch.len()).contains(&k) {
+                batch_from = k;
+                batch = lookups(repo_path, &ids[k..ids.len().min(k + LOOKUP_BATCH)], path, false)?;
+            }
+            std::mem::take(&mut batch[k - batch_from])
+        } else {
+            lookup(&repo, &mut trail, id, false)?
         };
-        if entry.is_none() {
+        let Some(entry) = look.entry else { continue };
+        // Unchanged from the first parent; or a merge that took the file as
+        // it was on another parent (as git log shows it: the change is on
+        // that side).
+        if look.parents.contains(&Some(entry)) {
             continue;
         }
+        let c = repo.find_commit(id)?;
+        let parent_entry = look.parents.first().copied().flatten();
         let author = c.author();
         out.push(FileHistoryEntry {
             commit: CommitRow {
@@ -511,8 +520,8 @@ pub fn file_history(repo_path: &str, path: &str, limit: usize) -> Result<Vec<Fil
         }
         // Added here: was it renamed from somewhere?
         if parent_entry.is_none() {
-            if let Some(pt) = &parent_tree {
-                let mut d = super::diff::diff_trees(&repo, Some(pt), &tree, &mut git2::DiffOptions::new())?;
+            if let Ok(p) = c.parent(0) {
+                let mut d = super::diff::diff_trees(&repo, Some(&p.tree()?), &c.tree()?, &mut git2::DiffOptions::new())?;
                 let mut f = DiffFindOptions::new();
                 f.renames(true);
                 d.find_similar(Some(&mut f))?;
@@ -522,9 +531,12 @@ pub fn file_history(repo_path: &str, path: &str, limit: usize) -> Result<Vec<Fil
                         .then(|| delta.old_file().path().map(|p| p.to_string_lossy().to_string()))
                         .flatten()
                 });
-                match renamed_from {
-                    Some(old) => current = old,
-                    None => break,
+                // Not renamed: keep going all the same. The file may have
+                // been deleted and added again, and commits on a branch
+                // merged later come after this in the walk.
+                if let Some(old) = renamed_from {
+                    current = old;
+                    trail = PathTrail::new(&repo, &current);
                 }
             }
         }
@@ -532,39 +544,95 @@ pub fn file_history(repo_path: &str, path: &str, limit: usize) -> Result<Vec<Fil
     Ok(out)
 }
 
-enum PathIds {
-    /// The path is the same in both trees (or missing from both).
-    Same,
-    /// It differs: its id in the first tree and in the second.
-    Differ(Option<Oid>, Option<Oid>),
+/// A path's id in a commit (None: not there) and in each of its parents.
+#[derive(Default, Clone)]
+struct Lookup {
+    entry: Option<Oid>,
+    parents: Vec<Option<Oid>>,
 }
 
-/// Compare `path` in two trees from the top down, stopping at the first
-/// folder that's identical in both. Most commits leave most folders alone,
-/// so this rarely has to look at the file itself.
-fn path_ids(repo: &Repository, a: &git2::Tree, b: &git2::Tree, path: &str) -> Result<PathIds> {
-    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    let (mut ta, mut tb) = (a.clone(), b.clone());
-    for (i, part) in parts.iter().enumerate() {
-        let ea = ta.get_name(part).map(|e| (e.id(), e.kind()));
-        let eb = tb.get_name(part).map(|e| (e.id(), e.kind()));
-        match (ea, eb) {
-            (None, None) => return Ok(PathIds::Same),
-            (Some((x, _)), Some((y, _))) if x == y => return Ok(PathIds::Same),
-            _ if i + 1 == parts.len() => return Ok(PathIds::Differ(ea.map(|e| e.0), eb.map(|e| e.0))),
-            (Some((x, Some(git2::ObjectType::Tree))), Some((y, Some(git2::ObjectType::Tree)))) => {
-                ta = repo.find_tree(x)?;
-                tb = repo.find_tree(y)?;
-            }
-            // A folder on one side only (or not a folder): look the rest up directly.
-            _ => {
-                let full = |t: &git2::Tree| t.get_path(Path::new(path)).ok().map(|e| e.id());
-                let (x, y) = (full(a), full(b));
-                return Ok(if x == y { PathIds::Same } else { PathIds::Differ(x, y) });
+const LOOKUP_BATCH: usize = 8192;
+
+/// `always`: look in the parents even where the path isn't in the commit
+/// (to see deletions); else they're skipped there.
+fn lookup(repo: &Repository, trail: &mut PathTrail, id: Oid, always: bool) -> Result<Lookup> {
+    let c = repo.find_commit(id)?;
+    let entry = trail.id_in(c.tree_id())?;
+    let mut parents = vec![];
+    if always || entry.is_some() {
+        for p in c.parent_ids() {
+            parents.push(trail.id_in(repo.find_commit(p)?.tree_id())?);
+            // Same as the first parent: the others don't matter.
+            if parents[0] == entry {
+                break;
             }
         }
     }
-    Ok(PathIds::Same)
+    Ok(Lookup { entry, parents })
+}
+
+/// `lookup` for many commits, split over a few threads (each with its own
+/// repository handle) when there are enough to be worth it.
+fn lookups(repo_path: &str, ids: &[Oid], path: &str, always: bool) -> Result<Vec<Lookup>> {
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let threads = if ids.len() < 2000 { 1 } else { cpus.clamp(1, 8) };
+    let run = |part: &[Oid]| -> Result<Vec<Lookup>> {
+        let repo = super::open_for_reading(repo_path)?;
+        let mut trail = PathTrail::new(&repo, path);
+        part.iter().map(|&id| lookup(&repo, &mut trail, id, always)).collect()
+    };
+    if threads == 1 {
+        return run(ids);
+    }
+    std::thread::scope(|s| {
+        let parts: Vec<_> = ids.chunks(ids.len().div_ceil(threads)).map(|part| s.spawn(move || run(part))).collect();
+        let mut out = Vec::with_capacity(ids.len());
+        for h in parts {
+            out.extend(h.join().map_err(|_| super::Error::Msg("Reading the history failed.".into()))??);
+        }
+        Ok(out)
+    })
+}
+
+/// Looks one path up in many trees, as when going through history. Most
+/// folders along the path are the same from one commit to the next (same
+/// id), so what each folder holds for the path is remembered and each is
+/// read once, rather than twice per commit.
+struct PathTrail<'r> {
+    repo: &'r Repository,
+    parts: Vec<String>,
+    /// (folder id, depth) → the next entry along the path: its id and
+    /// whether it's a folder.
+    memo: HashMap<(Oid, usize), Option<(Oid, bool)>>,
+}
+
+impl<'r> PathTrail<'r> {
+    fn new(repo: &'r Repository, path: &str) -> Self {
+        PathTrail { repo, parts: path.split('/').filter(|s| !s.is_empty()).map(str::to_string).collect(), memo: HashMap::new() }
+    }
+
+    /// The id of the path's file or folder in the tree `root` (None: not there).
+    fn id_in(&mut self, root: Oid) -> Result<Option<Oid>> {
+        let mut id = root;
+        for i in 0..self.parts.len() {
+            let next = match self.memo.get(&(id, i)) {
+                Some(v) => *v,
+                None => {
+                    let tree = self.repo.find_tree(id)?;
+                    let v = tree.get_name(&self.parts[i]).map(|e| (e.id(), e.kind() == Some(git2::ObjectType::Tree)));
+                    self.memo.insert((id, i), v);
+                    v
+                }
+            };
+            match next {
+                None => return Ok(None),
+                Some((child, _)) if i + 1 == self.parts.len() => return Ok(Some(child)),
+                Some((child, true)) => id = child,
+                Some((_, false)) => return Ok(None),
+            }
+        }
+        Ok(Some(id))
+    }
 }
 
 // ---- Searching the whole history ----
@@ -641,18 +709,40 @@ pub fn search(repo_path: &str, scope: &str, f: &LogFilter, limit: usize) -> Resu
     let path = nonempty(&f.path).map(|p| p.trim_matches('/').to_string());
     let contains = nonempty(&f.contains).map(|s| s.as_bytes().to_vec());
     let labels = ref_labels(&repo)?;
+    // (Not where paths ignore case, as on macOS and Windows: "Src" finds "src" there.)
+    let ignore_case = repo.config().and_then(|c| c.get_bool("core.ignorecase")).unwrap_or(false);
+    let plain = path.as_deref().filter(|p| !ignore_case && !p.contains(['*', '?', '[']));
+    let mut trail = plain.map(|p| PathTrail::new(&repo, p));
+    // Only a path (or changed text) to look for: look it up in every commit,
+    // a batch at a time on several threads, as for a file's history.
+    let ahead = plain.filter(|_| text.is_none() && author.is_none());
+    let ids: Vec<Oid> = walk.collect::<std::result::Result<_, _>>()?;
+    let (mut batch, mut batch_from): (Vec<Lookup>, usize) = (vec![], 0);
     // Searching inside changes is slow on huge histories; give up after a while.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let mut rows = vec![];
     let mut scanned = 0;
     let mut more = false;
-    for id in walk {
-        let id = id?;
+    for (k, &id) in ids.iter().enumerate() {
         if rows.len() >= limit || std::time::Instant::now() > deadline {
             more = true;
             break;
         }
         scanned += 1;
+        let changed = match ahead {
+            Some(p) => {
+                if !(batch_from..batch_from + batch.len()).contains(&k) {
+                    batch_from = k;
+                    batch = lookups(repo_path, &ids[k..ids.len().min(k + LOOKUP_BATCH)], p, true)?;
+                }
+                let l = &batch[k - batch_from];
+                if l.entry == l.parents.first().copied().flatten() {
+                    continue;
+                }
+                true
+            }
+            None => false,
+        };
         let c = repo.find_commit(id)?;
         let a = c.author();
         let when = a.when().seconds();
@@ -673,15 +763,29 @@ pub fn search(repo_path: &str, scope: &str, f: &LogFilter, limit: usize) -> Resu
             }
         }
         if path.is_some() || contains.is_some() {
-            let tree = c.tree()?;
-            let parent = c.parent(0).ok().map(|p| p.tree()).transpose()?;
-            // A plain path (no wildcards; a file or a folder) is ruled out
-            // cheaply first: an unchanged folder has the same id.
-            if let (Some(p), Some(pt)) = (&path, &parent) {
-                if !p.contains(['*', '?', '[']) && matches!(path_ids(&repo, &tree, pt, p)?, PathIds::Same) {
+            // A plain path (no wildcards; a file or a folder) is settled by
+            // comparing its id with the parent's: equal means unchanged,
+            // different means changed. That's all a search by path needs.
+            if changed && contains.is_none() {
+                push_row(&mut rows, &c, &labels);
+                continue;
+            }
+            if let Some(t) = trail.as_mut().filter(|_| !changed) {
+                let mine = t.id_in(c.tree_id())?;
+                let theirs = match c.parent(0) {
+                    Ok(p) => t.id_in(p.tree_id())?,
+                    Err(_) => None,
+                };
+                if mine == theirs {
+                    continue;
+                }
+                if contains.is_none() {
+                    push_row(&mut rows, &c, &labels);
                     continue;
                 }
             }
+            let tree = c.tree()?;
+            let parent = c.parent(0).ok().map(|p| p.tree()).transpose()?;
             let mut opts = git2::DiffOptions::new();
             if let Some(p) = &path {
                 opts.pathspec(p);
@@ -701,17 +805,22 @@ pub fn search(repo_path: &str, scope: &str, f: &LogFilter, limit: usize) -> Resu
                 }
             }
         }
-        rows.push(CommitRow {
-            oid: id.to_string(),
-            short: short(id),
-            summary: super::summary(&c),
-            author: name.to_string(),
-            email: email.to_string(),
-            time: when,
-            parents: c.parent_ids().map(|p| p.to_string()).collect(),
-            refs: labels.get(&id).cloned().unwrap_or_default(),
-            graph: GraphRow { col: 0, color: 0, width: 0, segs: vec![] },
-        });
+        push_row(&mut rows, &c, &labels);
     }
     Ok(SearchResult { rows, scanned, more })
+}
+
+fn push_row(rows: &mut Vec<CommitRow>, c: &git2::Commit, labels: &HashMap<Oid, Vec<RefLabel>>) {
+    let a = c.author();
+    rows.push(CommitRow {
+        oid: c.id().to_string(),
+        short: short(c.id()),
+        summary: super::summary(c),
+        author: a.name().unwrap_or("").to_string(),
+        email: a.email().unwrap_or("").to_string(),
+        time: a.when().seconds(),
+        parents: c.parent_ids().map(|p| p.to_string()).collect(),
+        refs: labels.get(&c.id()).cloned().unwrap_or_default(),
+        graph: GraphRow { col: 0, color: 0, width: 0, segs: vec![] },
+    });
 }

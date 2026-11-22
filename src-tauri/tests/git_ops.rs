@@ -2401,3 +2401,78 @@ fn log_depth_says_how_much_history_to_load() {
     assert_eq!(git::log::log_depth(&r.path, "main", &side, 1000).unwrap(), None, "not on main");
     assert_eq!(git::log::log_depth(&r.path, "all", &oldest, 5).unwrap(), None, "deeper than asked");
 }
+
+#[test]
+fn search_by_path_matches_git_log() {
+    let r = Repo::new();
+    r.write("src/a/one.txt", "1\n");
+    r.write("src/b/two.txt", "2\n");
+    r.write("docs/readme.md", "r\n");
+    r.commit_all("first");
+    r.write("src/a/one.txt", "1.1\n");
+    r.commit_all("edit one");
+    r.write("docs/readme.md", "r2\n");
+    r.commit_all("docs only");
+    std::fs::remove_file(Path::new(&r.path).join("src/b/two.txt")).unwrap();
+    r.commit_all("remove two");
+    r.write("src/b/two.txt", "back\n");
+    r.write("src/a/deeper/x.txt", "x\n");
+    r.commit_all("two back, x");
+    // A file that becomes a folder.
+    r.write("thing", "file\n");
+    r.commit_all("thing file");
+    std::fs::remove_file(Path::new(&r.path).join("thing")).unwrap();
+    r.write("thing/inside.txt", "folder\n");
+    r.commit_all("thing folder");
+    for p in ["src", "src/a", "src/a/one.txt", "src/b/two.txt", "src/a/deeper", "docs", "thing", "nope", "src/a/"] {
+        let found = git::log::search(&r.path, "all", &serde_json::from_str(&format!(r#"{{"path":"{p}"}}"#)).unwrap(), 100).unwrap();
+        let mut got: Vec<String> = found.rows.iter().map(|c| c.summary.clone()).collect();
+        let mut want: Vec<String> = r.git(&["log", "--all", "--format=%s", "--", p.trim_end_matches('/')]).lines().map(str::to_string).collect();
+        got.sort();
+        want.sort();
+        assert_eq!(got, want, "path {p}");
+    }
+}
+
+#[test]
+fn file_history_matches_git_log() {
+    let r = Repo::new();
+    r.write("a/b/c.txt", "1\n");
+    r.write("other.txt", "o\n");
+    r.commit_all("add");
+    for i in 2..6 {
+        r.write("other.txt", &format!("o{i}\n"));
+        r.commit_all(&format!("other {i}"));
+        r.write("a/b/c.txt", &format!("{i}\n"));
+        r.commit_all(&format!("c {i}"));
+    }
+    std::fs::remove_file(Path::new(&r.path).join("a/b/c.txt")).unwrap();
+    r.commit_all("remove c");
+    r.write("a/b/c.txt", "again\n");
+    r.commit_all("c again");
+    let h: Vec<String> = git::log::file_history(&r.path, "a/b/c.txt", 50).unwrap().into_iter().map(|e| e.commit.summary).collect();
+    let want: Vec<String> = r.git(&["log", "--format=%s", "--", "a/b/c.txt"]).lines().map(str::to_string).collect();
+    // The removal isn't a version of the file; its earlier life is shown too, like git does.
+    assert_eq!(h, want.into_iter().filter(|s| s != "remove c").collect::<Vec<_>>());
+    let h2: Vec<String> = git::log::file_history(&r.path, "other.txt", 50).unwrap().into_iter().map(|e| e.commit.summary).collect();
+    let want2: Vec<String> = r.git(&["log", "--format=%s", "--", "other.txt"]).lines().map(str::to_string).collect();
+    assert_eq!(h2, want2);
+}
+
+#[test]
+fn file_history_includes_the_branch_a_file_came_from() {
+    let r = Repo::new();
+    r.write("base.txt", "b\n");
+    r.commit_all("base");
+    r.git(&["checkout", "-qb", "feature"]);
+    r.write("feat.txt", "1\n");
+    r.commit_all("feat add");
+    r.write("feat.txt", "2\n");
+    r.commit_all("feat edit");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("base.txt", "b2\n");
+    r.commit_all("main edit");
+    r.git(&["merge", "-q", "--no-ff", "--no-edit", "feature"]);
+    let h: Vec<String> = git::log::file_history(&r.path, "feat.txt", 50).unwrap().into_iter().map(|e| e.commit.summary).collect();
+    assert_eq!(h, vec!["feat edit", "feat add"], "the merge only brought it over");
+}

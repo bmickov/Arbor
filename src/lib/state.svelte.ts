@@ -423,7 +423,9 @@ class App {
     this.scope = t?.scope ?? "all";
     this.log = d?.log ?? [];
     this.logMore = d?.logMore ?? false;
-    this.logLimit = t?.logLimit ?? 2000;
+    // A long history loaded to show an old commit isn't loaded again on the
+    // next start (every refresh that touches a branch would reload it all).
+    this.logLimit = d ? (t?.logLimit ?? 2000) : Math.min(t?.logLimit ?? 2000, 10000);
     this.selectedCommit = t?.selectedCommit ?? null;
     this.selectedStash = t?.selectedStash ?? null;
     this.selectedFile = t?.selectedFile ?? null;
@@ -750,6 +752,7 @@ class App {
       this.scope = scope;
       this.historyAnchor = null;
       this.historyScroll = 0;
+      this.logLimit = 2000;
     }
     await this.loadLog();
     if (this.scope !== scope) return;

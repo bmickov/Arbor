@@ -5,7 +5,7 @@
   import { api, type ConfigEntry, type RemoteInfo } from "../lib/api";
   import * as act from "../lib/actions";
   import { app } from "../lib/state.svelte";
-  import { dialog, toasts } from "../lib/ui.svelte";
+  import { dialog, menu, toasts } from "../lib/ui.svelte";
   import Icon from "./Icon.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -97,16 +97,19 @@
     else loadConfig();
   });
 
+  // Escape closes it wherever the focus is (it opens from a menu, which
+  // leaves the focus behind it); menus and dialogs on top take theirs first.
   function key(e: KeyboardEvent) {
-    if (e.key === "Escape") {
-      e.stopPropagation();
+    if (e.key === "Escape" && !e.defaultPrevented && !menu.items.length && !dialog.spec) {
+      e.preventDefault();
       onclose();
     }
   }
 </script>
 
+<svelte:window onkeydown={key} />
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-<div class="backdrop" onkeydown={key} onclick={(e) => e.target === e.currentTarget && onclose()}>
+<div class="backdrop" onclick={(e) => e.target === e.currentTarget && onclose()}>
   <div class="box" role="dialog" aria-modal="true" aria-labelledby="rs-title">
     <nav>
       <h2 id="rs-title">Repository</h2>
