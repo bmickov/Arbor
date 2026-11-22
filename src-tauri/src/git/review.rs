@@ -306,7 +306,7 @@ fn compare_diff<'a>(repo: &'a Repository, base: Oid, target: Oid, s: super::diff
     let old = repo.find_commit(from)?.tree()?;
     let new = repo.find_commit(target)?.tree()?;
     let mut o = super::diff::options(s);
-    let mut d = repo.diff_tree_to_tree(Some(&old), Some(&new), Some(&mut o))?;
+    let mut d = super::diff::diff_trees(repo, Some(&old), &new, &mut o)?;
     let mut f = git2::DiffFindOptions::new();
     f.renames(true);
     d.find_similar(Some(&mut f))?;
@@ -314,7 +314,7 @@ fn compare_diff<'a>(repo: &'a Repository, base: Oid, target: Oid, s: super::diff
 }
 
 pub fn compare(repo_path: &str, base: &str, target: &str) -> Result<Comparison> {
-    let repo = open(repo_path)?;
+    let repo = super::open_for_reading(repo_path)?;
     let b = super::branches::resolve(&repo, base)?;
     let t = super::branches::resolve(&repo, target)?;
     if b == t {
@@ -341,7 +341,7 @@ pub fn compare(repo_path: &str, base: &str, target: &str) -> Result<Comparison> 
 
 /// One file's diff within a comparison.
 pub fn compare_file(repo_path: &str, base: &str, target: &str, path: &str, s: super::diff::DiffSettings) -> Result<Option<super::diff::FileDiff>> {
-    let repo = open(repo_path)?;
+    let repo = super::open_for_reading(repo_path)?;
     let b = super::branches::resolve(&repo, base)?;
     let t = super::branches::resolve(&repo, target)?;
     let diff = compare_diff(&repo, b, t, s)?;

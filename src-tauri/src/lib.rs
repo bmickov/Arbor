@@ -228,9 +228,33 @@ async fn search_log(repo: String, scope: String, filter: git::log::LogFilter, li
 async fn commit_info(repo: String, oid: String) -> R<git::log::CommitInfo> {
     blocking(move || git::log::commit_info(&repo, &oid)).await
 }
+/// One file of a commit. `listed`: `path` and `old_path` are from the
+/// commit's file list, which lets only those files be compared.
 #[tauri::command]
-async fn commit_file_diff(repo: String, oid: String, path: String, settings: Option<DiffSettings>) -> R<Option<git::diff::FileDiff>> {
-    blocking(move || git::diff::commit_file(&repo, &oid, &path, settings.unwrap_or_default())).await
+async fn commit_file_diff(
+    repo: String,
+    oid: String,
+    path: String,
+    settings: Option<DiffSettings>,
+    old_path: Option<String>,
+    listed: Option<bool>,
+) -> R<Option<git::diff::FileDiff>> {
+    blocking(move || {
+        git::diff::commit_file_listed(&repo, &oid, &path, old_path.as_deref(), listed.unwrap_or(false), settings.unwrap_or_default())
+    })
+    .await
+}
+#[tauri::command]
+async fn commit_view(repo: String, oid: String, want: Option<String>, settings: Option<DiffSettings>) -> R<git::log::CommitView> {
+    blocking(move || git::log::commit_view(&repo, &oid, want.as_deref(), settings.unwrap_or_default())).await
+}
+#[tauri::command]
+async fn log_depth(repo: String, scope: String, oid: String) -> R<Option<usize>> {
+    blocking(move || git::log::log_depth(&repo, &scope, &oid, 500_000)).await
+}
+#[tauri::command]
+async fn commit_message(repo: String, oid: String) -> R<git::log::CommitMessage> {
+    blocking(move || git::log::commit_message(&repo, &oid)).await
 }
 #[tauri::command]
 async fn file_history(repo: String, path: String, limit: usize) -> R<Vec<git::log::FileHistoryEntry>> {
@@ -756,7 +780,7 @@ pub fn run() {
             commit, head_message, cherry_pick, revert_commit, reset_to,
             get_log, commit_info, tracked_files, reflog, branches_review, compare_branches, compare_file_diff,
             tree_at, file_content, export_zip, ignore_pattern, untrack_files, restore_file,
-            save_commit_patch, save_changes_patch, apply_patch, get_identity, set_identity, commit_template, commit_file_diff, file_history, blame,
+            save_commit_patch, save_changes_patch, apply_patch, get_identity, set_identity, commit_template, commit_file_diff, commit_view, commit_message, log_depth, file_history, blame,
             get_refs, checkout_branch, checkout_commit, checkout_remote, create_branch,
             delete_branch, delete_branches, unmerged_branches, rename_branch, set_upstream, create_tag, delete_tag,
             add_remote, remove_remote,

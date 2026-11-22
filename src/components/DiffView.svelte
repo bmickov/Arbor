@@ -180,6 +180,7 @@
 
   /** The line's HTML: syntax colours plus changed-word marks (null: plain text). */
   function render(h: number, l: number): string | null {
+    if (l >= 0 && !diff?.hunks[h]?.lines[l]) return null;
     const html = hl(h, l);
     if (!sides.words || l < 0 || diff!.hunks[h].lines[l].origin === " ") return html;
     const r = wordsOf(h).get(l);
@@ -297,8 +298,12 @@
   });
 </script>
 
+<!-- Snippets look lines up by index in the current diff: while one diff
+     replaces another, a row of the old one can be updated once more before
+     it's removed, with an index the new diff doesn't have. -->
 {#snippet head(h: number)}
-  {@const hunk = diff!.hunks[h]}
+  {@const hunk = diff?.hunks[h]}
+  {#if hunk}
   <div class="hunk-head">
     <span class="range">{hunk.header.replace(/^(@@[^@]*@@).*/, "$1")}</span>
     <span class="ctx">{hunk.header.replace(/^@@[^@]*@@\s?/, "")}</span>
@@ -310,10 +315,12 @@
       <button class="hbtn strong" onclick={() => fire("unstage", hunkSel(h))}><Icon name="minus" size={13} /> Unstage hunk</button>
     {/if}
   </div>
+  {/if}
 {/snippet}
 
 {#snippet line(h: number, l: number)}
-  {@const ln = diff!.hunks[h].lines[l]}
+  {@const ln = diff?.hunks[h]?.lines[l]}
+  {#if ln}
   {@const sel = selected.has(key(h, l))}
   {@const html = render(h, l)}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -325,6 +332,7 @@
     <span class="sign">{ln.origin === " " ? "" : ln.origin}</span>
     <span class="code">{#if html != null}{@html html}{:else}{ln.content}{/if}{#if !ln.nl}<span class="eof" title="No newline at end of file">⏎̸</span>{/if}</span>
   </div>
+  {/if}
 {/snippet}
 
 {#snippet sideCode(h: number, ln: DiffLine | null, i: number)}
@@ -332,13 +340,15 @@
   {#if html != null}{@html html}{:else}{ln?.content ?? ""}{/if}
 {/snippet}
 
-{#snippet pairRow(h: number, row: Row)}
+{#snippet pairRow(h: number, row: Row | undefined)}
+  {#if row}
   <div class="prow">
     <span class="no">{row.left?.oldNo ?? ""}</span>
     <span class="code {row.left ? (row.left.origin === '-' ? 'del' : '') : 'blank'}" title={row.left?.content}>{@render sideCode(h, row.left, row.li)}</span>
     <span class="no">{row.right?.newNo ?? ""}</span>
     <span class="code {row.right ? (row.right.origin === '+' ? 'add' : '') : 'blank'}" title={row.right?.content}>{@render sideCode(h, row.right, row.ri)}</span>
   </div>
+  {/if}
 {/snippet}
 
 <div class="wrap">
@@ -380,7 +390,7 @@
           {#if l < 0}
             {@render head(h)}
           {:else if layout.pairsOf}
-            {@render pairRow(h, layout.pairsOf[h][l])}
+            {@render pairRow(h, layout.pairsOf[h]?.[l])}
           {:else}
             {@render line(h, l)}
           {/if}

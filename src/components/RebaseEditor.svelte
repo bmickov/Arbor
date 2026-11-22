@@ -21,7 +21,7 @@
   $effect(() => {
     for (const it of items) {
       if (it.full) continue;
-      api.commitInfo(app.path, it.c.oid).then((info) => {
+      api.commitMessage(app.path, it.c.oid).then((info) => {
         it.full = info.body ? `${info.summary}\n\n${info.body}` : info.summary;
         if (it.action !== "reword") it.message = it.full;
       });

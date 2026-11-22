@@ -14,9 +14,9 @@
     {#if b.found}
       <div class="what">
         <b>Found the first bad commit</b>
-        <span><button class="sha mono" onclick={() => { if (b.found) app.reveal(b.found); app.view = "history"; }}>{b.found.slice(0, 7)}</button> {subject}</span>
+        <span><button class="sha mono" onclick={() => b.found && act.selectCommit(b.found)}>{b.found.slice(0, 7)}</button> {subject}</span>
       </div>
-      <button class="btn small" onclick={() => { if (b.found) app.reveal(b.found); app.view = "history"; }}>Show commit</button>
+      <button class="btn small" onclick={() => b.found && act.selectCommit(b.found)}>Show commit</button>
       <button class="btn small primary" onclick={act.bisectStop} disabled={!!app.busy}>Stop bisect</button>
     {:else if b.ambiguous.length}
       <div class="what">

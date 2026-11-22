@@ -47,6 +47,10 @@ fn bench() {
     time("stack list", || git::stack::list(p));
     time("worktree list", || git::worktree::list(p));
     time("commit_file", || git::diff::commit_file(p, &head, &git::diff::commit_files(p, &head).unwrap()[0].path, ds()));
+    let first = git::diff::commit_files(p, &head).unwrap()[0].clone();
+    time("commit_file listed", || git::diff::commit_file_listed(p, &head, &first.path, first.old_path.as_deref(), true, ds()));
+    time("commit_view", || git::log::commit_view(p, &head, None, ds()));
+    time("commit_message", || git::log::commit_message(p, &head));
 }
 
 #[test]

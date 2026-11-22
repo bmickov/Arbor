@@ -118,6 +118,20 @@ pub fn open(path: &str) -> Result<Repository> {
     Ok(Repository::open(path)?)
 }
 
+/// Open a repository to read commits with: its diffs look up attributes
+/// (binary files, diff drivers), which makes libgit2 load the whole index
+/// (several milliseconds in a big project, on every call) just for any
+/// `.gitattributes` in it. Here it gets an empty one instead; the
+/// `.gitattributes` files in the working tree still apply, as with git.
+/// Only for reading: nothing done with it may write the index.
+pub fn open_for_reading(path: &str) -> Result<Repository> {
+    let repo = Repository::open(path)?;
+    if !repo.is_bare() {
+        repo.set_index(&mut git2::Index::new()?)?;
+    }
+    Ok(repo)
+}
+
 pub fn oid(s: &str) -> Result<Oid> {
     Oid::from_str(s).map_err(|_| Error::Msg(format!("'{s}' is not a valid commit id")))
 }

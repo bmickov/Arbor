@@ -1,12 +1,35 @@
 <script lang="ts" module>
-  import type { Verification as V } from "../lib/api";
+  import type { CommitInfo as CI, FileDiff as FD, Verification as V } from "../lib/api";
   const verifications = new Map<string, V | null>();
+
+  // A commit never changes: what was loaded for one is kept for going back
+  // to it (the last few commits and diffs, small ones only).
+  const infos = new Map<string, CI>();
+  const diffs = new Map<string, FD | null>();
+  function keep<T>(m: Map<string, T>, k: string, v: T, max: number) {
+    m.delete(k);
+    m.set(k, v);
+    if (m.size > max) m.delete(m.keys().next().value!);
+  }
+  const lineCount = (d: FD | null) => (d ? d.hunks.reduce((n, h) => n + h.lines.length, 0) : 0);
+
+  // Arrow keys held down pass many commits a second: load only where they
+  // stop. A click (or a pause) loads straight away.
+  let lastMove = 0;
+  let movingFast = false;
+  function moving(): boolean {
+    const now = performance.now();
+    movingFast = now - lastMove < 120;
+    lastMove = now;
+    return movingFast;
+  }
 </script>
 
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { untrack } from "svelte";
   import * as act from "../lib/actions";
-  import { api, type CommitInfo, type FileDiff, type Verification } from "../lib/api";
+  import { api, type CommitInfo, type DiffSettings, type FileDiff, type Verification } from "../lib/api";
   import { authorHue, basename, dirname, fullDate, initials, STATUS_GLYPH } from "../lib/format";
   import { app } from "../lib/state.svelte";
   import { menu, toasts } from "../lib/ui.svelte";
@@ -20,7 +43,9 @@
 
   let { oid, header }: { oid: string; header?: Snippet } = $props();
 
-  let info = $state<CommitInfo | null>(null);
+  // The commit shown, and which commit id it was asked for by.
+  let info = $state.raw<CommitInfo | null>(null);
+  let infoFor = $state("");
   let file = $state<string | null>(null);
   let diff = $state.raw<FileDiff | null>(null);
   // Which file the shown diff belongs to, so a slow (huge) diff shows as loading.
@@ -28,6 +53,73 @@
   let error = $state<string | null>(null);
   // The commit's signature, checked once per commit (it can't change).
   let verified = $state<{ oid: string; v: Verification | null } | null>(null);
+
+  const dkey = (repo: string, id: string, f: string, s: DiffSettings) => `${repo}|${id}|${f}|${s.context ?? ""}|${s.ignoreWhitespace ?? ""}|${s.maxLines ?? ""}`;
+  const settingsFor = (repo: string, id: string, f: string) => app.diffSettingsFor(`${repo}|${id}|${f}`);
+  function keepDiff(k: string, d: FileDiff | null) {
+    if (lineCount(d) <= 5000) keep(diffs, k, d, 40);
+  }
+
+  function show(i: CommitInfo, id: string) {
+    info = i;
+    infoFor = id;
+    error = null;
+    if (!file || !i.files.some((f) => f.path === file)) file = i.files[0]?.path ?? null;
+  }
+
+  // Load the commit, and the diff of the file to show, in one call.
+  $effect(() => {
+    const id = oid;
+    const repo = app.path;
+    const fast = moving();
+    const hit = infos.get(`${repo}|${id}`);
+    if (hit) return void show(hit, id);
+    const load = () => {
+      const want = untrack(() => file);
+      const s = untrack(() => settingsFor(repo, id, want ?? ""));
+      api.commitView(repo, id, want, s).then((v) => {
+        if (v.info.files.length <= 3000) keep(infos, `${repo}|${id}`, v.info, 60);
+        if (v.diff) keepDiff(dkey(repo, id, v.diff.path, s), v.diff);
+        if (oid !== id || app.path !== repo) return;
+        show(v.info, id);
+      }).catch((e) => oid === id && (error = String(e)));
+    };
+    if (!fast) return void load();
+    const t = setTimeout(load, 90);
+    return () => clearTimeout(t);
+  });
+
+  // The selected file's diff, once the commit it belongs to is shown.
+  $effect(() => {
+    const i = info;
+    const f = file;
+    const id = oid;
+    const repo = app.path;
+    if (!i || infoFor !== id) return;
+    if (!f) {
+      diff = null;
+      return;
+    }
+    const s = settingsFor(repo, id, f);
+    const k = dkey(repo, id, f, s);
+    if (diffs.has(k)) {
+      diff = diffs.get(k) ?? null;
+      diffKey = `${id}:${f}`;
+      return;
+    }
+    const entry = i.files.find((x) => x.path === f);
+    api.commitFileDiff(repo, id, f, s, entry ? { oldPath: entry.oldPath } : undefined).then((d) => {
+      keepDiff(k, d);
+      if (file === f && oid === id) {
+        diff = d;
+        diffKey = `${id}:${f}`;
+      }
+    }).catch((e) => {
+      if (file === f && oid === id) diffKey = `${id}:${f}`;
+      toasts.push("error", String(e));
+    });
+  });
+
   $effect(() => {
     const id = oid;
     const repo = app.path;
@@ -41,55 +133,13 @@
         verifications.set(`${repo}|${id}`, v);
         if (oid === id) verified = { oid: id, v };
       }).catch(() => {});
-    }, 150);
+    }, movingFast ? 200 : 0);
     return () => clearTimeout(t);
   });
   const sigLabel = (v: Verification) =>
     v.status === "good" ? "Verified" : v.status === "bad" ? "Bad signature" : v.status === "error" ? "Signed" : "Signed";
   const sigTitle = (v: Verification) =>
     [`${v.format === "ssh" ? "SSH" : v.format === "x509" ? "X.509" : "GPG"} signature`, v.signer && `by ${v.signer}`, v.key && `key ${v.key}`].filter(Boolean).join(" ") + `\n${v.detail}`;
-
-  // A commit never changes, only the branch and tag labels on it do: load
-  // it again when the refs change, not on every refresh (editing a file
-  // refreshes too, and a huge commit takes a while to read).
-  const refsKey = $derived(app.refs ? JSON.stringify(app.refs) : "");
-  let shownOid = "";
-  $effect(() => {
-    const id = oid;
-    const repo = app.path;
-    void refsKey;
-    const load = () =>
-      api.commitInfo(repo, id).then((i) => {
-        if (oid !== id) return;
-        info = i;
-        shownOid = id;
-        error = null;
-        if (!file || !i.files.some((f) => f.path === file)) file = i.files[0]?.path ?? null;
-      }).catch((e) => oid === id && (error = String(e)));
-    // Moving through the list with the arrow keys: load only where it stops.
-    if (!shownOid || shownOid === id) return void load();
-    const t = setTimeout(load, 60);
-    return () => clearTimeout(t);
-  });
-
-  $effect(() => {
-    const f = file;
-    const id = oid;
-    if (!f) {
-      diff = null;
-      return;
-    }
-    const s = app.diffSettingsFor(`${app.path}|${id}|${f}`);
-    api.commitFileDiff(app.path, id, f, s).then((d) => {
-      if (file === f && oid === id) {
-        diff = d;
-        diffKey = `${id}:${f}`;
-      }
-    }).catch((e) => {
-      if (file === f && oid === id) diffKey = `${id}:${f}`;
-      toasts.push("error", String(e));
-    });
-  });
 
   function fileMenu(e: MouseEvent, path: string) {
     const f = info?.files.find((x) => x.path === path);
@@ -150,7 +200,7 @@
         <div class="parents faint">
           {info.parents.length > 1 ? "Parents" : "Parent"}
           {#each info.parents as p}
-            <button class="mono plink" onclick={() => app.reveal(p)}>{p.slice(0, 7)}</button>
+            <button class="mono plink" onclick={() => act.selectCommit(p)}>{p.slice(0, 7)}</button>
           {/each}
         </div>
       {/if}

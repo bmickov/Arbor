@@ -64,6 +64,9 @@ interface TabData {
   log: CommitRow[];
   logMore: boolean;
   lastSig: string;
+  /** What the log and the refs-dependent views were loaded for (see refresh). */
+  logSig?: string;
+  refsSig?: string;
 }
 
 /** Holds a background tab's data. A class instance, so Svelte's deep
@@ -404,7 +407,7 @@ class App {
       ...this.uiSnapshot(),
       data: new Loaded({
         repo: this.repo, status: this.status, refs: this.refs, stashes: this.stashes, undoTop: this.undoTop,
-        log: this.log, logMore: this.logMore, lastSig: this.lastSig,
+        log: this.log, logMore: this.logMore, lastSig: this.lastSig, logSig: this.logSig, refsSig: this.refsSig,
       }),
     };
   }
@@ -425,8 +428,10 @@ class App {
     this.selectedStash = t?.selectedStash ?? null;
     this.selectedFile = t?.selectedFile ?? null;
     this.lastSig = d?.lastSig ?? "";
-    this.logSig = "";
-    this.refsSig = "";
+    // Coming back to a tab: its history is reloaded only if a branch or
+    // HEAD moved meanwhile.
+    this.logSig = d?.logSig ?? "";
+    this.refsSig = d?.refsSig ?? "";
     this.historyQuery = t?.historyQuery ?? "";
     this.historyScroll = t?.historyScroll ?? 0;
     this.historyAnchor = t?.historyAnchor ?? null;
@@ -718,7 +723,8 @@ class App {
       // branch you were looking at the tip of), show where HEAD is now.
       if (before && status.head && before.head !== status.head) {
         const moved = before.branch !== status.branch || !this.selectedCommit || this.selectedCommit === before.head;
-        if (moved) this.reveal(status.head);
+        // (Unless the history shown is of another branch, without it.)
+        if (moved && this.log.some((r) => r.oid === status.head)) this.reveal(status.head);
       }
       this.version++;
       this.refreshError = "";
@@ -759,7 +765,8 @@ class App {
     this.revealOid = oid;
   }
 
-  async loadLog(): Promise<void> {
+  /** Load the history. `keep`: leave the selection alone even if it isn't among the commits loaded. */
+  async loadLog(opts: { keep?: boolean } = {}): Promise<void> {
     if (!this.repo) return;
     this.logLoading = true;
     const path = this.path;
@@ -768,14 +775,14 @@ class App {
       if (path !== this.path) return;
       this.log = l.rows;
       this.logMore = l.more;
-      if (this.selectedCommit && !l.rows.some((r) => r.oid === this.selectedCommit)) {
+      if (!opts.keep && this.selectedCommit && !l.rows.some((r) => r.oid === this.selectedCommit)) {
         this.selectedCommit = l.rows.find((r) => r.oid === this.status?.head)?.oid ?? l.rows[0]?.oid ?? null;
       }
     } catch (e) {
       // A deleted branch scope falls back to all branches.
       if (this.scope !== "all") {
         this.scope = "all";
-        return this.loadLog();
+        return this.loadLog(opts);
       }
       toasts.push("error", String(e));
     } finally {

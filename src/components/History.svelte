@@ -189,10 +189,13 @@
   });
 
   function key(e: KeyboardEvent) {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const page = Math.max(1, Math.floor((scroller?.clientHeight || viewH) / ROW) - 1);
+    const step: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, PageDown: page, PageUp: -page, End: Infinity, Home: -Infinity };
+    if (!(e.key in step) || e.altKey || e.ctrlKey || e.metaKey) return;
     e.preventDefault();
+    if (!rows.length) return;
     const i = rows.findIndex((r) => r.oid === app.selectedCommit);
-    const j = Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
+    const j = Math.max(0, Math.min(rows.length - 1, (i < 0 ? 0 : i) + step[e.key]));
     if (rows[j]) {
       app.selectedCommit = rows[j].oid;
       show(j, false);

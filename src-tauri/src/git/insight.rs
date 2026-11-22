@@ -39,7 +39,7 @@ pub fn predict_merge(repo_path: &str, source: &str, target: &str) -> Result<Merg
     // How many files both sides touched, for "merges cleanly, but…" hints.
     let bt = repo.find_commit(base)?.tree()?;
     let changed = |c: &git2::Commit| -> Result<std::collections::HashSet<String>> {
-        let d = repo.diff_tree_to_tree(Some(&bt), Some(&c.tree()?), None)?;
+        let d = super::diff::diff_trees(&repo, Some(&bt), &c.tree()?, &mut git2::DiffOptions::new())?;
         Ok(d.deltas().filter_map(|d| d.new_file().path().or(d.old_file().path()).map(|p| p.to_string_lossy().to_string())).collect())
     };
     let both_changed = changed(&s)?.intersection(&changed(&t)?).count();

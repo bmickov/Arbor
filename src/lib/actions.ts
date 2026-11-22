@@ -566,10 +566,36 @@ export function remoteMenu(e: MouseEvent, name: string) {
 
 // ----------------------------------------------------------------- commits
 
-export function selectCommit(oid: string) {
+/**
+ * Show a commit in History. One older than the loaded commits loads more
+ * of the history until it's there; one not on the branch shown switches
+ * to all branches.
+ */
+export async function selectCommit(oid: string) {
   app.view = "history";
   app.reveal(oid);
-  if (!app.log.some((r) => r.oid === oid)) app.loadLog();
+  const has = () => app.log.some((r) => r.oid === oid);
+  if (has()) return;
+  const path = app.path;
+  const still = () => app.path === path && app.selectedCommit === oid;
+  try {
+    let depth = await api.logDepth(path, app.scope, oid);
+    if (depth === null && app.scope !== "all" && still()) {
+      depth = await api.logDepth(path, "all", oid);
+      if (depth !== null && still()) {
+        app.scope = "all";
+        app.historyAnchor = null;
+      }
+    }
+    if (!still()) return;
+    // Load enough of the history to include it (in steps of a thousand).
+    if (depth !== null && depth > app.logLimit) app.logLimit = Math.ceil((depth + 100) / 1000) * 1000;
+    await app.loadLog({ keep: true });
+  } catch (e) {
+    toasts.push("error", String(e));
+  }
+  // History gave up on scrolling to it while it wasn't loaded.
+  if (has() && still()) app.reveal(oid);
 }
 
 /**
@@ -652,7 +678,7 @@ export async function rewrite(label: string, edit: (steps: Step[]) => Step[] | n
 }
 
 export async function reword(c: CommitRow) {
-  const info = await api.commitInfo(P(), c.oid);
+  const info = await api.commitMessage(P(), c.oid);
   const full = info.body ? `${info.summary}\n\n${info.body}` : info.summary;
   const r = await dialog.show({
     title: "Edit commit message",

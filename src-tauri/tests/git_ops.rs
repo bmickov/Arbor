@@ -2315,3 +2315,89 @@ fn refs_follow_changes_to_branches_tags_and_upstreams() {
     let side = git::branches::refs(&r.path).unwrap().local.into_iter().find(|b| b.name == "side").unwrap();
     assert_eq!((side.upstream.as_deref(), side.behind), (Some("main"), 1));
 }
+
+#[test]
+fn commit_view_and_listed_file_diffs_match_the_whole_commit() {
+    let r = Repo::new();
+    r.write("a.txt", &lines(40));
+    r.write("b.txt", "one\n");
+    r.write("dir/c.txt", "c\n");
+    r.commit_all("base");
+    // A rename with an edit, a change, an addition and a deletion.
+    r.git(&["mv", "a.txt", "moved.txt"]);
+    r.write("moved.txt", &lines(40).replace("line 7\n", "line seven\n"));
+    r.write("b.txt", "one\ntwo\n");
+    r.write("new.txt", "new\n");
+    std::fs::remove_file(Path::new(&r.path).join("dir/c.txt")).unwrap();
+    r.commit_all("changes");
+    let head = git::status::status(&r.path).unwrap().head.unwrap();
+
+    let info = git::log::commit_info(&r.path, &head).unwrap();
+    assert_eq!(info.files.len(), 4);
+    let moved = info.files.iter().find(|f| f.path == "moved.txt").unwrap();
+    assert_eq!(moved.status, "renamed");
+    assert_eq!(moved.old_path.as_deref(), Some("a.txt"));
+
+    // Each listed file, compared alone, is the same as within the whole commit.
+    for f in &info.files {
+        let whole = git::diff::commit_file(&r.path, &head, &f.path, s()).unwrap().unwrap();
+        let alone = git::diff::commit_file_listed(&r.path, &head, &f.path, f.old_path.as_deref(), true, s()).unwrap().unwrap();
+        assert_eq!(serde_json::to_value(&whole).unwrap(), serde_json::to_value(&alone).unwrap(), "{}", f.path);
+    }
+
+    // The view brings the file asked for, or else the first one.
+    let v = git::log::commit_view(&r.path, &head, Some("b.txt"), s()).unwrap();
+    assert_eq!(v.diff.as_ref().unwrap().path, "b.txt");
+    assert_eq!(v.diff.unwrap().additions, 1);
+    let v = git::log::commit_view(&r.path, &head, Some("not-in-this-commit.txt"), s()).unwrap();
+    assert_eq!(v.diff.unwrap().path, v.info.files[0].path);
+    // Other settings compare the file again, with them.
+    let wide = DiffSettings { context: Some(10), ..s() };
+    let v = git::log::commit_view(&r.path, &head, Some("moved.txt"), wide).unwrap();
+    let d = v.diff.unwrap();
+    assert_eq!(d.status, "renamed");
+    assert!(d.hunks[0].lines.len() > 15, "ten lines of context each side");
+
+    let m = git::log::commit_message(&r.path, &head).unwrap();
+    assert_eq!(m.summary, "changes");
+}
+
+#[test]
+fn commit_diffs_follow_gitattributes() {
+    let r = Repo::new();
+    r.write(".gitattributes", "*.dat -diff\n");
+    r.write("x.dat", "text\n");
+    r.write("y.txt", "text\n");
+    r.commit_all("base");
+    r.write("x.dat", "more text\n");
+    r.write("y.txt", "more text\n");
+    r.commit_all("change");
+    let head = git::status::status(&r.path).unwrap().head.unwrap();
+    let v = git::log::commit_view(&r.path, &head, Some("x.dat"), s()).unwrap();
+    assert!(v.diff.unwrap().binary, "-diff marks it binary");
+    let y = git::diff::commit_file_listed(&r.path, &head, "y.txt", None, true, s()).unwrap().unwrap();
+    assert!(!y.binary);
+    assert_eq!(y.additions, 1);
+}
+
+#[test]
+fn log_depth_says_how_much_history_to_load() {
+    let r = Repo::new();
+    for i in 0..30 {
+        r.write("f.txt", &format!("{i}\n"));
+        r.commit_all(&format!("c{i}"));
+    }
+    r.git(&["checkout", "-qb", "side", "HEAD~20"]);
+    r.write("side.txt", "s\n");
+    r.commit_all("side");
+    r.git(&["checkout", "-q", "main"]);
+    let log = git::log::log(&r.path, "all", 1000).unwrap();
+    let oldest = log.rows.last().unwrap().oid.clone();
+    let depth = git::log::log_depth(&r.path, "all", &oldest, 1000).unwrap().unwrap();
+    assert!(depth <= 31);
+    // Loading that many includes it.
+    assert!(git::log::log(&r.path, "all", depth).unwrap().rows.iter().any(|c| c.oid == oldest));
+    let side = git::branches::resolve(&git::open(&r.path).unwrap(), "side").unwrap().to_string();
+    assert_eq!(git::log::log_depth(&r.path, "main", &side, 1000).unwrap(), None, "not on main");
+    assert_eq!(git::log::log_depth(&r.path, "all", &oldest, 5).unwrap(), None, "deeper than asked");
+}

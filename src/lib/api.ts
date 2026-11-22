@@ -117,8 +117,10 @@ export interface Log { rows: CommitRow[]; more: boolean }
 export interface Person { name: string; email: string; time: number }
 export interface CommitInfo {
   oid: string; short: string; summary: string; body: string;
-  author: Person; committer: Person; parents: string[]; refs: RefLabel[]; files: FileDiff[];
+  author: Person; committer: Person; parents: string[]; files: FileDiff[];
 }
+/** A commit with the diff of one of its files, loaded together. */
+export interface CommitView { info: CommitInfo; diff: FileDiff | null }
 export interface FileHistoryEntry { commit: CommitRow; path: string }
 export interface BlameHunk { start: number; count: number; oid: string; short: string; author: string; time: number; summary: string }
 export interface Blame { lines: string[]; hunks: BlameHunk[]; binary: boolean }
@@ -265,9 +267,20 @@ export const api = {
   reset: (repo: string, oid: string, mode: "soft" | "mixed" | "hard") => call<void>("reset_to", { repo, oid, mode }),
 
   log: (repo: string, scope: string, limit: number) => call<Log>("get_log", { repo, scope, limit }),
+  /** How many commits the log of `scope` must load to include `oid` (null: not in it). */
+  logDepth: (repo: string, scope: string, oid: string) => call<number | null>("log_depth", { repo, scope, oid }),
   commitInfo: (repo: string, oid: string) => call<CommitInfo>("commit_info", { repo, oid }),
-  commitFileDiff: (repo: string, oid: string, path: string, settings?: DiffSettings) =>
-    call<WireDiff | null>("commit_file_diff", { repo, oid, path, settings }).then(decodeDiff),
+  /** The commit, its files and the diff of `want` (or the first file) in one go. */
+  commitView: (repo: string, oid: string, want: string | null, settings?: DiffSettings) =>
+    call<{ info: CommitInfo; diff: WireDiff | null }>("commit_view", { repo, oid, want, settings }).then((v) => ({ info: v.info, diff: decodeDiff(v.diff) })),
+  /** A commit's message, without its changes. */
+  commitMessage: (repo: string, oid: string) => call<{ summary: string; body: string }>("commit_message", { repo, oid }),
+  /**
+   * One file of a commit. Pass `listed` (the entry from the commit's file list)
+   * when you have it: then only that file is compared, not the whole commit.
+   */
+  commitFileDiff: (repo: string, oid: string, path: string, settings?: DiffSettings, listed?: { oldPath: string | null }) =>
+    call<WireDiff | null>("commit_file_diff", { repo, oid, path, settings, oldPath: listed?.oldPath ?? null, listed: !!listed }).then(decodeDiff),
   fileHistory: (repo: string, path: string, limit = 300) => call<FileHistoryEntry[]>("file_history", { repo, path, limit }),
   blame: (repo: string, path: string) => call<Blame>("blame", { repo, path }),
 

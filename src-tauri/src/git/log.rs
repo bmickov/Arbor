@@ -304,17 +304,38 @@ fn topo_page<'r>(walk: DateWalk<'r>, limit: usize) -> Result<(Vec<git2::Commit<'
 }
 
 /// `scope`: "all" for every branch, "head" for the current branch, or a ref name.
-pub fn log(repo_path: &str, scope: &str, limit: usize) -> Result<Log> {
-    let repo = open(repo_path)?;
-    let mut walk = DateWalk::new(&repo);
+/// The commits of `scope` ("all", "head" or a branch), newest first; None
+/// when there are none (an unborn HEAD).
+fn scoped_walk<'r>(repo: &'r Repository, scope: &str) -> Result<Option<DateWalk<'r>>> {
+    let mut walk = DateWalk::new(repo);
     match scope {
         "all" => walk.push_all()?,
         "head" => match repo.head().ok().and_then(|h| h.target()) {
             Some(t) => walk.push(t),
-            None => return Ok(Log { rows: vec![], more: false }),
+            None => return Ok(None),
         },
-        other => walk.push(super::branches::resolve(&repo, other)?),
+        other => walk.push(super::branches::resolve(repo, other)?),
     }
+    Ok(Some(walk))
+}
+
+/// How many commits the log of `scope` must load to include `id` (None:
+/// it isn't in that history, or not within `max` commits).
+pub fn log_depth(repo_path: &str, scope: &str, id: &str, max: usize) -> Result<Option<usize>> {
+    let repo = open(repo_path)?;
+    let target = oid(id)?;
+    let Some(walk) = scoped_walk(&repo, scope)? else { return Ok(None) };
+    for (i, c) in walk.take(max).enumerate() {
+        if c?.id() == target {
+            return Ok(Some(i + 1));
+        }
+    }
+    Ok(None)
+}
+
+pub fn log(repo_path: &str, scope: &str, limit: usize) -> Result<Log> {
+    let repo = open(repo_path)?;
+    let Some(walk) = scoped_walk(&repo, scope)? else { return Ok(Log { rows: vec![], more: false }) };
     let labels = ref_labels(&repo)?;
     let mut lanes = Lanes { lanes: vec![], next_color: 0 };
     let (page, more) = topo_page(walk, limit)?;
@@ -357,7 +378,6 @@ pub struct CommitInfo {
     pub author: Person,
     pub committer: Person,
     pub parents: Vec<String>,
-    pub refs: Vec<RefLabel>,
     pub files: Vec<super::diff::FileDiff>,
 }
 
@@ -369,29 +389,69 @@ fn person(s: &git2::Signature) -> Person {
     }
 }
 
-pub fn commit_info(repo_path: &str, id: &str) -> Result<CommitInfo> {
-    let repo = open(repo_path)?;
-    let c = repo.find_commit(oid(id)?)?;
+fn info_of(c: &git2::Commit, files: Vec<super::diff::FileDiff>) -> CommitInfo {
     let msg = c.message().unwrap_or("");
     let (summary, body) = match msg.split_once('\n') {
         Some((s, b)) => (s.to_string(), b.trim().to_string()),
         None => (msg.trim().to_string(), String::new()),
     };
-    let labels = ref_labels(&repo)?;
-    let author = person(&c.author());
-    let committer = person(&c.committer());
-    let info = CommitInfo {
+    CommitInfo {
         oid: c.id().to_string(),
         short: short(c.id()),
         summary,
         body,
-        author,
-        committer,
+        author: person(&c.author()),
+        committer: person(&c.committer()),
         parents: c.parent_ids().map(|p| p.to_string()).collect(),
-        refs: labels.get(&c.id()).cloned().unwrap_or_default(),
-        files: super::diff::commit_files(repo_path, id)?,
+        files,
+    }
+}
+
+pub fn commit_info(repo_path: &str, id: &str) -> Result<CommitInfo> {
+    let repo = super::open_for_reading(repo_path)?;
+    let c = repo.find_commit(oid(id)?)?;
+    let diffs = super::diff::commit_diffs(&repo, id, Default::default(), &[])?;
+    let files = super::diff::summaries(&diffs)?;
+    Ok(info_of(&c, files))
+}
+
+/// A commit's message alone (no diff), for editing it.
+#[derive(Serialize, Debug)]
+pub struct CommitMessage {
+    pub summary: String,
+    pub body: String,
+}
+
+pub fn commit_message(repo_path: &str, id: &str) -> Result<CommitMessage> {
+    let repo = open(repo_path)?;
+    let c = repo.find_commit(oid(id)?)?;
+    let i = info_of(&c, vec![]);
+    Ok(CommitMessage { summary: i.summary, body: i.body })
+}
+
+/// What the commit view shows first: the commit, its files, and the diff
+/// of one of them (`want` if the commit changed it, else the first), all
+/// from one comparison of the trees.
+#[derive(Serialize, Debug)]
+pub struct CommitView {
+    pub info: CommitInfo,
+    pub diff: Option<super::diff::FileDiff>,
+}
+
+pub fn commit_view(repo_path: &str, id: &str, want: Option<&str>, s: super::diff::DiffSettings) -> Result<CommitView> {
+    let repo = super::open_for_reading(repo_path)?;
+    let c = repo.find_commit(oid(id)?)?;
+    let diffs = super::diff::commit_diffs(&repo, id, Default::default(), &[])?;
+    let files = super::diff::summaries(&diffs)?;
+    let shown = want.and_then(|w| files.iter().find(|f| f.path == w)).or(files.first());
+    let diff = match shown {
+        None => None,
+        // The file list is compared with the default settings; other
+        // settings (context, whitespace) need the file compared again.
+        Some(f) if s.context.is_none() && !s.ignore_whitespace.unwrap_or(false) => super::diff::pick_in(&diffs, &f.path, s.max_lines)?,
+        Some(f) => super::diff::commit_file_listed(repo_path, id, &f.path, f.old_path.as_deref(), true, s)?,
     };
-    Ok(info)
+    Ok(CommitView { info: info_of(&c, files), diff })
 }
 
 #[derive(Serialize, Debug)]
@@ -404,7 +464,7 @@ pub struct FileHistoryEntry {
 
 /// Commits on HEAD that changed `path`, newest first, following renames.
 pub fn file_history(repo_path: &str, path: &str, limit: usize) -> Result<Vec<FileHistoryEntry>> {
-    let repo = open(repo_path)?;
+    let repo = super::open_for_reading(repo_path)?;
     let mut walk = repo.revwalk()?;
     // Topological: commits made in the same second (a rebase makes many)
     // have no date order. Finding every change to a file walks the whole
@@ -452,7 +512,7 @@ pub fn file_history(repo_path: &str, path: &str, limit: usize) -> Result<Vec<Fil
         // Added here: was it renamed from somewhere?
         if parent_entry.is_none() {
             if let Some(pt) = &parent_tree {
-                let mut d = repo.diff_tree_to_tree(Some(pt), Some(&tree), None)?;
+                let mut d = super::diff::diff_trees(&repo, Some(pt), &tree, &mut git2::DiffOptions::new())?;
                 let mut f = DiffFindOptions::new();
                 f.renames(true);
                 d.find_similar(Some(&mut f))?;
@@ -556,7 +616,7 @@ fn occurrences(repo: &Repository, id: Oid, needle: &[u8]) -> usize {
 }
 
 pub fn search(repo_path: &str, scope: &str, f: &LogFilter, limit: usize) -> Result<SearchResult> {
-    let repo = open(repo_path)?;
+    let repo = super::open_for_reading(repo_path)?;
     let mut walk = repo.revwalk()?;
     walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
     match scope {
@@ -626,7 +686,11 @@ pub fn search(repo_path: &str, scope: &str, f: &LogFilter, limit: usize) -> Resu
             if let Some(p) = &path {
                 opts.pathspec(p);
             }
-            let diff = repo.diff_tree_to_tree(parent.as_ref(), Some(&tree), Some(&mut opts))?;
+            let diff = if path.is_some() {
+                repo.diff_tree_to_tree(parent.as_ref(), Some(&tree), Some(&mut opts))?
+            } else {
+                super::diff::diff_trees(&repo, parent.as_ref(), &tree, &mut opts)?
+            };
             if diff.deltas().len() == 0 {
                 continue;
             }
