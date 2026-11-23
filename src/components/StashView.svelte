@@ -117,7 +117,7 @@
         </div>
       </div>
     {:else if sel}
-      <CommitDetail oid={sel.oid}>
+      <CommitDetail oid={sel.oid} stash>
         {#snippet header()}
           <div class="actions">
             <button class="btn primary small" onclick={() => act.applyStash(sel.index, true)}><Icon name="pull" size={13} /> Apply and remove</button>

@@ -13,6 +13,7 @@
   const noRemote = $derived(!!app.refs && app.refs.remotes.length === 0);
   const unborn = $derived(!!st && !st.head);
   const midOperation = $derived(!!st && st.state !== "clean");
+  const nothingToStash = $derived(!!st && !st.staged.length && !st.unstaged.length);
   const NO_REMOTE = "This repository has no remotes yet. Add one with + next to Remotes in the sidebar.";
   const NO_COMMIT = "Make a first commit first.";
 
@@ -106,7 +107,8 @@
       <Icon name="sync" /><span>Sync</span>
     </button>
     <span class="gap"></span>
-    <button class="tool" onclick={() => act.stashChanges()} disabled={!!app.busy || unborn || midOperation} title={unborn ? NO_COMMIT : midOperation ? "Finish or abort the merge, rebase or cherry-pick in progress first." : "Stash your changes (right-click to save a snapshot instead)"}
+    <button class="tool" onclick={() => act.stashChanges()} disabled={!!app.busy || unborn || midOperation || nothingToStash}
+      title={unborn ? NO_COMMIT : midOperation ? "Finish or abort the merge, rebase or cherry-pick in progress first." : nothingToStash ? "Nothing to stash: the working copy is clean" : "Stash your changes (right-click to save a snapshot instead)"}
       oncontextmenu={(e) => menu.fromEvent(e, [
         { label: "Stash changes…", hint: keyText("Ctrl+Shift+S"), action: () => act.stashChanges() },
         { label: "Save a snapshot…", hint: "keeps your changes", action: () => act.snapshot() },

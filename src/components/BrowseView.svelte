@@ -30,7 +30,12 @@
     loading = true;
     selected = null;
     api.treeAt(app.path, r)
-      .then((e) => (entries = e))
+      .then((e) => {
+        entries = e;
+        // Start with the README, as a project's page does.
+        const readme = e.find((x) => x.kind === "file" && !x.path.includes("/") && /^readme(\.(md|markdown|txt|rst))?$/i.test(x.path));
+        if (readme && rev === r && !selected) show(readme.path);
+      })
       .catch((e) => { entries = []; toasts.push("error", String(e)); })
       .finally(() => (loading = false));
   });

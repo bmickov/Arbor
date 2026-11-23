@@ -27,7 +27,8 @@ function afterMerge(m: { result?: string; conflicts: string[] } | undefined, wha
     app.view = "changes";
     const n = m.conflicts.length;
     const then = what === "rebase" ? "choose Continue" : "commit";
-    toasts.push("error", `The ${what} stopped on ${n} conflicted file${n === 1 ? ". Resolve it" : "s. Resolve them"}, then ${then}.`);
+    // Expected (and often warned about first): a notice, not an error.
+    toasts.push("info", `The ${what} stopped on ${n} conflicted file${n === 1 ? ". Resolve it" : "s. Resolve them"}, then ${then}.`);
   }
 }
 

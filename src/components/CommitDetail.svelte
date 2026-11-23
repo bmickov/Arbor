@@ -41,7 +41,9 @@
   import { SvelteSet } from "svelte/reactivity";
   import { nearEnd, Progressive } from "../lib/progressive.svelte";
 
-  let { oid, header }: { oid: string; header?: Snippet } = $props();
+  // `stash`: a stash entry, whose other parents are git's own bookkeeping
+  // (the staged and the untracked files), not commits to go to.
+  let { oid, header, stash = false }: { oid: string; header?: Snippet; stash?: boolean } = $props();
 
   // The commit shown, and which commit id it was asked for by.
   let info = $state.raw<CommitInfo | null>(null);
@@ -197,9 +199,10 @@
         <button class="sha mono" title="Copy commit ID" onclick={() => navigator.clipboard.writeText(info!.oid).then(() => toasts.push("info", "Copied commit ID."))}>{info.short}</button>
       </div>
       {#if info.parents.length}
+        {@const parents = stash ? info.parents.slice(0, 1) : info.parents}
         <div class="parents faint">
-          {info.parents.length > 1 ? "Parents" : "Parent"}
-          {#each info.parents as p}
+          {stash ? "Made on" : parents.length > 1 ? "Parents" : "Parent"}
+          {#each parents as p}
             <button class="mono plink" onclick={() => act.selectCommit(p)}>{p.slice(0, 7)}</button>
           {/each}
         </div>
