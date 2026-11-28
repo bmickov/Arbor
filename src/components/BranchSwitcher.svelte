@@ -43,6 +43,7 @@
     const q = query.trim().toLowerCase();
     const locals = app.refs?.local ?? [];
     const localNames = new Set(locals.map((b) => b.name));
+    const tracked = new Set(locals.map((b) => b.upstream).filter(Boolean));
     const out: Item[] = [];
     for (const b of locals) {
       const s = score(b.name, q);
@@ -50,8 +51,8 @@
     }
     for (const r of app.refs?.remotes ?? []) {
       for (const b of r.branches) {
-        // Remote branches that already have a local branch are covered above.
-        if (localNames.has(b.name)) continue;
+        // Remote branches a local branch tracks are covered above.
+        if (tracked.has(b.fullName)) continue;
         const s = score(b.fullName, q);
         if (s >= 0) out.push({ kind: "remote", name: b.fullName, hint: "remote", score: s - 1 });
       }
@@ -68,6 +69,12 @@
   $effect(() => {
     void query;
     active = 0;
+  });
+
+  // What Enter does to the highlighted row.
+  const enterLabel = $derived.by(() => {
+    const it = items[active];
+    return !it ? "to switch" : it.kind === "create" ? "to create it" : it.kind === "remote" ? "to check it out" : it.current ? "to stay" : "to switch";
   });
 
   function close() {
@@ -124,10 +131,10 @@
           <span class="hint">{it.hint}</span>
         </button>
       {:else}
-        <div class="none">No matching branches.</div>
+        <div class="none">{query.trim() && /\s/.test(query.trim()) ? "No matching branches. A new branch name can't contain spaces." : "No matching branches."}</div>
       {/each}
     </div>
-    <div class="foot"><span><span class="kbd">↑</span> <span class="kbd">↓</span> to choose</span><span><span class="kbd">Enter</span> to switch</span><span><span class="kbd">Esc</span> to close</span></div>
+    <div class="foot"><span><span class="kbd">↑</span> <span class="kbd">↓</span> to choose</span><span><span class="kbd">Enter</span> {enterLabel}</span><span><span class="kbd">Esc</span> to close</span></div>
   </div>
 </div>
 

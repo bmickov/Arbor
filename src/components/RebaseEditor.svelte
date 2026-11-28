@@ -153,7 +153,7 @@
   li.line-above { box-shadow: 0 -2px 0 var(--accent); }
   li.line-below { box-shadow: 0 2px 0 var(--accent); }
   .grip { color: var(--ink-3); display: grid; }
-  select { width: 130px; flex: none; padding: 4px 6px; }
+  select { width: 130px; flex: none; padding: 4px 26px 4px 8px; }
   .summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 6px; align-items: center; }
   textarea { flex: 1; font-size: calc(var(--fs) * 12); }
   .sha { flex: none; }

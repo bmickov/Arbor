@@ -141,6 +141,10 @@ async fn conflict_file(repo: String, path: String) -> R<git::conflict::ConflictF
 }
 
 #[tauri::command]
+async fn files_with_markers(repo: String, paths: Vec<String>) -> R<Vec<String>> {
+    blocking(move || git::conflict::files_with_markers(&repo, &paths)).await
+}
+#[tauri::command]
 async fn resolve_with_content(repo: String, path: String, content: String) -> R<()> {
     blocking(move || git::conflict::resolve_with_content(&repo, &path, &content)).await
 }
@@ -576,9 +580,21 @@ async fn fetch(app: AppHandle, repo: String, remote: Option<String>, prune: bool
     blocking(move || git::remote::fetch(&repo, remote.as_deref(), prune, creds, p)).await
 }
 #[tauri::command]
-async fn pull(app: AppHandle, repo: String, rebase: bool, creds: Option<Creds>) -> R<git::remote::PullOutcome> {
+async fn between_head_and(repo: String, other: String) -> R<git::branches::Between> {
+    blocking(move || git::branches::between_head_and(&repo, &other)).await
+}
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn pull(
+    app: AppHandle,
+    repo: String,
+    rebase: bool,
+    creds: Option<Creds>,
+    from: Option<String>,
+    autostash: Option<bool>,
+) -> R<git::remote::PullOutcome> {
     let p = progress(&app);
-    blocking(move || git::remote::pull(&repo, rebase, creds, p)).await
+    blocking(move || git::remote::pull_from(&repo, from.as_deref(), rebase, autostash.unwrap_or(false), creds, p)).await
 }
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -776,11 +792,11 @@ pub fn run() {
             library_get, library_save, library_add_many, scan_folder, repo_summaries,
             get_status, diff_unstaged, diff_staged, file_at,
             stage_files, unstage_files, stage_all, unstage_all, discard_files,
-            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, signing_settings, set_signing, verify_commit, rebase_continue, rebase_skip, rebase_abort, fold_into, stash_snapshot, stash_restore_snapshot, search_log, predict_merge, grep_tree, remotes_info, edit_remote, read_ignore, write_ignore, repo_config, set_repo_config, lfs_info, lfs_checkout, lfs_pull, lfs_track, lfs_locks, lfs_lock, tools_list, diff_tool, merge_tool, flow_config, flow_suggest, flow_init, flow_start, flow_finish, stack_list, stack_set_parent, stack_restack, stack_descendants, bisect_start, bisect_mark, bisect_reset, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
+            stage_lines, unstage_lines, discard_lines, resolve_conflict, conflict_file, resolve_with_content, files_with_markers, signing_settings, set_signing, verify_commit, rebase_continue, rebase_skip, rebase_abort, fold_into, stash_snapshot, stash_restore_snapshot, search_log, predict_merge, grep_tree, remotes_info, edit_remote, read_ignore, write_ignore, repo_config, set_repo_config, lfs_info, lfs_checkout, lfs_pull, lfs_track, lfs_locks, lfs_lock, tools_list, diff_tool, merge_tool, flow_config, flow_suggest, flow_init, flow_start, flow_finish, stack_list, stack_set_parent, stack_restack, stack_descendants, bisect_start, bisect_mark, bisect_reset, worktrees, add_worktree, remove_worktree, prune_worktrees, submodules, update_submodules,
             commit, head_message, cherry_pick, revert_commit, reset_to,
             get_log, commit_info, tracked_files, reflog, branches_review, compare_branches, compare_file_diff,
             tree_at, file_content, export_zip, ignore_pattern, untrack_files, restore_file,
-            save_commit_patch, save_changes_patch, apply_patch, get_identity, set_identity, commit_template, commit_file_diff, commit_view, commit_message, log_depth, file_history, blame,
+            save_commit_patch, save_changes_patch, apply_patch, get_identity, set_identity, commit_template, commit_file_diff, commit_view, commit_message, log_depth, between_head_and, file_history, blame,
             get_refs, checkout_branch, checkout_commit, checkout_remote, create_branch,
             delete_branch, delete_branches, unmerged_branches, rename_branch, set_upstream, create_tag, delete_tag,
             add_remote, remove_remote,

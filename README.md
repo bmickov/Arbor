@@ -247,7 +247,9 @@ Click a group to expand it.
   theirs (and the common base). Click a side to use it, take both in either
   order, or write the result yourself, then save and mark the file resolved.
   Works with half-edited files, and "Start over" merges the file afresh. Files
-  deleted on one side, or binary, get a keep-mine or keep-theirs choice
+  deleted on one side, or binary, get a keep-mine or keep-theirs choice.
+  Marking a file resolved (or Stage all) while it still has conflict markers
+  asks first, so the markers don't end up in a commit
 - **Signed commits** with GPG or SSH keys (Preferences → Commits, for one
   repository or all), using Git's own settings, so the command line agrees.
   Each commit can opt out. Merges, cherry-picks, reverts and rewritten commits
@@ -325,6 +327,18 @@ Click a group to expand it.
 - **Conflict prediction**: merging or rebasing a branch that would conflict
   says so first, listing the files, so you can cancel or go ahead
 - Fetch (with prune), pull (merge or rebase), push with rejection handling
+  (a rejected push of the current branch offers to pull, then push again)
+- **Check out remote branches** from the branch menu in the toolbar, the
+  branch switcher (Ctrl+P) or the sidebar; if a local branch already has
+  that name and tracks something else, Arbor asks for another name instead
+  of switching to the wrong branch
+- **Pull from any branch**, as in Tower: the Pull dialog (right-click Pull, or
+  Ctrl+Shift+L) pulls any remote branch into the current one, by merge or
+  rebase, shows how many commits it brings in, can stash your uncommitted
+  changes and put them back afterwards, and can make it the branch's
+  upstream. Right-click a remote branch (or drag it onto the current one)
+  for "Pull origin/x into main", with or without rebase. Pulling a branch
+  that tracks nothing opens the dialog.
 - **Sync**: pull, then push, in one click
 - **Pull requests**: "Create pull request…" on any branch opens the page that
   starts one on GitHub, GitLab (merge requests), Bitbucket, Codeberg, Gitea,
@@ -469,7 +483,7 @@ Open with **Ctrl+,** or the sliders button.
 - **Diffs & Git:** context lines, when to ask before showing large diffs,
   syntax highlighting, changed-word highlighting, external diff and merge
   tools, ignore whitespace, side-by-side history diffs, how often to fetch
-  automatically, pull with rebase
+  automatically, pull with rebase, stash local changes to pull
 - **Commits:** commit templates, author profiles, issue-tracker links, and
   commit signing
 - **Keyboard:** every shortcut below can be changed. Click it and press new keys;
@@ -514,6 +528,7 @@ On macOS, Ctrl in the table below is ⌘ (Command), Alt is ⌥ and Shift is ⇧.
 | Ctrl+Shift+S / Ctrl+Alt+S | Stash / apply and remove the latest stash |
 | Ctrl+Shift+F | Fetch (on the repository list: fetch all) |
 | Ctrl+Shift+↓ / Ctrl+Shift+↑ | Pull / push |
+| Ctrl+Shift+L | Pull from another branch… |
 | Ctrl+Shift+Y | Sync (pull, then push) |
 | Ctrl+Z | Undo the last operation |
 | Ctrl+R, F5 | Refresh |

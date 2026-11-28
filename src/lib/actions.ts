@@ -2,7 +2,7 @@
 // choices. Menus, buttons and drag-and-drop all call into these.
 
 import { open as pickFile, save as pickSaveFile } from "@tauri-apps/plugin-dialog";
-import { api, type CommitRow, type MergeOutcome, type RebaseAction, type Step } from "./api";
+import { api, type CommitRow, type MergeOutcome, type PullOutcome, type RebaseAction, type Step } from "./api";
 import type { Payload } from "./drag.svelte";
 import { relTime } from "./format";
 import { branchUrl, commitUrl, fileUrl, hostOf, newPullRequestUrl, pullRequestsUrl, type Host } from "./hosting";
@@ -73,14 +73,56 @@ export async function fetchAll() {
   }
 }
 
-export async function pull(): Promise<boolean> {
-  const r = await app.act("Pulling", (c) => api.pull(P(), app.settings.pullRebase, c), {
-    success: (r) => (r.result === "up-to-date" ? "Already up to date." : r.result === "conflicts" ? null : `Pulled (${r.result.replace("-", " ")}).`),
+/**
+ * Pull into the current branch, like Tower: its upstream, or `from` (any
+ * remote branch, "origin/feature"), by merge or (`rebase`) rebase.
+ * Uncommitted changes are put aside and back when `autostash` (the
+ * preference by default). A branch with nothing to pull from opens the
+ * Pull dialog to choose.
+ */
+export async function pull(opts: { from?: string; rebase?: boolean; autostash?: boolean; track?: boolean } = {}): Promise<boolean> {
+  if (!opts.from && app.headBranch && !app.status?.upstream) {
+    app.pullDialog = { from: "" };
+    return false;
+  }
+  const rebase = opts.rebase ?? app.settings.pullRebase;
+  const autostash = opts.autostash ?? app.settings.pullAutostash;
+  const into = app.headBranch ?? "HEAD";
+  const r = await app.act(opts.from ? `Pulling ${opts.from}` : "Pulling", (c) => api.pull(P(), rebase, c, { from: opts.from, autostash }), {
+    success: (r) => {
+      if (r.result === "conflicts" || r.stash === "conflicted") return null;
+      if (r.result === "up-to-date") return `${into} already has everything on ${r.from}.`;
+      const how = r.result === "fast-forward" ? " (fast-forward)" : r.result === "rebased" ? " with rebase" : "";
+      const back = r.stash === "restored" ? " Your uncommitted changes are back in place." : "";
+      return `Pulled ${r.from} into ${into}${how}.${back}`;
+    },
   });
   if (r) app.noteFetched(P());
-  if (r?.result === "conflicts") afterMerge({ result: "conflicts", conflicts: r.conflicts }, app.settings.pullRebase ? "rebase" : "merge");
+  // Make it the upstream once the pull has found it (not before: a typo'd
+  // or vanished branch shouldn't become one).
+  if (r && opts.track && opts.from && app.headBranch === into) {
+    try {
+      await api.setUpstream(P(), into, opts.from);
+      await app.refresh();
+    } catch (e) {
+      toasts.push("error", String(e));
+    }
+  }
+  if (r?.result === "conflicts") afterMerge({ result: "conflicts", conflicts: r.conflicts }, rebase ? "rebase" : "merge");
   else if (r && r.result !== "up-to-date" && app.lfs?.used && app.lfs.installed) await app.act("Downloading LFS files", () => api.lfsPull(P()));
+  if (r) stashNotice(r);
   return !!r && r.result !== "conflicts";
+}
+
+/** What became of the changes a pull put aside. */
+function stashNotice(r: PullOutcome) {
+  const stashes = { label: "Show stashes", run: () => (app.view = "stashes") };
+  if (r.stash === "kept") {
+    toasts.push("info", "Your uncommitted changes are waiting in the stash list. Apply them once the conflicts are resolved.", stashes, 12000);
+  } else if (r.stash === "conflicted") {
+    app.view = "changes";
+    toasts.push("info", `Pulled ${r.from}, but putting your uncommitted changes back conflicted. The conflicts are marked in the files, and the changes are kept in the stash list too.`, stashes, 12000);
+  }
 }
 
 /** Push; resolves to true when the branch ended up on the remote. */
@@ -102,13 +144,24 @@ export async function push(branch?: string, remote?: string, forPullRequest = fa
   } catch (e) {
     const err = String(e);
     if (err.startsWith("REJECTED:")) {
+      // Pulling brings commits into the checked-out branch only: for another
+      // branch, fetch so its ahead/behind shows what's new, and leave it there.
+      const here = !!target && target === app.headBranch;
       const r = await dialog.show({
         title: "The push was rejected",
-        body: err.slice(9) + "\n\nPull to bring in the remote's commits, or force push to replace the remote branch with yours.",
-        confirm: "Pull",
+        body: err.slice(9) + (here
+          ? "\n\nPull to bring in the remote's commits and push again, or force push to replace the remote branch with yours."
+          : `\n\nCheck out ${target} and pull to bring in the remote's commits, or force push to replace the remote branch with yours.`),
+        confirm: here ? "Pull, then push" : "Fetch",
         extra: [{ id: "force", label: "Force push…", danger: true }],
       });
-      if (r.button === "confirm") return (await pull()) && false;
+      if (r.button === "confirm") {
+        if (!here) {
+          await fetchAll();
+          return false;
+        }
+        return (await pull()) && app.headBranch === target ? push(target, remote, forPullRequest) : false;
+      }
       if (r.button === "force") return forcePush(target, remote);
     } else if (!err.startsWith("AUTH")) {
       toasts.push("error", err.replace(/^\w+_?\w*:/, ""));
@@ -160,13 +213,16 @@ export async function sync() {
   const st = app.status;
   if (!app.headBranch) return toasts.push("info", "Check out a branch to sync it.");
   if (st?.upstream) {
-    const r = await app.act("Syncing: pulling", (c) => api.pull(P(), app.settings.pullRebase, c));
+    const r = await app.act("Syncing: pulling", (c) => api.pull(P(), app.settings.pullRebase, c, { autostash: app.settings.pullAutostash }));
     app.noteFetched(P());
     if (r === undefined) return;
+    stashNotice(r);
     if (r.result === "conflicts") return afterMerge({ result: "conflicts", conflicts: r.conflicts }, app.settings.pullRebase ? "rebase" : "merge");
+    if (r.stash === "conflicted") return;
     await app.refresh();
     if (!app.status?.ahead) {
-      return toasts.push("success", r.result === "up-to-date" ? "Already in sync." : `Pulled (${r.result.replace("-", " ")}); nothing to push.`);
+      const how = r.result === "fast-forward" ? " (fast-forward)" : r.result === "rebased" ? " with rebase" : "";
+      return toasts.push("success", r.result === "up-to-date" ? `${app.headBranch} is in sync with ${r.from}.` : `Pulled ${r.from} into ${app.headBranch}${how}. Nothing to push.`);
     }
   }
   await push();
@@ -178,8 +234,29 @@ export async function checkout(name: string) {
   await app.act(`Switching to ${name}`, () => api.checkoutBranch(P(), name), { success: `Switched to ${name}.` });
 }
 
-export async function checkoutRemote(fullName: string) {
-  await app.act(`Checking out ${fullName}`, () => api.checkoutRemote(P(), fullName), { success: (n) => `Switched to ${n}, tracking ${fullName}.` });
+export async function checkoutRemote(fullName: string, localName?: string) {
+  try {
+    await app.run(`Checking out ${fullName}`, () => api.checkoutRemote(P(), fullName, localName), { quiet: true, success: (n) => `Switched to ${n}, tracking ${fullName}.` });
+  } catch (e) {
+    const err = String(e);
+    if (!err.startsWith("EXISTS:")) {
+      if (!err.startsWith("AUTH")) toasts.push("error", err.replace(/^\w+_?\w*:/, ""));
+      return;
+    }
+    // A local branch of that name is something else: check it out under another name.
+    const taken = new Set(app.refs?.local.map((b) => b.name) ?? []);
+    const rb = app.refs?.remotes.flatMap((r) => r.branches.map((b) => ({ remote: r.name, name: b.name, fullName: b.fullName }))).find((b) => b.fullName === fullName);
+    const base = rb ? `${rb.name}-${rb.remote.replace(/\//g, "-")}` : fullName.replace(/\//g, "-");
+    let guess = base;
+    for (let i = 2; taken.has(guess); i++) guess = `${base}-${i}`;
+    const name = await dialog.prompt(`Check out ${fullName}`, "Local branch name", {
+      value: guess,
+      confirm: "Check out",
+      body: err.slice("EXISTS:".length),
+      validate: (v) => validBranch(v.trim()) ?? (taken.has(v.trim()) ? "That branch already exists." : null),
+    });
+    if (name) await checkoutRemote(fullName, name);
+  }
 }
 
 export async function newBranch(from: string | null = null, fromLabel?: string) {
@@ -343,6 +420,10 @@ export function branchMenu(e: MouseEvent, name: string) {
       { label: `Rebase ${head} onto ${name}`, action: () => rebaseOnto(head, name) },
       { separator: true },
     ] as MenuItem[]),
+    ...(current && app.refs?.remotes.length ? [
+      { label: b?.upstream ? `Pull from ${b.upstream}` : "Pull…", action: () => pull() },
+      { label: "Pull from another branch…", action: () => (app.pullDialog = { from: "" }) },
+    ] as MenuItem[] : []),
     { label: "Push", disabled: !app.refs?.remotes.length, hint: app.refs?.remotes.length ? undefined : "no remotes", action: () => push(name) },
     { label: "Track remote branch…", disabled: !app.refs?.remotes.length, action: () => setUpstream(name) },
     { separator: true },
@@ -369,8 +450,11 @@ export function remoteBranchMenu(e: MouseEvent, fullName: string) {
     { label: "Check out as local branch", action: () => checkoutRemote(fullName) },
     { label: pinnedBranches().includes(fullName) ? "Unpin" : "Pin to top", action: () => togglePin(fullName) },
     { separator: true },
-    { label: `Merge into ${head}`, disabled: !head, action: () => mergeInto(fullName, head!) },
-    { label: `Rebase ${head} onto it`, disabled: !head, action: () => rebaseOnto(head!, fullName) },
+    // Like Tower: pulling fetches it first, then merges or rebases.
+    ...pullItems(fullName, head),
+    { separator: true },
+    { label: `Merge into ${head}`, hint: "without fetching", disabled: !head, action: () => mergeInto(fullName, head!) },
+    { label: `Rebase ${head} onto it`, hint: "without fetching", disabled: !head, action: () => rebaseOnto(head!, fullName) },
     { separator: true },
     { label: "Show history", action: () => showHistory(fullName) },
     { label: `Compare with ${head ?? "HEAD"}`, action: () => compareWith(fullName) },
@@ -379,6 +463,16 @@ export function remoteBranchMenu(e: MouseEvent, fullName: string) {
     { separator: true },
     { label: "Delete on remote…", danger: true, action: () => deleteRemoteBranch(fullName) },
   ], fullName);
+}
+
+/** "Pull origin/x into main" (merge, then with rebase) and the Pull dialog, for a remote branch. */
+function pullItems(fullName: string, head: string | null): MenuItem[] {
+  const off = !head ? "check out a branch first" : undefined;
+  return [
+    { label: `Pull ${fullName} into ${head ?? "HEAD"}`, hint: off, disabled: !head, action: () => pull({ from: fullName, rebase: false }) },
+    { label: `Pull ${fullName} into ${head ?? "HEAD"} with rebase`, hint: off, disabled: !head, action: () => pull({ from: fullName, rebase: true }) },
+    { label: "Pull…", disabled: !head, action: () => (app.pullDialog = { from: fullName }) },
+  ];
 }
 
 export function showHistory(scope: string) {
@@ -910,6 +1004,20 @@ export async function applyPatch() {
 // ------------------------------------------------------------------- stash
 
 /** Stash all changes, or only those in `paths`. */
+/** Stage everything, except files whose conflicts still have markers in them. */
+export async function stageAll() {
+  const conflicted = app.status?.conflicted.map((f) => f.path) ?? [];
+  const marked = conflicted.length ? await api.filesWithMarkers(P(), conflicted).catch(() => []) : [];
+  if (!marked.length) return void (await app.act("Staging", () => api.stageAll(P())));
+  const ok = await dialog.confirm(
+    "Some conflicts aren't resolved yet",
+    `${marked.length === 1 ? `${marked[0]} still has` : `${marked.length} files still have`} <<<<<<< and >>>>>>> markers, and staging marks a conflict resolved. Stage everything else?`,
+    "Stage the others",
+  );
+  const rest = (app.status?.unstaged.map((f) => f.path) ?? []).concat(conflicted.filter((p) => !marked.includes(p)));
+  if (ok && rest.length) await app.act("Staging", () => api.stageFiles(P(), rest));
+}
+
 export async function stashChanges(paths?: string[]) {
   const s = app.status;
   if (s && !s.staged.length && !s.unstaged.length) {
@@ -990,6 +1098,8 @@ export function dropOnBranch(p: Payload, target: string, e: PointerEvent) {
   const src = p.kind === "branch" ? p.name : p.kind === "remote-branch" ? p.fullName : "";
   if (!src || src === target) return;
   menu.open(e.clientX, e.clientY, [
+    // A remote branch dropped on the checked-out one: pull it (fetching first), as in Tower.
+    ...(p.kind === "remote-branch" && target === head ? [...pullItems(src, head), { separator: true }] : []),
     { label: `Merge ${src} into ${target}`, action: () => mergeInto(src, target) },
     { label: `Rebase ${target} onto ${src}`, disabled: target.includes("/") && !app.refs?.local.some((b) => b.name === target), action: () => rebaseOnto(target, src) },
   ], `${src} → ${target}`);
@@ -1081,15 +1191,15 @@ export async function flowSetup() {
   if (r.button !== "confirm") return false;
   const v = r.values;
   const config = { main: String(v.main).trim(), develop: String(v.develop).trim(), feature: String(v.feature), release: String(v.release), hotfix: String(v.hotfix), versionTag: String(v.versionTag ?? "") };
-  await app.act("Setting up git-flow", () => api.flowInit(P(), config), { success: "Git-flow is set up." });
-  return true;
+  return app.run("Setting up git-flow", () => api.flowInit(P(), config), { success: "Git-flow is set up." }).then(() => true, () => false);
 }
 
 const FLOW_NOUN: Record<string, string> = { feature: "feature", release: "release", hotfix: "hotfix" };
 
 export async function flowStart(kind: "feature" | "release" | "hotfix") {
-  const c = await api.flowConfig(P());
-  if (!c) return flowSetup();
+  // Not set up yet: set it up, then carry on with what was asked.
+  const c = (await api.flowConfig(P())) ?? ((await flowSetup()) ? await api.flowConfig(P()) : null);
+  if (!c) return;
   const prefix = kind === "feature" ? c.feature : kind === "release" ? c.release : c.hotfix;
   const name = await dialog.prompt(`Start ${FLOW_NOUN[kind]}`, kind === "feature" ? "Feature name" : "Version", {
     confirm: `Start ${FLOW_NOUN[kind]}`,
@@ -1194,8 +1304,8 @@ export async function bisectStart(good: { oid: string; short: string; summary: s
     confirm: "Start bisect",
   });
   if (ok.button !== "confirm") return;
-  await app.act("Starting bisect", () => api.bisectStart(P(), null, good.oid), { success: (s) => `Testing ${s.current?.slice(0, 7)} · about ${s.steps} step${s.steps === 1 ? "" : "s"} left.` });
-  app.view = "history";
+  const s = await app.act("Starting bisect", () => api.bisectStart(P(), null, good.oid), { success: (s) => `Testing ${s.current?.slice(0, 7)} · about ${s.steps} step${s.steps === 1 ? "" : "s"} left.` });
+  if (s) app.view = "history";
 }
 
 export async function bisectMark(verdict: "good" | "bad" | "skip") {

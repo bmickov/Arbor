@@ -1,7 +1,7 @@
 //! Fetch, pull and push, with SSH agent/key and credential-helper auth.
 
 use super::undo;
-use super::{advance_head, err, head_branch, open, Error, Result};
+use super::{advance_head, err, head_branch, open, tracked_clean, Error, Result};
 use git2::{AutotagOption, BranchType, CertificateCheckStatus, Config, Cred, CredentialType, FetchOptions, FetchPrune, PushOptions, RemoteCallbacks, Repository};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -167,46 +167,135 @@ pub struct PullOutcome {
     /// up-to-date | fast-forward | merged | rebased | conflicts
     pub result: String,
     pub conflicts: Vec<String>,
+    /// The branch pulled from ("origin/main").
+    pub from: String,
+    /// Local changes stashed to make room for the pull (`autostash`):
+    /// "restored" (put back), "kept" (the pull stopped on conflicts, so they
+    /// wait in the stash list), "conflicted" (putting them back conflicted:
+    /// marked in the files, and kept in the stash list too). None when
+    /// nothing was stashed.
+    pub stash: Option<String>,
 }
 
+/// Pull the current branch's upstream.
 pub fn pull(repo_path: &str, rebase: bool, creds: Option<Creds>, progress: Progress) -> Result<PullOutcome> {
+    pull_from(repo_path, None, rebase, false, creds, progress)
+}
+
+/// Split "origin/feature/x" into its remote ("origin") and branch
+/// ("feature/x"), by the repository's remotes (the longest that fits, as
+/// remote names can contain slashes too).
+pub fn split_remote_branch(repo: &Repository, full: &str) -> Option<(String, String)> {
+    let remotes = repo.remotes().ok()?;
+    remotes
+        .iter()
+        .filter_map(|r| r.ok().flatten())
+        .filter(|r: &&str| full.len() > r.len() + 1 && full.starts_with(r) && full.as_bytes()[r.len()] == b'/')
+        .max_by_key(|r| r.len())
+        .map(|r| (r.to_string(), full[r.len() + 1..].to_string()))
+}
+
+/// Pull into the current branch: fetch, then bring in `from` (a remote
+/// branch such as "origin/feature"; None: the branch's upstream) by
+/// fast-forward if possible, else by merging or (`rebase`) rebasing onto it.
+/// `autostash`: put uncommitted changes aside first and back afterwards, as
+/// a merge or rebase needs a clean working copy.
+pub fn pull_from(repo_path: &str, from: Option<&str>, rebase: bool, autostash: bool, creds: Option<Creds>, progress: Progress) -> Result<PullOutcome> {
     let repo = open(repo_path)?;
     let Some(branch) = head_branch(&repo) else {
         return err("Check out a branch before pulling.");
     };
-    let refname = format!("refs/heads/{branch}");
-    let remote = repo
-        .branch_upstream_remote(&refname)
-        .ok()
-        .and_then(|b| b.as_str().ok().map(|s| s.to_string()))
-        .ok_or_else(|| Error::Msg(format!("'{branch}' doesn't track a remote branch. Push it first, or set its upstream.")))?;
-    fetch_one(&repo, &remote, false, creds, progress)?;
-    let b = repo.find_branch(&branch, BranchType::Local)?;
-    let up = b.upstream().map_err(|_| Error::Msg(format!("The upstream of '{branch}' no longer exists on {remote}.")))?;
-    let up_name = up.name()?.unwrap_or("").to_string();
-    let up_oid = up.get().target().unwrap();
+    if repo.state() != git2::RepositoryState::Clean {
+        return err("Finish or abort the operation in progress first.");
+    }
+    super::rebase::require_not_paused(&repo)?;
+    let source = match from {
+        Some(f) => {
+            let (remote, name) = split_remote_branch(&repo, f)
+                .ok_or_else(|| Error::Msg(format!("'{f}' isn't a branch of one of this repository's remotes.")))?;
+            fetch_one(&repo, &remote, false, creds, progress)?;
+            let full = format!("{remote}/{name}");
+            repo.find_branch(&full, BranchType::Remote)
+                .map_err(|_| Error::Msg(format!("{remote} has no branch '{name}' (any more).")))?;
+            full
+        }
+        None => {
+            let refname = format!("refs/heads/{branch}");
+            let remote = repo
+                .branch_upstream_remote(&refname)
+                .ok()
+                .and_then(|b| b.as_str().ok().map(|s| s.to_string()))
+                .ok_or_else(|| Error::Msg(format!("'{branch}' doesn't track a remote branch. Push it first, or set its upstream.")))?;
+            fetch_one(&repo, &remote, false, creds, progress)?;
+            let b = repo.find_branch(&branch, BranchType::Local)?;
+            let up = b.upstream().map_err(|_| Error::Msg(format!("The upstream of '{branch}' no longer exists on {remote}.")))?;
+            let name = up.name()?.unwrap_or("").to_string();
+            name
+        }
+    };
+    let up_oid = repo.find_branch(&source, BranchType::Remote)?.get().target().ok_or_else(|| Error::Msg(format!("{source} doesn't point at a commit.")))?;
     let head = repo.head()?.peel_to_commit()?;
     let annotated = repo.find_annotated_commit(up_oid)?;
     let (analysis, _) = repo.merge_analysis(&[&annotated])?;
+    let outcome = |result: &str, conflicts: Vec<String>, stash: Option<&str>| PullOutcome {
+        result: result.into(),
+        conflicts,
+        from: source.clone(),
+        stash: stash.map(str::to_string),
+    };
     if analysis.is_up_to_date() {
-        return Ok(PullOutcome { result: "up-to-date".into(), conflicts: vec![] });
+        return Ok(outcome("up-to-date", vec![], None));
     }
-    if analysis.is_fast_forward() {
-        advance_head(&repo, up_oid, &format!("pull: fast-forward to {up_name}")).map_err(|e| match e {
-            Error::Git(g) if g.code() == git2::ErrorCode::Conflict => {
-                Error::Msg("Your local changes would be overwritten by the pull. Commit or stash them first.".into())
+
+    // Uncommitted changes in the way: put them aside (tracked files only,
+    // like git's --autostash; untracked files stay where they are).
+    let stashed = autostash && !tracked_clean(&repo)?;
+    if stashed {
+        super::stash::save(repo_path, Some(&format!("Changes stashed to pull {source}")), false, false, true)?;
+    }
+    let journal = undo::load(&repo).len();
+    let integrated = (|| -> Result<(String, Vec<String>)> {
+        if analysis.is_fast_forward() {
+            advance_head(&repo, up_oid, &format!("pull: fast-forward to {source}")).map_err(|e| match e {
+                Error::Git(g) if g.code() == git2::ErrorCode::Conflict => {
+                    Error::Msg("Your local changes would be overwritten by the pull. Commit or stash them first.".into())
+                }
+                other => other,
+            })?;
+            undo::record_head_move(&repo, format!("Pull {source}"), Some(head.id()), "mixed");
+            Ok(("fast-forward".into(), vec![]))
+        } else if rebase {
+            let r = super::rebase::rebase(repo_path, &source)?;
+            Ok((r.result.into(), r.conflicts))
+        } else {
+            let m = super::merge::merge(repo_path, &source, false)?;
+            Ok((m.result.into(), m.conflicts))
+        }
+    })();
+    let (result, conflicts) = match integrated {
+        Ok(r) => {
+            // Undo shows it as the pull it was, not the merge or rebase inside.
+            let how = if r.0 == "rebased" { " with rebase" } else { "" };
+            undo::relabel_newest(&repo, journal, format!("Pull {source} into {branch}{how}"));
+            r
+        }
+        Err(e) => {
+            // Nothing happened: put the changes back where they were.
+            if stashed {
+                let _ = super::stash::pop(repo_path, 0, true);
             }
-            other => other,
-        })?;
-        undo::record_head_move(&repo, format!("Pull {up_name}"), Some(head.id()), "mixed");
-        return Ok(PullOutcome { result: "fast-forward".into(), conflicts: vec![] });
+            return Err(e);
+        }
+    };
+    if !stashed {
+        return Ok(outcome(&result, conflicts, None));
     }
-    if rebase {
-        let r = super::rebase::rebase(repo_path, &up_name)?;
-        Ok(PullOutcome { result: r.result.into(), conflicts: r.conflicts })
-    } else {
-        let m = super::merge::merge(repo_path, &up_name, false)?;
-        Ok(PullOutcome { result: m.result.into(), conflicts: m.conflicts })
+    if result == "conflicts" {
+        return Ok(outcome(&result, conflicts, Some("kept")));
+    }
+    match super::stash::pop(repo_path, 0, true) {
+        Ok(()) => Ok(outcome(&result, conflicts, Some("restored"))),
+        Err(_) => Ok(outcome(&result, conflicts, Some("conflicted"))),
     }
 }
 

@@ -88,7 +88,7 @@
   .sp { flex: 1; }
   .side { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   figure { margin: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; min-width: 0; }
-  figcaption { font-family: var(--font-ui); font-size: calc(var(--fs) * 11); font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+  figcaption { font-family: var(--font-ui); font-size: calc(var(--fs) * 12); font-weight: 700; color: var(--ink-3); }
   img { max-width: 100%; border: 1px solid var(--line); background: repeating-conic-gradient(var(--surface-3) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px; }
   .none { padding: 20px 0; }
   .stack { position: relative; display: inline-grid; align-self: flex-start; max-width: 100%; user-select: none; }

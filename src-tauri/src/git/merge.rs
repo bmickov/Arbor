@@ -52,6 +52,15 @@ pub fn merge(repo_path: &str, source: &str, no_ff: bool) -> Result<MergeOutcome>
     let mut co = CheckoutBuilder::new();
     co.safe().allow_conflicts(true).conflict_style_merge(true);
     repo.merge(&[&annotated], Some(&mut mo), Some(&mut co))?;
+    // libgit2 names a remote branch by its full ref ("Merge remote-tracking
+    // branch 'refs/remotes/origin/main'"); git says 'origin/main'.
+    let merge_msg = repo.path().join("MERGE_MSG");
+    if let Ok(m) = std::fs::read_to_string(&merge_msg) {
+        let tidy = m.replace("'refs/remotes/", "'").replace("'refs/heads/", "'");
+        if tidy != m {
+            let _ = std::fs::write(&merge_msg, tidy);
+        }
+    }
 
     let mut index = repo.index()?;
     if index.has_conflicts() {

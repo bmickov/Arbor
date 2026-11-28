@@ -127,6 +127,19 @@ input[type="text"], input[type="password"], input:not([type]), textarea, select 
 textarea { resize: none; line-height: 1.45; }
 input:focus, textarea:focus, select:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--accent-soft); }
 input::placeholder, textarea::placeholder { color: var(--ink-3); }
+/* Drawn here too, so a select looks like the inputs beside it rather than a
+   GTK widget: a plain box with a small caret made of two gradients. */
+select {
+  appearance: none; -webkit-appearance: none;
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%), linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+  background-position: calc(100% - 13px) 55%, calc(100% - 9px) 55%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+select:hover:not(:disabled) { border-color: color-mix(in srgb, var(--ink-3) 60%, var(--line)); }
+select:disabled { opacity: 0.5; cursor: default; }
 /* Drawn here rather than by the toolkit: WebKitGTK paints native checkboxes
    with the desktop's GTK theme, so they came out white on dark themes. */
 input[type="checkbox"] {

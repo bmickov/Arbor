@@ -205,7 +205,15 @@ export interface ConflictFile {
 }
 export interface MergeOutcome { result: "up-to-date" | "fast-forward" | "merged" | "conflicts"; conflicts: string[] }
 export interface RebaseOutcome { result: "up-to-date" | "fast-forward" | "rebased" | "unchanged" | "conflicts"; head: string; conflicts: string[] }
-export interface PullOutcome { result: string; conflicts: string[] }
+export interface PullOutcome {
+  /** up-to-date | fast-forward | merged | rebased | conflicts */
+  result: string;
+  conflicts: string[];
+  /** The branch pulled from ("origin/main"). */
+  from: string;
+  /** Uncommitted changes put aside for the pull: restored, kept (in the stash list), or conflicted on the way back. */
+  stash: "restored" | "kept" | "conflicted" | null;
+}
 export interface CommitResult { oid: string; short: string; conflicts: string[] }
 export interface PausedRebase { label: string; branch: string | null; step: number; total: number; action: string; commit: string; summary: string }
 export interface Creds { username: string; password: string }
@@ -247,6 +255,8 @@ export const api = {
   resolveConflict: (repo: string, path: string, side: "ours" | "theirs") => call<void>("resolve_conflict", { repo, path, side }),
   conflictFile: (repo: string, path: string) => call<ConflictFile>("conflict_file", { repo, path }),
   resolveWithContent: (repo: string, path: string, content: string) => call<void>("resolve_with_content", { repo, path, content }),
+  /** Which of these files still have conflict markers in the working copy. */
+  filesWithMarkers: (repo: string, paths: string[]) => call<string[]>("files_with_markers", { repo, paths }),
 
   commit: (repo: string, message: string, amend: boolean, skipHooks: boolean, sign?: boolean) =>
     call<CommitResult>("commit", { repo, message, amend, skipHooks, sign: sign ?? null }),
@@ -297,6 +307,8 @@ export const api = {
   unmergedBranches: (repo: string, names: string[]) => call<string[]>("unmerged_branches", { repo, names }),
   renameBranch: (repo: string, from: string, to: string) => call<void>("rename_branch", { repo, from, to }),
   setUpstream: (repo: string, branch: string, upstream: string | null) => call<void>("set_upstream", { repo, branch, upstream }),
+  /** Commits `other` has that HEAD doesn't (incoming), and the reverse. */
+  betweenHeadAnd: (repo: string, other: string) => call<{ incoming: number; outgoing: number }>("between_head_and", { repo, other }),
   createTag: (repo: string, name: string, target: string, message: string | null) =>
     call<void>("create_tag", { repo, name, target, message }),
   deleteTag: (repo: string, name: string) => call<void>("delete_tag", { repo, name }),
@@ -341,7 +353,9 @@ export const api = {
   exportZip: (repo: string, rev: string, dest: string, folder: string) => call<number>("export_zip", { repo, rev, dest, folder }),
   trackedFiles: (repo: string) => call<string[]>("tracked_files", { repo }),
   fetch: (repo: string, remote: string | null, prune: boolean, creds?: Creds) => call<void>("fetch", { repo, remote, prune, creds }),
-  pull: (repo: string, rebase: boolean, creds?: Creds) => call<PullOutcome>("pull", { repo, rebase, creds }),
+  /** Pull into the current branch: its upstream, or `from` (a remote branch, "origin/feature"). `autostash` puts uncommitted changes aside and back. */
+  pull: (repo: string, rebase: boolean, creds?: Creds, opts: { from?: string; autostash?: boolean } = {}) =>
+    call<PullOutcome>("pull", { repo, rebase, creds, from: opts.from ?? null, autostash: opts.autostash ?? false }),
   /** `force` pushes with lease (refuses if someone pushed since the last fetch) unless `lease` is false. */
   push: (repo: string, opts: { branch?: string; remote?: string; force?: boolean; lease?: boolean; setUpstream?: boolean }, creds?: Creds) =>
     call<string>("push", {

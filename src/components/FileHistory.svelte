@@ -6,6 +6,7 @@
   import { app } from "../lib/state.svelte";
   import { dialog, menu, toasts } from "../lib/ui.svelte";
   import DiffView from "./DiffView.svelte";
+  import { untrack } from "svelte";
   import Icon from "./Icon.svelte";
 
   let { path, onclose }: { path: string; onclose: () => void } = $props();
@@ -18,14 +19,20 @@
   let blame = $state<Blame | null>(null);
   let loading = $state(true);
 
+  // Opened from a commit: start on that commit, not the newest one.
+  const at = untrack(() => app.fileHistoryAt);
+  app.fileHistoryAt = null;
+  let listEl = $state<HTMLDivElement>();
   $effect(() => {
     const p = path;
     loading = true;
     api.fileHistory(app.path, p).then((e) => {
       entries = e;
-      sel = e[0] ?? null;
+      sel = (at && e.find((x) => x.commit.oid === at)) || e[0] || null;
+      if (sel && sel !== e[0]) requestAnimationFrame(() => listEl?.querySelector(".entry.sel")?.scrollIntoView({ block: "center" }));
     }).catch((e) => toasts.push("error", String(e))).finally(() => (loading = false));
   });
+  const dir = $derived(path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "");
 
   $effect(() => {
     const s = sel;
@@ -82,7 +89,7 @@
   <div class="drawer" role="dialog" aria-modal="true" aria-label="History of {path}">
     <header>
       <Icon name="file" />
-      <div class="title"><b>{basename(path)}</b> <span class="faint">{path}</span></div>
+      <div class="title"><b>{basename(path)}</b>{#if dir}{" "}<span class="faint">{dir}</span>{/if}</div>
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected={tab === "history"} class:on={tab === "history"} onclick={() => (tab = "history")}>History</button>
         <button role="tab" aria-selected={tab === "blame"} class:on={tab === "blame"} onclick={() => (tab = "blame")}>Blame</button>
@@ -92,7 +99,7 @@
 
     {#if tab === "history"}
       <div class="body">
-        <div class="list">
+        <div class="list" bind:this={listEl}>
           {#each entries as e (e.commit.oid)}
             <button class="entry" class:sel={sel?.commit.oid === e.commit.oid} onclick={() => (sel = e)}>
               <span class="sum">{e.commit.summary}</span>

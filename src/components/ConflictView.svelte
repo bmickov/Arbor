@@ -350,8 +350,8 @@
   .side.ours.on { background: var(--sel); border-left-color: var(--accent); }
   .side.theirs.on { background: color-mix(in srgb, var(--lane-1) 14%, transparent); border-left-color: var(--lane-1); }
   .side .code, .result .code { overflow-x: auto; padding: 4px 0 6px; }
-  .who { display: flex; align-items: center; gap: 4px; padding: 5px 10px 2px; font-family: var(--font-ui); font-size: calc(var(--fs) * 11); font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.03em; }
-  .who .faint { text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .who { display: flex; align-items: center; gap: 4px; padding: 5px 10px 2px; font-family: var(--font-ui); font-size: calc(var(--fs) * 12); font-weight: 700; color: var(--ink-3); }
+  .who .faint { font-weight: 500; }
   .side.ours .who { color: var(--accent); }
   .side.theirs .who { color: var(--lane-1); }
   .ord { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; text-transform: none; }

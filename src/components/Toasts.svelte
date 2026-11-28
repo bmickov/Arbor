@@ -5,7 +5,7 @@
 
 <div class="toasts" aria-live="polite">
   {#each toasts.list as t (t.id)}
-    <div class="toast {t.kind}">
+    <div class="toast {t.kind}" role="status" onpointerenter={() => toasts.hold(t.id)} onpointerleave={() => toasts.release(t.id)}>
       <span class="text">{t.text}</span>
       {#if t.action}
         <button class="btn small" onclick={() => { t.action!.run(); toasts.dismiss(t.id); }}>{t.action.label}</button>

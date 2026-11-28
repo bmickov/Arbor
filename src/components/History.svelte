@@ -413,6 +413,7 @@
   .filters label { display: flex; flex-direction: column; gap: 2px; color: var(--ink-3); font-weight: 600; flex: 1 1 130px; min-width: 0; }
   .filters label.wide { flex: 1 1 220px; }
   .filters input, .filters select { padding: 0 7px; height: 28px; font-weight: 400; }
+  .filters select { padding-right: 26px; }
   .fstatus { flex: 1 0 100%; display: flex; align-items: center; gap: 6px; color: var(--ink-3); min-height: 18px; }
   .fstatus .sp { flex: 1; }
   .spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: hspin 0.8s linear infinite; }

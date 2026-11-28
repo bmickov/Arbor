@@ -15,7 +15,7 @@ export function fullDate(sec: number, withTime = true): string {
   const sameYear = dt.getFullYear() === new Date().getFullYear();
   const date = dt.toLocaleDateString(undefined, { day: "numeric", month: "short", year: sameYear ? undefined : "numeric" });
   if (!withTime) return date;
-  return `${date}, ${dt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+  return `${date}, ${dt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
 
 /** Lane palette for the commit graph; index wraps. */

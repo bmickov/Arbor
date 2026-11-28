@@ -2476,3 +2476,195 @@ fn file_history_includes_the_branch_a_file_came_from() {
     let h: Vec<String> = git::log::file_history(&r.path, "feat.txt", 50).unwrap().into_iter().map(|e| e.commit.summary).collect();
     assert_eq!(h, vec!["feat edit", "feat add"], "the merge only brought it over");
 }
+
+/// A bare "origin", repository `a` pushing to it and a clone `b` (main
+/// tracking origin/main).
+fn origin_and_clone() -> (Repo, tempfile::TempDir, tempfile::TempDir, String) {
+    let bare = tempfile::tempdir().unwrap();
+    let bare_path = bare.path().to_string_lossy().to_string();
+    Command::new("git").args(["init", "-q", "--bare", "-b", "main", &bare_path]).output().unwrap();
+    let a = Repo::new();
+    a.write("f.txt", "1\n2\n3\n");
+    a.write("g.txt", "g\n");
+    a.commit_all("one");
+    git::branches::add_remote(&a.path, "origin", &bare_path).unwrap();
+    git::remote::push(&a.path, None, None, false, false, true, None, None).unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let b = dest.path().join("b").to_string_lossy().to_string();
+    git::repo::clone_repo(&bare_path, &b, None, None).unwrap();
+    for (k, v) in [("user.name", "B"), ("user.email", "b@example.com")] {
+        Command::new("git").args(["config", k, v]).current_dir(&b).output().unwrap();
+    }
+    (a, bare, dest, b)
+}
+
+fn git_in(dir: &str, args: &[&str]) -> String {
+    let o = Command::new("git").args(args).current_dir(dir).output().unwrap();
+    assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
+    String::from_utf8_lossy(&o.stdout).to_string()
+}
+
+#[test]
+fn pull_from_another_remote_branch_by_merge_or_rebase() {
+    let (a, _bare, _dest, b) = origin_and_clone();
+    // On origin: a feature branch with a new file.
+    a.git(&["checkout", "-qb", "feature"]);
+    a.write("feature.txt", "f\n");
+    a.commit_all("feature work");
+    git::remote::push(&a.path, Some("feature"), Some("origin"), false, false, true, None, None).unwrap();
+
+    // b has its own commit on main, then pulls origin/feature (never fetched yet).
+    std::fs::write(Path::new(&b).join("g.txt"), "g from b\n").unwrap();
+    git_in(&b, &["commit", "-qam", "b's work"]);
+    let p = git::remote::pull_from(&b, Some("origin/feature"), false, false, None, None).unwrap();
+    assert_eq!(p.result, "merged");
+    assert_eq!(p.from, "origin/feature");
+    assert!(Path::new(&b).join("feature.txt").exists());
+    let subject = git_in(&b, &["log", "-1", "--format=%s"]);
+    assert_eq!(subject.trim(), "Merge remote-tracking branch 'origin/feature'");
+    assert_eq!(git_in(&b, &["rev-parse", "--abbrev-ref", "HEAD"]).trim(), "main");
+    // Its upstream is still origin/main.
+    assert_eq!(git::status::status(&b).unwrap().upstream.as_deref(), Some("origin/main"));
+
+    // Again by rebase: b's commits go on top of the new feature commit.
+    a.write("feature.txt", "f2\n");
+    a.commit_all("more feature work");
+    git::remote::push(&a.path, Some("feature"), Some("origin"), false, false, false, None, None).unwrap();
+    git_in(&b, &["reset", "-q", "--hard", "HEAD~1"]);
+    let p = git::remote::pull_from(&b, Some("origin/feature"), true, false, None, None).unwrap();
+    assert_eq!(p.result, "rebased");
+    let log = git_in(&b, &["log", "--format=%s"]);
+    assert_eq!(log.lines().take(3).collect::<Vec<_>>(), vec!["b's work", "more feature work", "feature work"]);
+    let undo = git::undo::list(&b).unwrap();
+    assert_eq!(undo[0].label, "Pull origin/feature into main with rebase");
+
+    // Not a remote branch.
+    assert!(git::remote::pull_from(&b, Some("nowhere/main"), false, false, None, None).is_err());
+    assert!(git::remote::pull_from(&b, Some("origin/no-such-branch"), false, false, None, None).is_err());
+}
+
+#[test]
+fn pull_stashes_local_changes_when_asked() {
+    let (a, _bare, _dest, b) = origin_and_clone();
+    a.write("f.txt", "1\n2 from a\n3\n");
+    a.commit_all("a edits line 2");
+    git::remote::push(&a.path, None, None, false, false, false, None, None).unwrap();
+    std::fs::write(Path::new(&b).join("g.txt"), "g\nlocal\n").unwrap();
+    git_in(&b, &["commit", "-qam", "b commit"]); // diverged: needs a merge
+    std::fs::write(Path::new(&b).join("g.txt"), "g\nlocal\nuncommitted\n").unwrap();
+
+    // Without autostash the merge refuses (and nothing changes).
+    assert!(git::remote::pull_from(&b, None, false, false, None, None).is_err());
+    assert_eq!(checked_out(&Path::new(&b).join("g.txt")), "g\nlocal\nuncommitted\n");
+    // With it: merged, and the changes are back, with no stash left.
+    let p = git::remote::pull_from(&b, None, false, true, None, None).unwrap();
+    assert_eq!(p.result, "merged");
+    assert_eq!(p.stash.as_deref(), Some("restored"));
+    assert_eq!(checked_out(&Path::new(&b).join("g.txt")), "g\nlocal\nuncommitted\n");
+    assert_eq!(checked_out(&Path::new(&b).join("f.txt")), "1\n2 from a\n3\n");
+    assert!(git::stash::list(&b).unwrap().is_empty());
+
+    // The pull itself conflicts: the changes wait in the stash list.
+    a.write("f.txt", "1\n2 again from a\n3\n");
+    a.commit_all("a edits line 2 again");
+    git::remote::push(&a.path, None, None, false, false, false, None, None).unwrap();
+    std::fs::write(Path::new(&b).join("f.txt"), "1\n2 from b\n3\n").unwrap();
+    git_in(&b, &["commit", "-qm", "b edits line 2", "--", "f.txt"]);
+    let p = git::remote::pull_from(&b, None, false, true, None, None).unwrap();
+    assert_eq!(p.result, "conflicts");
+    assert_eq!(p.stash.as_deref(), Some("kept"));
+    assert_eq!(git::stash::list(&b).unwrap().len(), 1);
+    git::merge::abort(&b).unwrap();
+    git::stash::pop(&b, 0, true).unwrap();
+    assert_eq!(checked_out(&Path::new(&b).join("g.txt")), "g\nlocal\nuncommitted\n");
+}
+
+#[test]
+fn pull_autostash_edge_cases() {
+    let (a, _bare, _dest, b) = origin_and_clone();
+    // Fast-forward with changes in the same file the pull changes.
+    a.write("f.txt", "1\n2 from a\n3\n");
+    a.commit_all("a edits line 2");
+    git::remote::push(&a.path, None, None, false, false, false, None, None).unwrap();
+    std::fs::write(Path::new(&b).join("f.txt"), "1\n2\n3\n4 local\n").unwrap();
+    let p = git::remote::pull_from(&b, None, false, true, None, None).unwrap();
+    assert_eq!(p.result, "fast-forward");
+    assert_eq!(p.stash.as_deref(), Some("restored"));
+    assert_eq!(checked_out(&Path::new(&b).join("f.txt")), "1\n2 from a\n3\n4 local\n");
+
+    // Putting the changes back conflicts: they're marked, and kept in the stash list.
+    a.write("f.txt", "1\n2 from a\n3\n4 from a\n");
+    a.commit_all("a adds line 4");
+    git::remote::push(&a.path, None, None, false, false, false, None, None).unwrap();
+    let p = git::remote::pull_from(&b, None, false, true, None, None).unwrap();
+    assert_eq!(p.result, "fast-forward");
+    assert_eq!(p.stash.as_deref(), Some("conflicted"));
+    assert_eq!(git::stash::list(&b).unwrap().len(), 1);
+    assert!(checked_out(&Path::new(&b).join("f.txt")).contains("<<<<<<<"));
+    git_in(&b, &["reset", "-q", "--hard"]);
+    git::stash::drop(&b, 0).unwrap();
+
+    // An untracked file where the pull adds one: refused, nothing lost, nothing left stashed.
+    a.write("new.txt", "from a\n");
+    a.commit_all("a adds new.txt");
+    git::remote::push(&a.path, None, None, false, false, false, None, None).unwrap();
+    std::fs::write(Path::new(&b).join("new.txt"), "mine\n").unwrap();
+    std::fs::write(Path::new(&b).join("g.txt"), "g\nlocal\n").unwrap();
+    assert!(git::remote::pull_from(&b, None, false, true, None, None).is_err());
+    assert_eq!(checked_out(&Path::new(&b).join("new.txt")), "mine\n");
+    assert_eq!(checked_out(&Path::new(&b).join("g.txt")), "g\nlocal\n");
+    assert!(git::stash::list(&b).unwrap().is_empty());
+
+    // Nothing to pull: nothing is stashed either.
+    std::fs::remove_file(Path::new(&b).join("new.txt")).unwrap();
+    git::remote::pull_from(&b, None, false, true, None, None).unwrap();
+    let p = git::remote::pull_from(&b, None, false, true, None, None).unwrap();
+    assert_eq!(p.result, "up-to-date");
+    assert_eq!(p.stash, None);
+}
+
+#[test]
+fn checkout_remote_branch_never_switches_to_an_unrelated_local_one() {
+    let (a, bare, _dest, b) = origin_and_clone();
+    // A second remote, "up/stream" (with a slash), carrying its own "main".
+    a.git(&["checkout", "-qb", "side"]);
+    a.write("side.txt", "s\n");
+    a.commit_all("side work");
+    let bare2 = tempfile::tempdir().unwrap();
+    let bare2_path = bare2.path().to_string_lossy().to_string();
+    Command::new("git").args(["init", "-q", "--bare", "-b", "main", &bare2_path]).output().unwrap();
+    git_in(&a.path, &["push", "-q", &bare2_path, "side:main", "side:topic"]);
+    git::branches::add_remote(&b, "up/stream", &bare2_path).unwrap();
+    git_in(&b, &["fetch", "-q", "up/stream"]);
+    let _ = bare;
+
+    // "topic" doesn't exist locally: created from the right remote, tracking it, and undoable.
+    let name = git::branches::checkout_remote(&b, "up/stream/topic", None).unwrap();
+    assert_eq!(name, "topic");
+    assert_eq!(git::status::status(&b).unwrap().upstream.as_deref(), Some("up/stream/topic"));
+    assert!(git::undo::list(&b).unwrap().iter().any(|e| e.label == "Create branch topic"));
+    // Again: it's already there, tracking it, so this just switches back to it.
+    git_in(&b, &["checkout", "-q", "main"]);
+    assert_eq!(git::branches::checkout_remote(&b, "up/stream/topic", None).unwrap(), "topic");
+
+    // "main" exists but tracks origin/main: refused, not a silent switch to the wrong branch.
+    git_in(&b, &["checkout", "-q", "main"]);
+    let e = git::branches::checkout_remote(&b, "up/stream/main", None).unwrap_err().to_string();
+    assert!(e.starts_with("EXISTS:") && e.contains("tracking origin/main"), "{e}");
+    assert_eq!(git_in(&b, &["rev-parse", "--abbrev-ref", "HEAD"]).trim(), "main");
+    // Under another name it works.
+    assert_eq!(git::branches::checkout_remote(&b, "up/stream/main", Some("stream-main")).unwrap(), "stream-main");
+    assert!(Path::new(&b).join("side.txt").exists());
+}
+
+#[test]
+fn files_with_markers_finds_unresolved_conflicts_only() {
+    let r = Repo::new();
+    r.write("a.txt", "x\n<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> other\n");
+    r.write("b.txt", "fine\n");
+    r.write("c.txt", "x\r\n<<<<<<<\r\nm\r\n=======\r\nt\r\n>>>>>>>\r\n");
+    // Lines that only look alike (indented, or longer runs) aren't markers.
+    r.write("d.txt", "  <<<<<<< quoted\n<<<<<<<< eight\n");
+    let all = ["a.txt", "b.txt", "c.txt", "d.txt", "missing.txt"].map(String::from).to_vec();
+    assert_eq!(git::conflict::files_with_markers(&r.path, &all).unwrap(), vec!["a.txt".to_string(), "c.txt".to_string()]);
+}

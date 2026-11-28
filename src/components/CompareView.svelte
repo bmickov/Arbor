@@ -163,6 +163,8 @@
             <div class="none faint">No file changes.</div>
           {/each}
           {#if cmp.files.length > filesProg.limit}<div class="none faint" use:nearEnd={filesProg.more}>{cmp.files.length - filesProg.limit} more…</div>{/if}
+        {:else if target && base && !error}
+          <div class="none faint">Comparing…</div>
         {/if}
       </div>
     </div>
@@ -182,7 +184,7 @@
   .compare { height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
   header { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
   .pick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .pick select { width: auto; max-width: 280px; padding: 4px 8px; font-weight: 600; }
+  .pick select { width: auto; max-width: 280px; padding: 4px 26px 4px 8px; font-weight: 600; }
   .lbl { color: var(--ink-3); }
   .summary { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--ink-2); }
   .summary.err { color: var(--danger); }
@@ -193,7 +195,7 @@
   .tabs button.on { background: var(--sel); color: var(--ink); }
   .n { color: var(--ink-3); font-weight: 500; }
   .list { flex: 1; overflow-y: auto; padding: 0 6px 10px; }
-  .group { padding: 10px 10px 4px; font-size: calc(var(--fs) * 11); font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+  .group { padding: 10px 10px 4px; font-size: calc(var(--fs) * 12); font-weight: 700; color: var(--ink-3); }
   .item { display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 6px 10px; border-radius: 6px; text-align: left; }
   .item:hover { background: var(--surface-2); }
   .item.sel { background: var(--sel); }

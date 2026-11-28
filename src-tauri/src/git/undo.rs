@@ -96,6 +96,19 @@ pub fn record(repo: &Repository, label: impl Into<String>, action: Action) {
     let _ = save(repo, &entries);
 }
 
+/// Rename the newest entry, if one was recorded since the journal held
+/// `before` entries (an operation built on another, like a pull on a merge,
+/// shows under its own name).
+pub fn relabel_newest(repo: &Repository, before: usize, label: impl Into<String>) {
+    let mut entries = load(repo);
+    if entries.len() > before {
+        if let Some(last) = entries.last_mut() {
+            last.label = label.into();
+            let _ = save(repo, &entries);
+        }
+    }
+}
+
 /// Snapshot the index as a tree so it can be restored later. None when the
 /// index has conflicts (a conflicted index can't be written as a tree).
 pub fn index_tree(repo: &Repository) -> Option<String> {

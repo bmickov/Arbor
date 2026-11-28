@@ -103,16 +103,53 @@ export interface Toast {
   action?: { label: string; run: () => void };
 }
 
+const MAX_TOASTS = 4;
+
 class ToastState {
   list = $state<Toast[]>([]);
   private n = 0;
+  private timers = new Map<number, { handle: ReturnType<typeof setTimeout>; life: number }>();
   push(kind: Toast["kind"], text: string, action?: Toast["action"], ms?: number) {
-    const id = ++this.n;
-    this.list = [...this.list, { id, kind, text, action }];
     const life = ms ?? (kind === "error" ? 9000 : action ? 7000 : 3500);
-    setTimeout(() => this.dismiss(id), life);
+    // The same message again (a retried action, a repeated error) refreshes
+    // the one on screen instead of stacking a copy.
+    const same = this.list.find((t) => t.kind === kind && t.text === text);
+    if (same) {
+      this.list = [...this.list.filter((t) => t !== same), { ...same, action }];
+      this.start(same.id, life);
+      return;
+    }
+    const id = ++this.n;
+    const list = [...this.list, { id, kind, text, action }];
+    // Keep a handful: the oldest go first, errors last.
+    while (list.length > MAX_TOASTS) {
+      const i = list.findIndex((t) => t.kind !== "error");
+      const [gone] = list.splice(i >= 0 ? i : 0, 1);
+      this.stop(gone.id);
+    }
+    this.list = list;
+    this.start(id, life);
+  }
+  private start(id: number, life: number) {
+    this.stop(id);
+    this.timers.set(id, { handle: setTimeout(() => this.dismiss(id), life), life });
+  }
+  private stop(id: number) {
+    const t = this.timers.get(id);
+    if (t) clearTimeout(t.handle);
+    this.timers.delete(id);
+  }
+  /** While the pointer is on a toast it stays, so a long message can be read. */
+  hold(id: number) {
+    const t = this.timers.get(id);
+    if (t) clearTimeout(t.handle);
+  }
+  release(id: number) {
+    const t = this.timers.get(id);
+    if (t) this.start(id, Math.min(t.life, 3000));
   }
   dismiss(id: number) {
+    this.stop(id);
     this.list = this.list.filter((t) => t.id !== id);
   }
 }

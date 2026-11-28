@@ -3,7 +3,7 @@
   import { api, type FileDiff, type Selection } from "../lib/api";
   import { basename } from "../lib/format";
   import { app } from "../lib/state.svelte";
-  import { menu, toasts } from "../lib/ui.svelte";
+  import { dialog, menu, toasts } from "../lib/ui.svelte";
   import Composer from "./Composer.svelte";
   import ConflictView from "./ConflictView.svelte";
   import DiffView from "./DiffView.svelte";
@@ -44,8 +44,10 @@
   $effect(() => {
     const sel = app.selectedFile;
     void app.version;
-    if (!sel) {
+    // Conflicted files show the conflict wizard, not a diff.
+    if (!sel || sel.area === "conflicted") {
       diff = null;
+      loading = false;
       return;
     }
     if (sel.area === "staged") selStaged = selStaged.has(sel.path) ? selStaged : new Set([sel.path]);
@@ -99,11 +101,30 @@
   }
 
   const stage = (paths: string[]) => app.act("Staging", () => api.stageFiles(app.path, paths));
-  const unstage = (paths: string[]) => app.act("Unstaging", () => api.unstageFiles(app.path, withRenames(paths)));
-  async function discard(paths: string[]) {
-    await app.act("Discarding", () => api.discardFiles(app.path, paths));
-    toasts.push("info", `Discarded changes to ${paths.length === 1 ? basename(paths[0]) : `${paths.length} files`}.`, undoAction);
+
+  /** Staging a conflicted file marks it resolved: not with markers still in it, unless you say so. */
+  async function markResolved(paths: string[]) {
+    const left = await api.filesWithMarkers(app.path, paths).catch(() => []);
+    if (left.length) {
+      const one = left.length === 1;
+      const ok = await dialog.confirm(
+        one ? `${basename(left[0])} still has conflict markers` : `${left.length} files still have conflict markers`,
+        `${one ? "It still has" : "They still have"} <<<<<<< and >>>>>>> lines. Marking ${one ? "it" : "them"} resolved stages the markers too, and they'd be committed. Pick Mine or Theirs, or edit the file, first.`,
+        "Mark resolved anyway",
+        true,
+      );
+      if (!ok) return;
+    }
+    await stage(paths);
   }
+
+  const unstage = (paths: string[]) => app.act("Unstaging", () => api.unstageFiles(app.path, withRenames(paths)));
+  // The Undo toast only once it worked: a failed discard already showed its error.
+  async function discard(paths: string[]) {
+    if (await done(app.run("Discarding", () => api.discardFiles(app.path, paths))))
+      toasts.push("info", `Discarded changes to ${paths.length === 1 ? basename(paths[0]) : `${paths.length} files`}.`, undoAction);
+  }
+  const done = (p: Promise<unknown>) => p.then(() => true, () => false);
 
   async function lineAction(a: "stage" | "unstage" | "discard", sel: Selection[]) {
     const f = app.selectedFile;
@@ -115,8 +136,8 @@
       await app.act("Unstaging", () => api.unstageLines(app.path, f.path, old, sel, s));
     }
     if (a === "discard") {
-      await app.act("Discarding", () => api.discardLines(app.path, f.path, sel, s));
-      toasts.push("info", "Discarded the selected lines.", undoAction);
+      if (await done(app.run("Discarding", () => api.discardLines(app.path, f.path, sel, s))))
+        toasts.push("info", "Discarded the selected lines.", undoAction);
     }
   }
 
@@ -207,7 +228,7 @@
                 <span class="name" title={f.path}><b>{basename(f.path)}</b></span>
                 <button class="btn small" title="Keep the version from your branch" onclick={() => app.act("Resolving", () => api.resolveConflict(app.path, f.path, "ours"))}>Mine</button>
                 <button class="btn small" title="Keep the version being merged in" onclick={() => app.act("Resolving", () => api.resolveConflict(app.path, f.path, "theirs"))}>Theirs</button>
-                <button class="btn small primary" title="Stage the file as it is now in your editor" onclick={() => stage([f.path])}>Resolved</button>
+                <button class="btn small" title="Stage the file as it is now in your editor" onclick={() => markResolved([f.path])}>Resolved</button>
               </div>
             {/each}
           </div>
@@ -222,7 +243,7 @@
             title={app.settings.fileTree ? "Show as a list" : "Show as a folder tree"} aria-label={app.settings.fileTree ? "Show as a list" : "Show as a folder tree"}>
             <Icon name={app.settings.fileTree ? "file" : "folder"} size={13} />
           </button>
-          {#if st?.unstaged.length}<button class="link" onclick={() => app.act("Staging", () => api.stageAll(app.path))}>Stage all</button>{/if}
+          {#if st?.unstaged.length}<button class="link" onclick={act.stageAll}>Stage all</button>{/if}
         </header>
         <FileList files={st?.unstaged ?? []} area="unstaged" selected={app.selectedFile?.area === "unstaged" ? selUnstaged : new Set()}
           onselect={(p, e) => select("unstaged", p, e)} ontoggle={stage} oncontext={(e, p) => fileMenu(e, "unstaged", p)} ondropfiles={unstage} />
@@ -256,7 +277,7 @@
             {#if entry.oldPath}<span class="faint">{entry.oldPath} →</span>{/if}
             <bdi>{entry.path}</bdi>
           </span>
-          {#if diff && !diff.binary}
+          {#if diff && !diff.binary && app.selectedFile.area !== "conflicted"}
             <span class="stats"><span class="plus">+{diff.additions}</span> <span class="minus">−{diff.deletions}</span></span>
           {/if}
           {#if loading}<span class="faint">…</span>{/if}

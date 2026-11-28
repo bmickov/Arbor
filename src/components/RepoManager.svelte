@@ -645,11 +645,11 @@
      grid itself must use the rows' font size to line up with them. */
   .clabel {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    font-size: calc(var(--fs) * 10.5); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3);
+    font-size: calc(var(--fs) * 12); font-weight: 600; color: var(--ink-3);
   }
   /* The handle fills the gap after its column. */
   .grip { position: absolute; top: -7px; bottom: -6px; right: -14px; width: 14px; cursor: col-resize; z-index: 1; }
-  .grip::after { content: ""; position: absolute; left: 6.5px; top: 5px; bottom: 5px; width: 1px; background: var(--line-soft); }
+  .grip::after { content: ""; position: absolute; left: 6.5px; top: 5px; bottom: 5px; width: 1px; background: transparent; }
   .grip.left { right: auto; left: -14px; }
   .colhead:hover .grip::after { background: var(--line); }
   .grip:hover::after, .grip.on::after, .grip:focus-visible::after { background: var(--accent); width: 2px; left: 6px; }

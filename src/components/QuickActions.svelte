@@ -67,6 +67,20 @@
 
   const close = () => (app.quick = false);
 
+  // An icon that says what a command is about, rather than the same one for all.
+  const ICONS: Record<string, string> = {
+    prefs: "settings", shortcuts: "grid", repos: "group", open: "folder", sidebar: "split", refresh: "refresh", undo: "undo", "undo.history": "undo",
+    "view.changes": "changes", "view.history": "history", "view.stashes": "stash", "view.review": "branch", "view.reflog": "undo",
+    compare: "merge", browse: "folder", "diff.split": "split", "repo.clone": "plus", "repo.files": "file", "patch.apply": "file", "patch.save": "file",
+    "repo.settings": "settings", "worktree.new": "folder", "submodules.update": "refresh", "repo.terminal": "terminal",
+    commit: "commit", "commit.focus": "commit", "commit.copyId": "commit", "stage.all": "plus", "unstage.all": "minus",
+    stash: "stash", "stash.snapshot": "stash", "stash.pop": "stash",
+    fetch: "fetch", pull: "pull", pullFrom: "pull", push: "push", sync: "sync",
+    "branch.switch": "branch", "branch.new": "branch", "history.search": "search",
+  };
+  const commandIcon = (id: string, group: string) =>
+    ICONS[id] ?? (group === "Tabs" ? "grid" : group === "Text size" ? "settings" : "grid");
+
   const items = $derived.by(() => {
     const q = query.trim().toLowerCase();
     const all: Item[] = [];
@@ -78,7 +92,9 @@
     for (const c of COMMANDS) {
       if (c.id === "quick" || (c.repo && !app.repo)) continue;
       const k = bindings(c.id)[0];
-      add({ kind: "command", key: c.id, label: c.label, hint: k ? keyLabel(k) : "", icon: "grid", run: c.run }, c.label, c.group);
+      // Commands come first on an equal match: "compare" means the command, not CompareView.svelte.
+      const s = Math.max(score(c.label, q), score(c.group, q));
+      if (s >= 0) all.push({ kind: "command", key: c.id, label: c.label, hint: k ? keyLabel(k) : "", icon: commandIcon(c.id, c.group), run: c.run, score: q ? s + 200 : 0 });
     }
     if (app.repo) {
       for (const b of app.refs?.local ?? []) {
@@ -88,10 +104,11 @@
           run: () => (b.isHead ? act.showHistory(b.name) : act.checkout(b.name)),
         }, b.name);
       }
-      const locals = new Set((app.refs?.local ?? []).map((b) => b.name));
+      // Remote branches a local branch tracks are covered by that branch.
+      const tracked = new Set((app.refs?.local ?? []).map((b) => b.upstream).filter(Boolean));
       for (const r of app.refs?.remotes ?? []) {
         for (const b of r.branches) {
-          if (locals.has(b.name)) continue;
+          if (tracked.has(b.fullName)) continue;
           add({ kind: "remote", key: b.fullName, label: b.fullName, icon: "remote", hint: "check out as local branch", run: () => act.checkoutRemote(b.fullName) }, b.fullName);
         }
       }
@@ -107,9 +124,11 @@
         }
         for (const f of files) {
           const base = f.slice(f.lastIndexOf("/") + 1);
-          // Matching the file name counts for more than matching its folder.
+          // Matching the file name counts for more than matching its folder,
+          // and letters scattered across a whole path match nearly anything.
           const sb = score(base, q);
-          const s = Math.max(sb < 0 ? -1 : sb + 100, score(f, q));
+          const sp = f.toLowerCase().includes(q) ? score(f, q) : -1;
+          const s = Math.max(sb < 0 ? -1 : sb + 50, sp);
           if (s >= 0) all.push({ kind: "file", key: f, label: base, hint: f, icon: "file", score: s, run: () => (app.fileHistoryPath = f) });
         }
       }
@@ -202,7 +221,7 @@
   .field { display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); color: var(--ink-3); }
   .field input { border: 0; background: transparent; box-shadow: none; padding: 13px 0; font-size: calc(var(--fs) * 15); }
   .list { max-height: 56vh; overflow-y: auto; padding: 4px 6px 6px; }
-  .group { padding: 8px 10px 3px; font-size: calc(var(--fs) * 11); font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+  .group { padding: 8px 10px 3px; font-size: calc(var(--fs) * 12); font-weight: 700; color: var(--ink-3); }
   .item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 10px; border-radius: 7px; text-align: left; color: var(--ink-3); }
   .item.on { background: var(--sel); color: var(--ink-2); }
   .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }

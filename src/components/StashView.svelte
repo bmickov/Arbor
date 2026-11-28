@@ -95,7 +95,16 @@
         <span class="meta faint">{s.branch ? `on ${s.branch} · ` : ""}<span title={fullDate(s.time)}>{relTime(s.time)}</span>{s.hasUntracked ? " · new files" : ""}</span>
       </button>
     {:else}
-      <div class="empty"><div><strong>No stashes</strong>Stash puts your changes aside so you can switch tasks with a clean working copy.</div></div>
+      {@const changed = (app.status?.staged.length ?? 0) + (app.status?.unstaged.length ?? 0)}
+      <div class="empty">
+        <div>
+          <strong>No stashes</strong>
+          Stash puts your changes aside so you can switch tasks with a clean working copy.
+          {#if changed}
+            <div class="first"><button class="btn" onclick={() => act.stashChanges()} title={keyText("Ctrl+Shift+S")}><Icon name="stash" size={14} /> Stash {changed} changed file{changed === 1 ? "" : "s"}…</button></div>
+          {/if}
+        </div>
+      </div>
     {/each}
   </div>
   <Splitter id="stash.list" min={180} keep={320} />
@@ -143,6 +152,7 @@
   .msg { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta { font-size: calc(var(--fs) * 12); }
   .detail { min-width: 0; min-height: 0; }
+  .first { margin-top: 14px; }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
   .sp { flex: 1; }
   .multi { display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 420px; }

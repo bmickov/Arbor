@@ -150,7 +150,7 @@
     const isStash = !!info && info.parents.length === 3;
     const link = isStash ? null : act.hostLink(oid, f?.status === "deleted" ? undefined : path);
     menu.fromEvent(e, [
-      { label: "File history & blame", action: () => (app.fileHistoryPath = path) },
+      { label: "File history & blame", action: () => ((app.fileHistoryAt = oid), (app.fileHistoryPath = path)) },
       { label: "Open current version", action: () => api.openExternal(`${app.path}/${path}`) },
       { label: "Open in diff tool", action: () => act.openDiffTool(path, oid) },
       { separator: true },

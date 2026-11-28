@@ -114,6 +114,8 @@ export interface Settings {
   context: number;
   ignoreWhitespace: boolean;
   pullRebase: boolean;
+  /** Put uncommitted changes aside before pulling and back afterwards. */
+  pullAutostash: boolean;
   splitDiff: boolean;
   theme: ThemeId;
   uiFont: "atkinson" | "system";
@@ -164,7 +166,7 @@ export interface Settings {
   skipVersion: string;
 }
 export const DEFAULT_SETTINGS: Settings = {
-  context: 3, ignoreWhitespace: false, pullRebase: false, splitDiff: false,
+  context: 3, ignoreWhitespace: false, pullRebase: false, pullAutostash: true, splitDiff: false,
   theme: "system", uiFont: "atkinson", uiSize: 13, codeFont: "commit", codeSize: 12, shortcuts: {},
   restoreSession: true, codeFollowsUi: true, largeDiffLines: 10000, autoFetchMinutes: 10, syntax: true, wordDiff: true, notify: true, desktopEntry: true, imageMode: "side", fileTree: false, issueLinks: [],
   diffTool: "", mergeTool: "", diffCommand: "", mergeCommand: "", pinned: {},
@@ -220,6 +222,8 @@ class App {
   selectedFile = $state<{ path: string; area: "staged" | "unstaged" | "conflicted" } | null>(null);
   /** File whose history/blame panel is open. */
   fileHistoryPath = $state<string | null>(null);
+  /** The commit File history should start on (it was opened from that commit). */
+  fileHistoryAt: string | null = null;
   compare = $state<{ base: string; target: string } | null>(null);
   browse = $state<{ rev: string; label: string } | null>(null);
   historyQuery = $state("");
@@ -242,6 +246,8 @@ class App {
 
   /** Preferences window: closed, or open at a section. */
   prefs = $state<null | "general" | "appearance" | "diffs" | "commits" | "keyboard" | "updates">(null);
+  /** The Pull dialog, open with what to pull from first (a remote branch), or "" for the upstream. */
+  pullDialog = $state<{ from: string; rebase?: boolean } | null>(null);
   /** Branch switcher (Ctrl+P) visibility. */
   switcher = $state(false);
   /** A commit message for the composer to pick up (from an applied email patch). */
@@ -846,7 +852,8 @@ class App {
         try {
           await api.stashPop(path, 0, true);
         } catch (e) {
-          toasts.push("error", String(e));
+          // Putting the changes back conflicted: the conflicts are in Changes.
+          toasts.push("error", String(e), this.path === path ? { label: "Show changes", run: () => (this.view = "changes") } : undefined);
         }
       }
       // libgit2 writes LFS pointers, not file contents: let git-lfs put them

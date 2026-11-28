@@ -36,6 +36,7 @@
     if (loadedFor === app.path) return;
     loadedFor = app.path;
     amend = false;
+    prefilled = null;
     try {
       const d = JSON.parse(localStorage.getItem(draftKey) || "null");
       subject = d?.subject ?? "";
@@ -68,12 +69,19 @@
     }
   });
 
-  // Prefill git's prepared message when a merge, cherry-pick or revert stopped on conflicts.
+  // Prefill git's prepared message when a merge, cherry-pick or revert stopped
+  // on conflicts, and take it away again if that's aborted (unless edited).
+  let prefilled: { subject: string; body: string } | null = null;
   $effect(() => {
-    if ((st?.state === "merge" || st?.state === "cherrypick" || st?.state === "revert") && !subject && st.mergeMessage) {
+    const busy = st?.state === "merge" || st?.state === "cherrypick" || st?.state === "revert";
+    if (busy && !subject && st?.mergeMessage) {
       const [s, ...rest] = st.mergeMessage.split("\n");
       subject = s;
       body = rest.join("\n").trim();
+      prefilled = { subject, body };
+    } else if (st && !busy && prefilled) {
+      if (subject === prefilled.subject && body === prefilled.body) subject = body = "";
+      prefilled = null;
     }
   });
 

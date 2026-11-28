@@ -192,7 +192,7 @@
   .title { display: flex; align-items: center; gap: 12px; }
   h2 { margin: 0; font-size: calc(var(--fs) * 17); }
   .base, .stale { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: calc(var(--fs) * 12); }
-  .base select, .stale select { width: auto; padding: 3px 6px; }
+  .base select, .stale select { width: auto; padding: 3px 26px 3px 8px; }
   .tools { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .seg { display: flex; background: var(--surface-3); border-radius: 7px; padding: 2px; }
   .seg button { padding: 3px 10px; border-radius: 5px; font-weight: 600; color: var(--ink-2); font-size: calc(var(--fs) * 12); }

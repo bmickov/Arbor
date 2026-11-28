@@ -61,7 +61,7 @@
       {/if}
       {#each s.fields ?? [] as f (f.key)}
         {#if f.type === "checkbox"}
-          <label class="check"><input type="checkbox" bind:checked={values[f.key] as boolean} /> {f.label}</label>
+          <label class="check"><input type="checkbox" bind:checked={values[f.key] as boolean} /> <span>{f.label}{#if f.hint}<small class="faint">{f.hint}</small>{/if}</span></label>
         {:else}
           <label class="field">
             <span>{f.label}</span>
@@ -113,7 +113,10 @@
   .body { margin: 0; color: var(--ink-2); white-space: pre-wrap; user-select: text; }
   .field { display: flex; flex-direction: column; gap: 5px; }
   .field span { font-size: calc(var(--fs) * 12); color: var(--ink-2); font-weight: 600; }
-  .check { display: flex; align-items: center; gap: 8px; }
+  .check { display: flex; align-items: flex-start; gap: 8px; }
+  .check input { margin-top: 2px; }
+  .check span { display: flex; flex-direction: column; gap: 2px; }
+  .check small { font-size: calc(var(--fs) * 12); line-height: 1.35; }
   .error { margin: 0; color: var(--danger); }
   .buttons { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
   .spacer { flex: 1; }

@@ -13,6 +13,17 @@
   const noRemote = $derived(!!app.refs && app.refs.remotes.length === 0);
   const unborn = $derived(!!st && !st.head);
   const midOperation = $derived(!!st && st.state !== "clean");
+  // Right-click on Pull: the upstream either way, or any other remote branch.
+  function pullMenu() {
+    const up = st?.upstream;
+    const other = app.settings.pullRebase ? { rebase: false, label: "with merge" } : { rebase: true, label: "with rebase" };
+    return [
+      { label: up ? `Pull from ${up}` : "Pull", hint: keyText("Ctrl+Shift+Down"), disabled: !up, action: () => act.pull() },
+      { label: up ? `Pull from ${up} ${other.label}` : `Pull ${other.label}`, disabled: !up, action: () => act.pull({ rebase: other.rebase }) },
+      { separator: true },
+      { label: "Pull from another branch…", hint: keyText("Ctrl+Shift+L"), action: () => (app.pullDialog = { from: "" }) },
+    ];
+  }
   const nothingToStash = $derived(!!st && !st.staged.length && !st.unstaged.length);
   const NO_REMOTE = "This repository has no remotes yet. Add one with + next to Remotes in the sidebar.";
   const NO_COMMIT = "Make a first commit first.";
@@ -48,10 +59,19 @@
 
   function branchMenu(e: MouseEvent) {
     const locals = app.refs?.local ?? [];
+    // Remote branches no local branch tracks yet: checking one out creates it, tracking the remote one.
+    const tracked = new Set(locals.map((b) => b.upstream).filter(Boolean));
+    const remote = (app.refs?.remotes ?? []).flatMap((r) => r.branches).filter((b) => !tracked.has(b.fullName));
+    const MAX = 12;
     const items: MenuItem[] = [
-      { label: "New branch…", action: () => act.newBranch() },
+      { label: "New branch…", hint: keyText("Ctrl+B"), action: () => act.newBranch() },
+      { label: "Find a branch…", hint: keyText("Ctrl+P"), action: () => (app.switcher = true) },
       { separator: true },
-      ...locals.map((b) => ({ label: b.name, hint: b.isHead ? "current" : undefined, disabled: b.isHead, action: () => act.checkout(b.name) })),
+      ...locals.slice(0, MAX).map((b) => ({ label: b.name, hint: b.isHead ? "current" : undefined, disabled: b.isHead, action: () => act.checkout(b.name) })),
+      ...(locals.length > MAX ? [{ label: `${locals.length - MAX} more…`, action: () => (app.switcher = true) }] : []),
+      ...(remote.length ? [{ separator: true } as MenuItem] : []),
+      ...remote.slice(0, MAX).map((b) => ({ label: b.fullName, hint: "remote", action: () => act.checkoutRemote(b.fullName) })),
+      ...(remote.length > MAX ? [{ label: `${remote.length - MAX} more remote branches…`, action: () => (app.switcher = true) }] : []),
     ];
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     menu.open(r.left, r.bottom + 4, items, "Switch branch");
@@ -95,7 +115,9 @@
     <button class="tool" onclick={act.fetchAll} disabled={!!app.busy || noRemote} title={noRemote ? NO_REMOTE : `Fetch from all remotes${fetchedAgo}`}>
       <Icon name="fetch" /><span>Fetch</span>
     </button>
-    <button class="tool" onclick={act.pull} disabled={!!app.busy || !st?.upstream} title={st?.upstream ? `Pull from ${st.upstream}` : "This branch doesn't track a remote branch"}>
+    <button class="tool" onclick={() => act.pull()} disabled={!!app.busy || !st?.branch || noRemote || unborn}
+      title={noRemote ? NO_REMOTE : unborn ? NO_COMMIT : !st?.branch ? "Check out a branch to pull into it" : st?.upstream ? `Pull from ${st.upstream} (right-click for more)` : "Choose a remote branch to pull from"}
+      oncontextmenu={(e) => menu.fromEvent(e, pullMenu())}>
       <Icon name="pull" /><span>Pull</span>
       {#if st?.behind}<b class="count">{st.behind}</b>{/if}
     </button>

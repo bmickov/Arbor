@@ -78,7 +78,8 @@ export const COMMANDS: Command[] = [
   { id: "view.review", label: "Show Branches Review", group: "Views", keys: ["Ctrl+4"], repo: true, inInputs: true, run: () => view("review") },
   { id: "view.reflog", label: "Show the reflog (recover lost commits)", group: "Views", keys: ["Ctrl+5"], repo: true, inInputs: true, run: () => view("reflog") },
   { id: "compare", label: "Compare branches…", group: "Branches & history", keys: [], repo: true, run: () => {
-    const other = app.refs?.local.find((b) => !b.isHead)?.name;
+    // Start with something to look at: the branch worked on most recently, or this one's upstream.
+    const other = (app.refs?.local ?? []).filter((b) => !b.isHead).sort((a, b) => b.time - a.time)[0]?.name ?? app.status?.upstream;
     if (other) return act.compareWith(other);
     app.compare = { base: app.headBranch ?? "HEAD", target: "" };
     app.view = "compare";
@@ -116,7 +117,7 @@ export const COMMANDS: Command[] = [
     view("changes");
     app.focusComposer = Date.now();
   } },
-  { id: "stage.all", label: "Stage all changes", group: "Working copy", keys: ["Ctrl+Shift+A"], repo: true, run: () => app.act("Staging", () => api.stageAll(app.path)) },
+  { id: "stage.all", label: "Stage all changes", group: "Working copy", keys: ["Ctrl+Shift+A"], repo: true, run: () => act.stageAll() },
   { id: "unstage.all", label: "Unstage all changes", group: "Working copy", keys: ["Ctrl+Shift+U"], repo: true, run: () => app.act("Unstaging", () => api.unstageAll(app.path)) },
   { id: "stash", label: "Stash changes…", group: "Working copy", keys: ["Ctrl+Shift+S"], repo: true, run: () => act.stashChanges() },
   { id: "stash.snapshot", label: "Save a snapshot of your changes…", group: "Working copy", keys: [], repo: true, run: () => act.snapshot() },
@@ -127,6 +128,7 @@ export const COMMANDS: Command[] = [
   // Remote
   { id: "fetch", label: "Fetch (all repositories when on the list)", group: "Remote", keys: ["Ctrl+Shift+F"], run: () => (app.repo ? act.fetchAll() : library.fetchAll()) },
   { id: "pull", label: "Pull", group: "Remote", keys: ["Ctrl+Shift+Down"], repo: true, run: () => act.pull() },
+  { id: "pullFrom", label: "Pull from another branch…", group: "Remote", keys: ["Ctrl+Shift+L"], repo: true, run: () => (app.pullDialog = { from: "" }) },
   { id: "push", label: "Push", group: "Remote", keys: ["Ctrl+Shift+Up"], repo: true, run: () => act.push() },
   { id: "sync", label: "Sync (pull, then push)", group: "Remote", keys: ["Ctrl+Shift+Y"], repo: true, run: () => act.sync() },
 

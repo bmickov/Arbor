@@ -6,6 +6,7 @@
   import { handleKey } from "./lib/shortcuts.svelte";
   import { dialog, menu } from "./lib/ui.svelte";
   import BranchSwitcher from "./components/BranchSwitcher.svelte";
+  import PullDialog from "./components/PullDialog.svelte";
   import QuickActions from "./components/QuickActions.svelte";
   import BranchesReview from "./components/BranchesReview.svelte";
   import BisectBar from "./components/BisectBar.svelte";
@@ -169,6 +170,7 @@
 
 {#if app.prefs}<Preferences />{/if}
 {#if app.switcher && app.repo}<BranchSwitcher />{/if}
+{#if app.pullDialog && app.repo}<PullDialog onclose={() => (app.pullDialog = null)} />{/if}
 {#if app.quick}<QuickActions />{/if}
 {#if app.repoSettings && app.repo}<RepoSettings onclose={() => (app.repoSettings = false)} />{/if}
 <Menu />

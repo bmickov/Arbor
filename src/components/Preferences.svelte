@@ -158,6 +158,8 @@
 
 <svelte:window onkeydowncapture={onKeyCapture} />
 
+{#snippet keys(combo: string)}<span class="combo">{#each keyParts(combo) as k, i}{#if i}<span class="plus">+</span>{/if}<span class="kbd">{k}</span>{/each}</span>{/snippet}
+
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 <div class="backdrop" onclick={(e) => e.target === e.currentTarget && close()}>
   <div class="prefs" role="dialog" aria-modal="true" aria-labelledby="prefs-title">
@@ -275,7 +277,7 @@
                 <button class="link" disabled={s.uiSize === UI_SIZES.default} onclick={() => app.setUiSize(UI_SIZES.default)}>Reset</button>
               </div>
             </div>
-            <p class="hint">Also with {#each keyParts("Ctrl+=") as k}<span class="kbd">{k}</span> {/each}and {#each keyParts("Ctrl+-") as k}<span class="kbd">{k}</span> {/each}anywhere in Arbor{s.codeFollowsUi ? ", which resize code and diffs along with it" : ""}.</p>
+            <p class="hint">Also with {@render keys("Ctrl+=")}{" "}and {@render keys("Ctrl+-")}{" "}anywhere in Arbor{s.codeFollowsUi ? ", which resize code and diffs along with it" : ""}.</p>
           </section>
 
           <section>
@@ -393,6 +395,10 @@
             <label class="toggle">
               <input type="checkbox" checked={s.pullRebase} onchange={() => { s.pullRebase = !s.pullRebase; save(); }} />
               <span><b>Pull with rebase</b><small>Replay your local commits on top of the remote ones instead of creating a merge commit.</small></span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" checked={s.pullAutostash} onchange={() => { s.pullAutostash = !s.pullAutostash; save(); }} />
+              <span><b>Stash local changes to pull</b><small>Put uncommitted changes aside before pulling and back afterwards, instead of asking you to commit or stash them first.</small></span>
             </label>
           </section>
         {:else if app.prefs === "commits"}
@@ -597,6 +603,8 @@
 </div>
 
 <style>
+  .combo { display: inline-flex; align-items: baseline; gap: 2px; white-space: nowrap; }
+  .combo .plus { color: var(--ink-3); }
   .backdrop { position: fixed; inset: 0; z-index: 100; background: var(--backdrop); display: grid; place-items: center; padding: 20px; }
   .prefs {
     width: min(860px, 100%); height: min(640px, 100%); display: grid; grid-template-columns: 200px 1fr;

@@ -353,13 +353,32 @@ pub fn checkout_remote(repo_path: &str, full_name: &str, local_name: Option<&str
     ensure_no_paused_rebase(&repo)?;
     let rb = repo.find_branch(full_name, BranchType::Remote)?;
     let target = rb.get().target().ok_or_else(|| Error::Msg("Remote branch has no commit.".into()))?;
-    let default_name = full_name.split_once('/').map(|(_, n)| n).unwrap_or(full_name);
-    let name = local_name.unwrap_or(default_name).to_string();
+    // "upstream/team/x" from remote "upstream/team" is branch "x": the longest remote name wins.
+    let default_name = super::remote::split_remote_branch(&repo, full_name)
+        .map(|(_, b)| b)
+        .unwrap_or_else(|| full_name.split_once('/').map(|(_, n)| n).unwrap_or(full_name).to_string());
+    let name = local_name.map(str::to_string).unwrap_or(default_name);
     validate_name(&name)?;
-    if repo.find_branch(&name, BranchType::Local).is_err() {
-        let c = repo.find_commit(target)?;
-        let mut b = repo.branch(&name, &c, false)?;
-        b.set_upstream(Some(full_name))?;
+    match repo.find_branch(&name, BranchType::Local) {
+        // Already there and tracking this remote branch: just switch to it.
+        Ok(b) => {
+            let tracks = b.upstream().ok().and_then(|u| u.name().ok().flatten().map(str::to_string));
+            if tracks.as_deref() != Some(full_name) {
+                return Err(Error::Msg(format!(
+                    "EXISTS:A local branch {name} already exists{}. Check out {full_name} under another name.",
+                    tracks.map(|t| format!(", tracking {t}")).unwrap_or_default()
+                )));
+            }
+        }
+        Err(_) => {
+            let c = repo.find_commit(target)?;
+            let mut b = repo.branch(&name, &c, false)?;
+            b.set_upstream(Some(full_name))?;
+            undo::record(&repo, format!("Create branch {name}"), Action::DeleteBranch { name: name.clone(), expect: target.to_string() });
+        }
+    }
+    if let Some(at) = checked_out_elsewhere(&repo, &name) {
+        return err(format!("'{name}' is already checked out in the worktree at {at}. Open that worktree instead, or switch it to another branch first."));
     }
     checkout_recorded(&repo, &format!("refs/heads/{name}"), format!("Check out {name}"))?;
     Ok(name)
@@ -570,4 +589,21 @@ pub fn resolve(repo: &Repository, spec: &str) -> Result<Oid> {
         }
     }
     Ok(repo.revparse_single(spec)?.peel_to_commit()?.id())
+}
+
+/// Commits `other` has that HEAD doesn't (incoming), and the reverse
+/// (outgoing): what pulling `other` would bring in.
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Between {
+    pub incoming: usize,
+    pub outgoing: usize,
+}
+
+pub fn between_head_and(repo_path: &str, other: &str) -> Result<Between> {
+    let repo = open(repo_path)?;
+    let head = repo.head()?.peel_to_commit()?.id();
+    let theirs = resolve(&repo, other)?;
+    let (outgoing, incoming) = repo.graph_ahead_behind(head, theirs)?;
+    Ok(Between { incoming, outgoing })
 }

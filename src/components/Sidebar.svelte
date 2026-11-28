@@ -544,7 +544,8 @@
   .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dot { width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--ink-3); flex: none; }
   .dot.current { background: var(--lane-0); border-color: var(--lane-0); box-shadow: 0 0 0 3px color-mix(in srgb, var(--lane-0) 25%, transparent); }
-  .dot.remote { border-style: dashed; border-width: 1.5px; }
+  /* A thinner, lighter ring: dashed borders break up at this size. */
+  .dot.remote { width: 7px; height: 7px; border-width: 1.5px; border-color: color-mix(in srgb, var(--ink-3) 70%, transparent); margin: 0 0.5px; }
   .ab { font-size: calc(var(--fs) * 11); color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .gone { font-size: calc(var(--fs) * 10); color: var(--warn); border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; }
   .none { padding: 4px 10px; font-size: calc(var(--fs) * 12); }

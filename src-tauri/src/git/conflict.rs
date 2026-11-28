@@ -155,11 +155,38 @@ fn clone_entry(e: &IndexEntry) -> IndexEntry {
     }
 }
 
+/// A line git writes to open or close a conflict.
+fn is_marker(l: &str) -> bool {
+    l.starts_with("<<<<<<< ") || l == "<<<<<<<" || l.starts_with(">>>>>>> ") || l == ">>>>>>>"
+}
+
+/// Which of `paths` still have conflict markers in the working tree (text
+/// files only; anything unreadable or huge is left out).
+pub fn files_with_markers(repo_path: &str, paths: &[String]) -> Result<Vec<String>> {
+    let repo = open(repo_path)?;
+    let Some(root) = repo.workdir() else { return Ok(vec![]) };
+    let mut out = vec![];
+    for p in paths {
+        let Ok(full) = super::in_workdir(root, p) else { continue };
+        if std::fs::metadata(&full).map(|m| m.len() > 20 << 20).unwrap_or(true) {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&full) else { continue };
+        if bytes.contains(&0) {
+            continue;
+        }
+        if String::from_utf8_lossy(&bytes).lines().any(|l| is_marker(l.trim_end_matches('\r'))) {
+            out.push(p.clone());
+        }
+    }
+    Ok(out)
+}
+
 /// Save the resolved file and mark it resolved (stage it).
 pub fn resolve_with_content(repo_path: &str, path: &str, content: &str) -> Result<()> {
     let repo = open(repo_path)?;
     find(&repo, path)?;
-    if content.lines().any(|l| l.starts_with("<<<<<<< ") || l == "<<<<<<<" || l.starts_with(">>>>>>> ") || l == ">>>>>>>") {
+    if content.lines().any(|l| is_marker(l.trim_end_matches('\r'))) {
         return err("The file still has conflict markers.");
     }
     let full = super::in_workdir(repo.workdir().ok_or_else(|| Error::Msg("This repository has no working tree.".into()))?, path)?;
